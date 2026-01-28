@@ -85,6 +85,8 @@ const CustomDrawerContent = (props) => {
    */
   const ITEM_LABELS = {
     11: '当日部員',
+    12: '通知',
+    13: '🔔 通知テスト',
   };
 
   /**
@@ -96,6 +98,8 @@ const CustomDrawerContent = (props) => {
    */
   const SCREEN_NAME_MAP = {
     11: 'JimuShift',
+    12: 'Notifications',
+    13: 'NotificationTest',
   };
 
   /**
@@ -104,13 +108,18 @@ const CustomDrawerContent = (props) => {
    */
   const PERMISSION_NAME_MAP = {
     11: '当日部員',
+    12: '通知', // 全員アクセス可能
+    13: null, // 通知テスト - 権限チェックなし（開発用）
   };
 
-  const accessibleItems = Array.from({ length: 11 }, (_, index) => {
+  const accessibleItems = Array.from({ length: 13 }, (_, index) => {
     const itemNumber = index + 1;
     // カスタム権限名があればそれを使用、なければデフォルト
-    const permissionName = PERMISSION_NAME_MAP[itemNumber] || `item${itemNumber}`;
-    const isAccessible = canAccessScreen(userInfo?.roles || [], permissionName);
+    const permissionName = PERMISSION_NAME_MAP[itemNumber];
+    // nullの場合は権限チェックをスキップ（全員アクセス可能）
+    const isAccessible = permissionName === null 
+      ? true 
+      : canAccessScreen(userInfo?.roles || [], permissionName !== undefined ? permissionName : `item${itemNumber}`);
     // カスタムラベルがあればそれを使用、なければデフォルト
     const label = ITEM_LABELS[itemNumber] || `項目${itemNumber}`;
     // カスタム画面名があればそれを使用、なければデフォルト

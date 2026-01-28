@@ -6,10 +6,11 @@
  */
 
 import React from 'react';
-import { useWindowDimensions } from 'react-native';
+import { useWindowDimensions, Platform } from 'react-native';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import CustomDrawerContent from './components/CustomDrawerContent';
 import ScreenErrorBoundary from '../shared/components/ScreenErrorBoundary';
+import { NotificationButton } from '../features/notifications/components/NotificationButton';
 
 /* 各項目の画面をインポート */
 import Item1Screen from '../features/item1/screens/Item1Screen';
@@ -23,6 +24,8 @@ import Item8Screen from '../features/item8/screens/Item8Screen';
 import Item9Screen from '../features/item9/screens/Item9Screen';
 import Item10Screen from '../features/item10/screens/Item10Screen';
 import JimuShiftScreen from '../features/jimu-shift/screens/JimuShiftScreen';
+import { NotificationScreen } from '../features/notifications/screens/NotificationScreen';
+import { NotificationTestScreen } from '../features/notifications/screens/NotificationTestScreen';
 
 /** Drawerナビゲーター */
 const Drawer = createDrawerNavigator();
@@ -68,6 +71,8 @@ const WrappedItem8Screen = createWrappedScreen(Item8Screen, '項目8');
 const WrappedItem9Screen = createWrappedScreen(Item9Screen, '項目9');
 const WrappedItem10Screen = createWrappedScreen(Item10Screen, '項目10');
 const WrappedJimuShiftScreen = createWrappedScreen(JimuShiftScreen, '当日部員');
+const WrappedNotificationScreen = createWrappedScreen(NotificationScreen, '通知');
+const WrappedNotificationTestScreen = createWrappedScreen(NotificationTestScreen, '通知テスト');
 
 /**
  * Drawerナビゲーターコンポーネント
@@ -84,7 +89,28 @@ const DrawerNavigator = () => {
       initialRouteName="Item1"
       drawerContent={(props) => <CustomDrawerContent {...props} />}
       screenOptions={{
-        headerShown: false,
+        headerShown: true,
+        headerStyle: {
+          backgroundColor: '#FFFFFF',
+          ...Platform.select({
+            web: {
+              boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+            },
+            default: {
+              elevation: 2,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 4,
+            },
+          }),
+        },
+        headerTintColor: '#111827',
+        headerTitleStyle: {
+          fontWeight: 'bold',
+          fontSize: 18,
+        },
+        headerRight: () => <NotificationButton />,
         drawerType: isMobile ? 'front' : 'permanent',
         drawerStyle: {
           width: DRAWER_WIDTH,
@@ -94,7 +120,7 @@ const DrawerNavigator = () => {
         swipeEnabled: isMobile,
       }}
     >
-      {/* 項目1〜10、事務シフト（Error Boundaryでラップ済み） */}
+      {/* 項目1〜10、事務シフト、通知（Error Boundaryでラップ済み） */}
       <Drawer.Screen name="Item1" component={WrappedItem1Screen} />
       <Drawer.Screen name="Item2" component={WrappedItem2Screen} />
       <Drawer.Screen name="Item3" component={WrappedItem3Screen} />
@@ -106,6 +132,8 @@ const DrawerNavigator = () => {
       <Drawer.Screen name="Item9" component={WrappedItem9Screen} />
       <Drawer.Screen name="Item10" component={WrappedItem10Screen} />
       <Drawer.Screen name="JimuShift" component={WrappedJimuShiftScreen} />
+      <Drawer.Screen name="Notifications" component={WrappedNotificationScreen} />
+      <Drawer.Screen name="NotificationTest" component={WrappedNotificationTestScreen} />
     </Drawer.Navigator>
   );
 };
