@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Platform } from 'react-native';
 import { NotificationList } from '../components/NotificationList';
 import { useNotifications } from '../hooks/useNotifications';
 import { markNotificationAsRead, markAllNotificationsAsRead } from '../../../shared/services/notificationService';
 import { NOTIFICATION_TYPES } from '../constants/notificationType';
+import { useAuth } from '../../../shared/contexts/AuthContext';
 
 /**
  * 通知画面コンポーネント
@@ -11,15 +12,18 @@ import { NOTIFICATION_TYPES } from '../constants/notificationType';
  * 
  * @param {Object} props - プロパティ
  * @param {Object} props.navigation - ナビゲーションオブジェクト
- * @param {string} props.userId - ユーザーID（AuthContextから取得想定）
  * @returns {JSX.Element}
  */
-export const NotificationScreen = ({ navigation, userId = 'dummy-user-id' }) => {
+export const NotificationScreen = ({ navigation }) => {
+  /** 認証情報取得 */
+  const { user } = useAuth();
+  const userId = user?.id;
+
   /** 選択中のフィルター */
   const [selectedFilter, setSelectedFilter] = useState(null);
   
   /** 通知データ */
-  const { notifications, isLoading, refetch } = useNotifications(userId, {
+  const { notifications, isLoading, refetch } = useNotifications({
     limit: 100,
     filterByType: selectedFilter,
   });
@@ -32,8 +36,19 @@ export const NotificationScreen = ({ navigation, userId = 'dummy-user-id' }) => 
    * @param {Object} notification - 通知オブジェクト
    */
   const handleNotificationPress = async (notification) => {
-    // 既読にする
-    await markNotificationAsRead(notification.id, userId);
+    if (!userId) return;
+
+    try {
+      // 既読にする（409エラーは無視）
+      await markNotificationAsRead(notification.id, userId);
+    } catch (error) {
+      // 既に既読の場合（409エラー）は無視
+      if (error.message?.includes('409') || error.message?.includes('Conflict')) {
+        console.log('既に既読の通知です');
+      } else {
+        console.error('既読化エラー:', error);
+      }
+    }
 
     // 通知リストを更新
     refetch();
@@ -49,6 +64,8 @@ export const NotificationScreen = ({ navigation, userId = 'dummy-user-id' }) => 
    * すべて既読にする
    */
   const handleMarkAllAsRead = async () => {
+    if (!userId) return;
+
     try {
       setIsMarkingAllRead(true);
       await markAllNotificationsAsRead(userId);
@@ -66,35 +83,34 @@ export const NotificationScreen = ({ navigation, userId = 'dummy-user-id' }) => 
    */
   const renderFilters = () => {
     const filters = [
-      { label: 'すべて', value: null },
-      { label: '情報', value: NOTIFICATION_TYPES.INFO },
-      { label: '成功', value: NOTIFICATION_TYPES.SUCCESS },
-      { label: '警告', value: NOTIFICATION_TYPES.WARNING },
-      { label: 'エラー', value: NOTIFICATION_TYPES.ERROR },
+      { label: 'すべて', value: null, icon: '📋' },
+      { label: '情報', value: NOTIFICATION_TYPES.INFO, icon: 'ℹ️' },
+      { label: '成功', value: NOTIFICATION_TYPES.SUCCESS, icon: '✅' },
+      { label: '警告', value: NOTIFICATION_TYPES.WARNING, icon: '⚠️' },
+      { label: 'エラー', value: NOTIFICATION_TYPES.ERROR, icon: '❌' },
     ];
 
     return (
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        className="px-4 py-2"
+        style={styles.filterContainer}
       >
         {filters.map((filter) => (
           <TouchableOpacity
             key={filter.label}
             onPress={() => setSelectedFilter(filter.value)}
-            className={`mr-2 px-4 py-2 rounded-full ${
-              selectedFilter === filter.value
-                ? 'bg-blue-600'
-                : 'bg-gray-200'
-            }`}
+            style={[
+              styles.filterButton,
+              selectedFilter === filter.value && styles.filterButtonActive
+            ]}
           >
+            <Text style={styles.filterIcon}>{filter.icon}</Text>
             <Text
-              className={`text-sm font-medium ${
-                selectedFilter === filter.value
-                  ? 'text-white'
-                  : 'text-gray-700'
-              }`}
+              style={[
+                styles.filterText,
+                selectedFilter === filter.value && styles.filterTextActive
+              ]}
             >
               {filter.label}
             </Text>
@@ -105,20 +121,26 @@ export const NotificationScreen = ({ navigation, userId = 'dummy-user-id' }) => 
   };
 
   return (
-    <View className="flex-1 bg-white">
+    <View style={styles.container}>
       {/* ヘッダー */}
-      <View className="bg-blue-600 pt-12 pb-4 px-4">
-        <View className="flex-row items-center justify-between">
-          <Text className="text-white text-2xl font-bold">通知履歴</Text>
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerIcon}>🔔</Text>
+            <Text style={styles.headerTitle}>通知センター</Text>
+          </View>
           
           {/* すべて既読ボタン */}
           <TouchableOpacity
             onPress={handleMarkAllAsRead}
             disabled={isMarkingAllRead || notifications.length === 0}
-            className="bg-white/20 px-3 py-2 rounded"
+            style={[
+              styles.markAllButton,
+              (isMarkingAllRead || notifications.length === 0) && styles.markAllButtonDisabled
+            ]}
           >
-            <Text className="text-white text-sm font-medium">
-              {isMarkingAllRead ? '処理中...' : 'すべて既読'}
+            <Text style={styles.markAllButtonText}>
+              {isMarkingAllRead ? '⏳ 処理中...' : '✓ すべて既読'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -137,3 +159,116 @@ export const NotificationScreen = ({ navigation, userId = 'dummy-user-id' }) => 
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+  },
+  header: {
+    backgroundColor: '#6366F1',
+    paddingTop: 16,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 6,
+        elevation: 5,
+      },
+    }),
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerIcon: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  markAllButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+      },
+    }),
+  },
+  markAllButtonDisabled: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    opacity: 0.5,
+  },
+  markAllButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  filterContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginRight: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+        elevation: 2,
+      },
+    }),
+  },
+  filterButtonActive: {
+    backgroundColor: '#6366F1',
+  },
+  filterIcon: {
+    fontSize: 16,
+    marginRight: 6,
+  },
+  filterText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  filterTextActive: {
+    color: '#FFFFFF',
+  },
+});

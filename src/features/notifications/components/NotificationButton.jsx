@@ -14,7 +14,7 @@ export const NotificationButton = () => {
   const { unreadCount } = useNotifications();
 
   const handlePress = () => {
-    navigation.navigate('NotificationTest');
+    navigation.navigate('Notifications');
   };
 
   return (

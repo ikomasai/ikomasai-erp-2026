@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, FlatList, Text, ActivityIndicator } from 'react-native';
+import { View, FlatList, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { NotificationItem } from './NotificationItem';
 
 /**
@@ -34,12 +34,12 @@ export const NotificationList = ({
    * @returns {JSX.Element}
    */
   const renderEmptyState = () => (
-    <View className="flex-1 items-center justify-center p-8">
-      <Text className="text-6xl mb-4">📭</Text>
-      <Text className="text-lg font-semibold text-gray-700 mb-2">
+    <View style={styles.emptyContainer}>
+      <Text style={styles.emptyIcon}>📭</Text>
+      <Text style={styles.emptyTitle}>
         通知はありません
       </Text>
-      <Text className="text-sm text-gray-500 text-center">
+      <Text style={styles.emptyDescription}>
         新しい通知が届くとここに表示されます
       </Text>
     </View>
@@ -50,9 +50,9 @@ export const NotificationList = ({
    * @returns {JSX.Element}
    */
   const renderLoadingState = () => (
-    <View className="flex-1 items-center justify-center p-8">
-      <ActivityIndicator size="large" color="#3B82F6" />
-      <Text className="text-sm text-gray-500 mt-4">読み込み中...</Text>
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color="#6366F1" />
+      <Text style={styles.loadingText}>読み込み中...</Text>
     </View>
   );
 
@@ -84,8 +84,54 @@ export const NotificationList = ({
       onEndReached={onEndReached}
       onEndReachedThreshold={0.5}
       contentContainerStyle={
-        notifications.length === 0 ? { flex: 1 } : undefined
+        notifications.length === 0 ? styles.emptyList : styles.listContent
       }
+      style={styles.list}
     />
   );
 };
+
+const styles = StyleSheet.create({
+  list: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+  },
+  listContent: {
+    paddingVertical: 8,
+  },
+  emptyList: {
+    flex: 1,
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  emptyIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  emptyDescription: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    textAlign: 'center',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginTop: 16,
+  },
+});

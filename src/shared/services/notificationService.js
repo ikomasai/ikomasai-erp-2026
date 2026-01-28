@@ -147,7 +147,7 @@ export const markAllNotificationsAsRead = async (userId) => {
     const { data: notifications, error: selectError } = await supabase
       .from('notifications')
       .select('id')
-      .filter('target_user_ids', 'cs', `{\"${userId}\"}`);
+      .contains('target_user_ids', JSON.stringify([userId]));
 
     if (selectError) {
       throw new Error(`未読通知の取得に失敗しました: ${selectError.message}`);

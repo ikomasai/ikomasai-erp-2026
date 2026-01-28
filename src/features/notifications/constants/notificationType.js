@@ -38,56 +38,56 @@ export const NOTIFICATION_TYPE_CONFIG = {
     color: '#3B82F6', // 青色
     priority: 1,
     autoDismissSeconds: 7,
-    icon: 'information-circle',
+    icon: 'ℹ️',
   },
   [NOTIFICATION_TYPES.SUCCESS]: {
     displayName: '成功',
     color: '#10B981', // 緑色
     priority: 1,
     autoDismissSeconds: 5,
-    icon: 'checkmark-circle',
+    icon: '✅',
   },
   [NOTIFICATION_TYPES.WARNING]: {
     displayName: '警告',
-    color: '#F59E0B', // 橙色
+    color: '#F59E0B', // 黄色
     priority: 2,
-    autoDismissSeconds: null, // 自動で閉じない
-    icon: 'warning',
+    autoDismissSeconds: 10,
+    icon: '⚠️',
   },
   [NOTIFICATION_TYPES.ERROR]: {
     displayName: 'エラー',
     color: '#EF4444', // 赤色
     priority: 3,
-    autoDismissSeconds: null, // 自動で閉じない
-    icon: 'alert-circle',
+    autoDismissSeconds: null, // 手動で閉じる
+    icon: '❌',
   },
   [NOTIFICATION_TYPES.VENDOR_STOP]: {
     displayName: '屋台停止',
     color: '#DC2626', // 濃い赤色
     priority: 3,
     autoDismissSeconds: null,
-    icon: 'stop-circle',
+    icon: '🛑',
   },
   [NOTIFICATION_TYPES.SCHEDULE_CHANGE]: {
     displayName: 'スケジュール変更',
     color: '#8B5CF6', // 紫色
     priority: 2,
     autoDismissSeconds: 10,
-    icon: 'time',
+    icon: '📅',
   },
   [NOTIFICATION_TYPES.INVENTORY_ALERT]: {
     displayName: '在庫アラート',
     color: '#F97316', // オレンジ色
     priority: 2,
     autoDismissSeconds: null,
-    icon: 'cube',
+    icon: '📦',
   },
   [NOTIFICATION_TYPES.USER_ACTION]: {
     displayName: 'ユーザーアクション',
     color: '#06B6D4', // シアン色
     priority: 1,
     autoDismissSeconds: 7,
-    icon: 'person',
+    icon: '👤',
   },
 };
 

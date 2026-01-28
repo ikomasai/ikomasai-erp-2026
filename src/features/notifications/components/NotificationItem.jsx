@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { NOTIFICATION_TYPE_CONFIG } from '../constants/notificationType';
 
 /**
@@ -40,44 +40,37 @@ export const NotificationItem = ({ notification, onPress, isRead = false }) => {
   return (
     <TouchableOpacity
       onPress={() => onPress(notification)}
-      className={`border-b border-gray-200 p-4 ${isRead ? 'bg-white' : 'bg-blue-50'}`}
+      style={[styles.container, isRead ? styles.containerRead : styles.containerUnread]}
       accessibilityLabel={`${config.displayName}の通知: ${notification.message}`}
     >
-      <View className="flex-row items-start">
-        {/* 通知タイプインジケーター */}
-        <View
-          className="w-1 h-full rounded-full mr-3"
-          style={{ backgroundColor: config.color }}
-        />
+      <View style={styles.content}>
+        {/* 通知アイコン */}
+        <View style={[styles.iconContainer, { backgroundColor: `${config.color}15` }]}>
+          <Text style={styles.iconText}>{config.icon}</Text>
+        </View>
 
-        <View className="flex-1">
+        <View style={styles.textContainer}>
           {/* タイトル */}
           {notification.title && (
-            <Text className="text-base font-semibold text-gray-900 mb-1">
+            <Text style={styles.title}>
               {notification.title}
             </Text>
           )}
 
           {/* メッセージ */}
-          <Text className="text-sm text-gray-700 mb-2">
+          <Text style={styles.message} numberOfLines={2}>
             {notification.message}
           </Text>
 
           {/* メタ情報 */}
-          <View className="flex-row items-center">
-            <View
-              className="px-2 py-1 rounded mr-2"
-              style={{ backgroundColor: `${config.color}20` }}
-            >
-              <Text
-                className="text-xs font-medium"
-                style={{ color: config.color }}
-              >
+          <View style={styles.metaContainer}>
+            <View style={[styles.typeBadge, { backgroundColor: `${config.color}20` }]}>
+              <Text style={[styles.typeBadgeText, { color: config.color }]}>
                 {config.displayName}
               </Text>
             </View>
 
-            <Text className="text-xs text-gray-500">
+            <Text style={styles.timestamp}>
               {formatRelativeTime(notification.created_at)}
             </Text>
           </View>
@@ -85,9 +78,94 @@ export const NotificationItem = ({ notification, onPress, isRead = false }) => {
 
         {/* 未読インジケーター */}
         {!isRead && (
-          <View className="w-2 h-2 bg-blue-500 rounded-full ml-2 mt-2" />
+          <View style={styles.unreadIndicator} />
         )}
       </View>
     </TouchableOpacity>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    marginHorizontal: 12,
+    marginVertical: 6,
+    borderRadius: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+        elevation: 2,
+      },
+    }),
+  },
+  containerRead: {
+    backgroundColor: '#FFFFFF',
+  },
+  containerUnread: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  content: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 16,
+  },
+  iconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  iconText: {
+    fontSize: 22,
+  },
+  textContainer: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  message: {
+    fontSize: 14,
+    color: '#4B5563',
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  metaContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  typeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  typeBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  timestamp: {
+    fontSize: 12,
+    color: '#9CA3AF',
+  },
+  unreadIndicator: {
+    width: 10,
+    height: 10,
+    backgroundColor: '#3B82F6',
+    borderRadius: 5,
+    marginLeft: 8,
+    marginTop: 4,
+  },
+});
