@@ -5,7 +5,6 @@
 
 import { sendNotification } from '../shared/services/sendNotification';
 import { NOTIFICATION_TYPES } from '../features/notifications/constants/notificationType';
-import { USER_ROLES } from '../shared/constants/userRoles';
 
 /**
  * 使用例1: 屋台管理機能から屋台停止を通知
@@ -14,7 +13,7 @@ export const notifyVendorStop = async (vendorId, vendorName) => {
   const result = await sendNotification({
     type: NOTIFICATION_TYPES.VENDOR_STOP,
     message: `屋台番号${vendorId}「${vendorName}」が出店停止しました`,
-    recipientRoles: USER_ROLES.VENDOR_MANAGER,
+    recipientRoles: '屋台部', // rolesテーブルのnameフィールドを直接指定
     title: '屋台停止のお知らせ',
     deepLink: `/item5/vendor/${vendorId}`,
     metadata: {
@@ -40,7 +39,7 @@ export const notifyInventoryAlert = async (circleId, circleName, remainingStock)
   const result = await sendNotification({
     type: NOTIFICATION_TYPES.INVENTORY_ALERT,
     message: `${circleName}の在庫が残り${remainingStock}個です。補充が必要です。`,
-    recipientRoles: USER_ROLES.INVENTORY_MANAGER,
+    recipientRoles: '環境部',
     title: '在庫アラート',
     deepLink: `/item3/inventory/${circleId}`,
     metadata: {
@@ -61,7 +60,7 @@ export const notifyScheduleChange = async (venueName, changeDetails) => {
   const result = await sendNotification({
     type: NOTIFICATION_TYPES.SCHEDULE_CHANGE,
     message: `${venueName}のタイムテーブルが更新されました`,
-    recipientRoles: USER_ROLES.STAFF,
+    recipientRoles: '企画制作部',
     title: 'スケジュール変更のお知らせ',
     deepLink: '/item7/schedule',
     metadata: {
@@ -81,7 +80,7 @@ export const notifyDailyReportCompleted = async (reportDate) => {
   const result = await sendNotification({
     type: NOTIFICATION_TYPES.SUCCESS,
     message: `${reportDate}の日報提出が完了しました`,
-    recipientRoles: USER_ROLES.ACCOUNTANT,
+    recipientRoles: '会計部',
     title: '日報提出完了',
     deepLink: `/item8/daily-report/${reportDate}`,
   });
@@ -96,7 +95,7 @@ export const notifySystemMaintenance = async (startTime, endTime) => {
   const result = await sendNotification({
     type: NOTIFICATION_TYPES.WARNING,
     message: `システムメンテナンスを実施します。期間: ${startTime} ～ ${endTime}`,
-    recipientRoles: [USER_ROLES.ADMIN, USER_ROLES.OPERATOR, USER_ROLES.STAFF],
+    recipientRoles: ['管理者', '実長', '事務部'], // 複数のロール名を配列で指定
     title: 'システムメンテナンスのお知らせ',
     metadata: {
       maintenanceStartTime: startTime,
@@ -115,7 +114,7 @@ export const notifySystemError = async (errorMessage, errorStack) => {
   const result = await sendNotification({
     type: NOTIFICATION_TYPES.ERROR,
     message: `システムエラーが発生しました: ${errorMessage}`,
-    recipientRoles: USER_ROLES.ADMIN,
+    recipientRoles: '管理者',
     title: 'システムエラー',
     metadata: {
       errorMessage,
@@ -135,8 +134,8 @@ export const notifyCircleLeaders = async (message) => {
   const result = await sendNotification({
     type: NOTIFICATION_TYPES.INFO,
     message: message,
-    recipientRoles: USER_ROLES.CIRCLE_LEADER,
-    title: 'サークル責任者へのお知らせ',
+    recipientRoles: '部長',
+    title: '部長へのお知らせ',
   });
 
   return result;
@@ -149,7 +148,7 @@ export const notifyMultipleRoles = async (message, roles) => {
   const result = await sendNotification({
     type: NOTIFICATION_TYPES.INFO,
     message: message,
-    recipientRoles: roles, // 配列で複数ロールを指定
+    recipientRoles: roles, // 配列で複数ロール名を指定（例: ['環境部', '屋台部']）
     title: '重要なお知らせ',
   });
 
@@ -163,7 +162,7 @@ export const notifyWithCustomMetadata = async () => {
   const result = await sendNotification({
     type: NOTIFICATION_TYPES.USER_ACTION,
     message: 'タスクが完了しました',
-    recipientRoles: USER_ROLES.MANAGER,
+    recipientRoles: '実長',
     metadata: {
       taskId: 'task_123',
       taskName: '在庫確認',
@@ -189,7 +188,7 @@ export const ExampleComponent = () => {
       await sendNotification({
         type: NOTIFICATION_TYPES.SUCCESS,
         message: 'データが正常に保存されました',
-        recipientRoles: USER_ROLES.STAFF,
+        recipientRoles: '事務部',
       });
 
       // 画面遷移など...
@@ -198,7 +197,7 @@ export const ExampleComponent = () => {
       await sendNotification({
         type: NOTIFICATION_TYPES.ERROR,
         message: `エラーが発生しました: ${error.message}`,
-        recipientRoles: USER_ROLES.ADMIN,
+        recipientRoles: '管理者',
       });
     }
   };

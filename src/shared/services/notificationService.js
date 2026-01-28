@@ -46,8 +46,16 @@ export const getUserNotifications = async (userId, options = {}) => {
     // クライアント側でユーザーIDに基づいてフィルタリング
     const filtered = (data || []).filter(notification => {
       if (!notification.target_user_ids) return false;
-      return notification.target_user_ids.includes(userId);
+      // target_user_idsはJSONB配列なので、適切に扱う
+      const targetIds = Array.isArray(notification.target_user_ids) 
+        ? notification.target_user_ids 
+        : [];
+      return targetIds.includes(userId);
     });
+
+    console.log('[notificationService] 取得した通知数:', data?.length || 0);
+    console.log('[notificationService] フィルタ後の通知数:', filtered.length);
+    console.log('[notificationService] ユーザーID:', userId);
 
     // 各通知にisReadフィールドを追加
     const withReadStatus = filtered.map(notification => {

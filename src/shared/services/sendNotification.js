@@ -80,24 +80,29 @@ export const sendNotification = async (params) => {
     }
 
     // ロールに基づいて対象ユーザーIDを取得
-    // rolesがJSONB配列の場合、各ロールに対して検索
-    const { data: targetUsers, error: usersError } = await supabase
-      .from('users')
-      .select('id, roles');
+    // user_rolesテーブルとrolesテーブルを結合して、指定されたロール名を持つユーザーを取得
+    const { data: userRolesData, error: usersError } = await supabase
+      .from('user_roles')
+      .select(`
+        user_id,
+        roles!inner (
+          name
+        )
+      `);
 
     if (usersError) {
       throw new Error(`対象ユーザーの取得に失敗しました: ${usersError.message}`);
     }
 
-    // クライアント側でフィルタリング（JSONB配列の検索はクライアント側の方が確実）
-    const targetUserIds = targetUsers
-      ?.filter(u => {
-        const userRoles = u.roles || [];
-        return rolesArray.some(role => userRoles.includes(role));
-      })
-      .map(u => u.id) || [];
+    // 指定されたロール名を持つユーザーIDをフィルタリング
+    const targetUserIds = userRolesData
+      ?.filter(ur => rolesArray.includes(ur.roles.name))
+      .map(ur => ur.user_id) || [];
 
-    if (targetUserIds.length === 0) {
+    // 重複を除去
+    const uniqueUserIds = [...new Set(targetUserIds)];
+
+    if (uniqueUserIds.length === 0) {
       console.warn('通知対象ユーザーが見つかりませんでした', { recipientRoles });
     }
 
@@ -113,7 +118,7 @@ export const sendNotification = async (params) => {
         title: notificationTitle,
         message,
         recipient_roles: rolesArray,
-        target_user_ids: targetUserIds,
+        target_user_ids: uniqueUserIds,
         sent_by: user.id,
         deep_link: deepLink,
         metadata,
@@ -129,7 +134,7 @@ export const sendNotification = async (params) => {
 
     console.log('通知が正常に送信されました', {
       notificationId: notification.id,
-      targetUserCount: targetUserIds.length,
+      targetUserCount: uniqueUserIds.length,
     });
 
     return {
