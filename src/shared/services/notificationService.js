@@ -49,8 +49,20 @@ export const getUserNotifications = async (userId, options = {}) => {
       return notification.target_user_ids.includes(userId);
     });
 
+    // 各通知にisReadフィールドを追加
+    const withReadStatus = filtered.map(notification => {
+      const isRead = notification.notification_reads?.some(
+        read => read.user_id === userId
+      ) || false;
+      
+      return {
+        ...notification,
+        isRead,
+      };
+    });
+
     // ページング処理
-    return filtered.slice(offset, offset + limit);
+    return withReadStatus.slice(offset, offset + limit);
   } catch (error) {
     console.error('getUserNotifications error:', error);
     throw error;
