@@ -110,7 +110,7 @@ const DrawerNavigator = () => {
           fontWeight: 'bold',
           fontSize: 18,
         },
-        headerLeft: () => null,
+        headerLeft: isMobile ? undefined : () => null,
         headerRight: () => <NotificationButton />,
         drawerType: isMobile ? 'front' : 'permanent',
         drawerStyle: {

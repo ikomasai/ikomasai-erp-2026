@@ -10,7 +10,6 @@ import {
   StyleSheet,
   SafeAreaView,
   TouchableOpacity,
-  useWindowDimensions,
   ActivityIndicator,
   ScrollView,
 } from 'react-native';
@@ -39,10 +38,6 @@ const SCREEN_NAME = '当日部員';
  * @returns {JSX.Element} シフト確認画面
  */
 const JimuShiftScreen = ({ navigation }) => {
-  /** 画面サイズ取得 */
-  const { width } = useWindowDimensions();
-  /** モバイル判定 */
-  const isMobile = width < MOBILE_BREAKPOINT;
   /** 認証コンテキストからユーザー情報を取得 */
   const { userInfo } = useAuth();
 
@@ -129,13 +124,6 @@ const JimuShiftScreen = ({ navigation }) => {
   }, [loadShifts]);
 
   /**
-   * ドロワーを開く
-   */
-  const openDrawer = () => {
-    navigation.openDrawer();
-  };
-
-  /**
    * 開始日かどうかを判定
    * @returns {boolean} 開始日の場合true
    */
@@ -186,17 +174,6 @@ const JimuShiftScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* ヘッダー */}
-      <View style={styles.header}>
-        {isMobile && (
-          <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
-            <Text style={styles.menuButtonText}>☰</Text>
-          </TouchableOpacity>
-        )}
-        <Text style={styles.headerTitle}>{SCREEN_NAME}</Text>
-        {isMobile && <View style={styles.menuButton} />}
-      </View>
-
       {/* コンテンツ */}
       <ScrollView
         style={styles.content}
@@ -292,31 +269,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f7',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  menuButton: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuButtonText: {
-    fontSize: 24,
-    color: '#333333',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333333',
   },
   content: {
     flex: 1,
