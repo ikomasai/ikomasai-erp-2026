@@ -86,7 +86,7 @@ const CustomDrawerContent = (props) => {
   const ITEM_LABELS = {
     11: '当日部員',
     12: '通知',
-    13: '🔔 通知テスト',
+    13: '通知テスト',
   };
 
   /**

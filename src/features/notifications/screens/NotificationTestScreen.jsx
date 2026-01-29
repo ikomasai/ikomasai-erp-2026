@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { sendNotification } from '../../../shared/services/sendNotification';
 import { NOTIFICATION_TYPES } from '../constants/notificationType';
 import { supabase } from '../../../services/supabase/client';
@@ -111,16 +112,19 @@ export const NotificationTestScreen = () => {
    * 通知タイプの選択肢
    */
   const notificationTypes = [
-    { value: NOTIFICATION_TYPES.INFO, label: 'ℹ️ 情報', color: '#3B82F6' },
-    { value: NOTIFICATION_TYPES.SUCCESS, label: '✅ 成功', color: '#10B981' },
-    { value: NOTIFICATION_TYPES.WARNING, label: '⚠️ 警告', color: '#F59E0B' },
-    { value: NOTIFICATION_TYPES.ERROR, label: '❌ エラー', color: '#EF4444' },
+    { value: NOTIFICATION_TYPES.INFO, label: '情報', icon: 'information-circle', color: '#3B82F6' },
+    { value: NOTIFICATION_TYPES.SUCCESS, label: '成功', icon: 'checkmark-circle', color: '#10B981' },
+    { value: NOTIFICATION_TYPES.WARNING, label: '警告', icon: 'warning', color: '#F59E0B' },
+    { value: NOTIFICATION_TYPES.ERROR, label: 'エラー', icon: 'close-circle', color: '#EF4444' },
   ];
 
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.pageTitle}>🔔 通知送信テスト</Text>
+        <View style={styles.titleContainer}>
+          <Ionicons name="notifications" size={28} color="#6366F1" />
+          <Text style={styles.pageTitle}>通知送信テスト</Text>
+        </View>
         <Text style={styles.description}>
           Supabaseのrolesテーブルから取得したロールに通知を送信できます
         </Text>
@@ -144,12 +148,17 @@ export const NotificationTestScreen = () => {
                   ]}
                   onPress={() => toggleRole(role.name)}
                 >
-                  <Text style={[
-                    styles.roleButtonText,
-                    selectedRoles.includes(role.name) && styles.roleButtonTextSelected
-                  ]}>
-                    {selectedRoles.includes(role.name) ? '✓ ' : ''}{role.display_name || role.name}
-                  </Text>
+                  <View style={styles.roleButtonContent}>
+                    {selectedRoles.includes(role.name) && (
+                      <Ionicons name="checkmark" size={16} color="#FFFFFF" style={styles.checkIcon} />
+                    )}
+                    <Text style={[
+                      styles.roleButtonText,
+                      selectedRoles.includes(role.name) && styles.roleButtonTextSelected
+                    ]}>
+                      {role.display_name || role.name}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               ))}
             </View>
@@ -177,12 +186,19 @@ export const NotificationTestScreen = () => {
                 ]}
                 onPress={() => setNotificationType(type.value)}
               >
-                <Text style={[
-                  styles.typeButtonText,
-                  notificationType === type.value && styles.typeButtonTextSelected
-                ]}>
-                  {type.label}
-                </Text>
+                <View style={styles.typeButtonContent}>
+                  <Ionicons 
+                    name={type.icon} 
+                    size={18} 
+                    color={notificationType === type.value ? '#FFFFFF' : type.color} 
+                  />
+                  <Text style={[
+                    styles.typeButtonText,
+                    notificationType === type.value && styles.typeButtonTextSelected
+                  ]}>
+                    {type.label}
+                  </Text>
+                </View>
               </TouchableOpacity>
             ))}
           </View>
@@ -218,9 +234,12 @@ export const NotificationTestScreen = () => {
           onPress={handleSendNotification}
           disabled={isSending}
         >
-          <Text style={styles.sendButtonText}>
-            {isSending ? '送信中...' : '📤 通知を送信'}
-          </Text>
+          <View style={styles.sendButtonContent}>
+            {!isSending && <Ionicons name="send" size={20} color="#FFFFFF" style={styles.sendIcon} />}
+            <Text style={styles.sendButtonText}>
+              {isSending ? '送信中...' : '通知を送信'}
+            </Text>
+          </View>
         </TouchableOpacity>
 
         {/* 結果表示 */}
@@ -244,6 +263,12 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
+  },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
   },
   pageTitle: {
     fontSize: 24,
@@ -296,6 +321,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#6366F1',
     borderColor: '#6366F1',
   },
+  roleButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  checkIcon: {
+    marginRight: 2,
+  },
   roleButtonText: {
     fontSize: 14,
     color: '#374151',
@@ -324,6 +357,11 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     marginRight: 8,
     marginBottom: 8,
+  },
+  typeButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   typeButtonText: {
     fontSize: 14,
@@ -368,6 +406,14 @@ const styles = StyleSheet.create({
   sendButtonDisabled: {
     backgroundColor: '#9CA3AF',
     opacity: 0.6,
+  },
+  sendButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sendIcon: {
+    marginRight: 4,
   },
   sendButtonText: {
     color: '#FFFFFF',
