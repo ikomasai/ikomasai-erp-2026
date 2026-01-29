@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Platform } from 'react-native';
 import { NotificationList } from '../components/NotificationList';
-import { useNotifications } from '../hooks/useNotifications';
+import { useNotificationContext } from '../contexts/NotificationContext';
 import { markNotificationAsRead, markAllNotificationsAsRead } from '../../../shared/services/notificationService';
 import { NOTIFICATION_TYPES } from '../constants/notificationType';
 import { useAuth } from '../../../shared/contexts/AuthContext';
@@ -22,11 +22,13 @@ export const NotificationScreen = ({ navigation }) => {
   /** 選択中のフィルター */
   const [selectedFilter, setSelectedFilter] = useState(null);
   
-  /** 通知データ */
-  const { notifications, isLoading, refetch } = useNotifications({
-    limit: 100,
-    filterByType: selectedFilter,
-  });
+  /** 通知データ（コンテキストから取得） */
+  const { notifications: allNotifications, isLoading, refetch } = useNotificationContext();
+
+  // フィルタリング処理
+  const notifications = selectedFilter
+    ? allNotifications.filter(n => n.type === selectedFilter)
+    : allNotifications;
 
   /** 全既読処理中フラグ */
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -50,8 +52,8 @@ export const NotificationScreen = ({ navigation }) => {
       }
     }
 
-    // 通知リストを更新
-    refetch();
+    // 通知リストを即座に更新
+    await refetch();
 
     // deepLinkがある場合は画面遷移
     if (notification.deep_link) {
@@ -69,7 +71,7 @@ export const NotificationScreen = ({ navigation }) => {
     try {
       setIsMarkingAllRead(true);
       await markAllNotificationsAsRead(userId);
-      refetch();
+      await refetch();
     } catch (error) {
       console.error('一括既読化に失敗しました:', error);
     } finally {

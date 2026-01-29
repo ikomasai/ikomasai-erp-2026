@@ -11,6 +11,7 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import CustomDrawerContent from './components/CustomDrawerContent';
 import ScreenErrorBoundary from '../shared/components/ScreenErrorBoundary';
 import { NotificationButton } from '../features/notifications/components/NotificationButton';
+import { NotificationProvider } from '../features/notifications/contexts/NotificationContext';
 
 /* 各項目の画面をインポート */
 import Item1Screen from '../features/item1/screens/Item1Screen';
@@ -85,13 +86,14 @@ const DrawerNavigator = () => {
   const isMobile = width < MOBILE_BREAKPOINT;
 
   return (
-    <Drawer.Navigator
-      initialRouteName="Item1"
-      drawerContent={(props) => <CustomDrawerContent {...props} />}
-      screenOptions={{
-        headerShown: true,
-        headerStyle: {
-          backgroundColor: '#FFFFFF',
+    <NotificationProvider>
+      <Drawer.Navigator
+        initialRouteName="Item1"
+        drawerContent={(props) => <CustomDrawerContent {...props} />}
+        screenOptions={{
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: '#FFFFFF',
           ...Platform.select({
             web: {
               boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
@@ -136,6 +138,7 @@ const DrawerNavigator = () => {
       <Drawer.Screen name="Notifications" component={WrappedNotificationScreen} />
       <Drawer.Screen name="NotificationTest" component={WrappedNotificationTestScreen} />
     </Drawer.Navigator>
+    </NotificationProvider>
   );
 };
 

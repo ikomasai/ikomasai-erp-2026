@@ -3,6 +3,7 @@ import { View, Modal, TouchableOpacity, Text } from 'react-native';
 import { NotificationList } from './NotificationList';
 import { useNotifications } from '../hooks/useNotifications';
 import { markNotificationAsRead, markAllNotificationsAsRead } from '../../../shared/services/notificationService';
+import { useAuth } from '../../../shared/contexts/AuthContext';
 
 /**
  * 通知センターコンポーネント
@@ -11,13 +12,19 @@ import { markNotificationAsRead, markAllNotificationsAsRead } from '../../../sha
  * @param {Object} props - プロパティ
  * @param {boolean} props.visible - モーダルの表示状態
  * @param {Function} props.onClose - モーダルを閉じる時のハンドラー
- * @param {string} props.userId - ユーザーID
  * @param {Function} [props.onNotificationClick] - 通知クリック時のハンドラー
  * @returns {JSX.Element}
  */
-export const NotificationCenter = ({ visible, onClose, userId, onNotificationClick }) => {
+export const NotificationCenter = ({ visible, onClose, onNotificationClick }) => {
+  /** 認証情報取得 */
+  const { user } = useAuth();
+  const userId = user?.id;
+
   /** 通知データ */
-  const { notifications, isLoading, refetch } = useNotifications(userId, { limit: 50 });
+  const { notifications, isLoading, refetch } = useNotifications({ 
+    limit: 50,
+    refreshInterval: visible ? 10000 : 0 // モーダルが開いている時のみ10秒ごとに更新
+  });
 
   /** 全既読処理中フラグ */
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -27,11 +34,13 @@ export const NotificationCenter = ({ visible, onClose, userId, onNotificationCli
    * @param {Object} notification - 通知オブジェクト
    */
   const handleNotificationPress = async (notification) => {
+    if (!userId) return;
+
     // 既読にする
     await markNotificationAsRead(notification.id, userId);
 
-    // 通知リストを更新
-    refetch();
+    // 通知リストを即座に更新
+    await refetch();
 
     // カスタムハンドラーを呼び出し
     if (onNotificationClick) {
@@ -52,10 +61,12 @@ export const NotificationCenter = ({ visible, onClose, userId, onNotificationCli
    * すべて既読にする
    */
   const handleMarkAllAsRead = async () => {
+    if (!userId) return;
+
     try {
       setIsMarkingAllRead(true);
       await markAllNotificationsAsRead(userId);
-      refetch();
+      await refetch();
     } catch (error) {
       console.error('一括既読化に失敗しました:', error);
     } finally {
