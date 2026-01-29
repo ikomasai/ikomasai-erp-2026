@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useNotifications } from '../hooks/useNotifications';
+import { Ionicons } from '@expo/vector-icons';
 
 /**
  * 通知ボタンコンポーネント
@@ -20,7 +21,7 @@ export const NotificationButton = () => {
   return (
     <TouchableOpacity onPress={handlePress} style={styles.button}>
       <View style={styles.iconContainer}>
-        <Text style={styles.icon}>🔔</Text>
+        <Ionicons name="notifications" size={24} color="#374151" />
         {unreadCount > 0 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>
@@ -44,9 +45,6 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  icon: {
-    fontSize: 24,
   },
   badge: {
     position: 'absolute',

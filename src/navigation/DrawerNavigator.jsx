@@ -31,7 +31,7 @@ import { NotificationTestScreen } from '../features/notifications/screens/Notifi
 const Drawer = createDrawerNavigator();
 
 /** ブレークポイント（スマホ/PC切り替え） */
-const MOBILE_BREAKPOINT = 768;
+const MOBILE_BREAKPOINT = 1024;
 
 /** サイドバーの幅 */
 const DRAWER_WIDTH = 280;
@@ -110,6 +110,7 @@ const DrawerNavigator = () => {
           fontWeight: 'bold',
           fontSize: 18,
         },
+        headerLeft: () => null,
         headerRight: () => <NotificationButton />,
         drawerType: isMobile ? 'front' : 'permanent',
         drawerStyle: {
