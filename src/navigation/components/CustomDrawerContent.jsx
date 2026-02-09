@@ -100,6 +100,11 @@ const CustomDrawerContent = (props) => {
    */
   const ITEM_LABELS = {
     11: '当日部員',
+    12: '巡回',
+    13: '本部',
+    14: '会計',
+    15: '物品',
+    16: '企画者',
   };
 
   /**
@@ -111,6 +116,11 @@ const CustomDrawerContent = (props) => {
    */
   const SCREEN_NAME_MAP = {
     11: 'JimuShift',
+    12: 'Item12',
+    13: 'Item13',
+    14: 'Item14',
+    15: 'Item15',
+    16: 'Item16',
   };
 
   /**
@@ -119,9 +129,14 @@ const CustomDrawerContent = (props) => {
    */
   const PERMISSION_NAME_MAP = {
     11: '当日部員',
+    12: 'item12',
+    13: 'item13',
+    14: 'item14',
+    15: 'item15',
+    16: 'item16',
   };
 
-  const accessibleItems = Array.from({ length: 11 }, (_, index) => {
+  const accessibleItems = Array.from({ length: 16 }, (_, index) => {
     const itemNumber = index + 1;
     // カスタム権限名があればそれを使用、なければデフォルト
     const permissionName = PERMISSION_NAME_MAP[itemNumber] || `item${itemNumber}`;

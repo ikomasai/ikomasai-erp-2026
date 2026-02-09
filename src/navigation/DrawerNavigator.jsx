@@ -22,6 +22,11 @@ import Item7Screen from '../features/item7/screens/Item7Screen';
 import Item8Screen from '../features/item8/screens/Item8Screen';
 import Item9Screen from '../features/item9/screens/Item9Screen';
 import Item10Screen from '../features/item10/screens/Item10Screen';
+import Item12Screen from '../features/item12/screens/Item12Screen';
+import Item13Screen from '../features/item13/screens/Item13Screen';
+import Item14Screen from '../features/item14/screens/Item14Screen';
+import Item15Screen from '../features/item15/screens/Item15Screen';
+import Item16Screen from '../features/item16/screens/Item16Screen';
 import JimuShiftScreen from '../features/jimu-shift/screens/JimuShiftScreen';
 import SettingsThemeScreen from '../features/settings/screens/SettingsThemeScreen';
 
@@ -68,6 +73,11 @@ const WrappedItem7Screen = createWrappedScreen(Item7Screen, '項目7');
 const WrappedItem8Screen = createWrappedScreen(Item8Screen, '項目8');
 const WrappedItem9Screen = createWrappedScreen(Item9Screen, '項目9');
 const WrappedItem10Screen = createWrappedScreen(Item10Screen, '項目10');
+const WrappedItem12Screen = createWrappedScreen(Item12Screen, '巡回');
+const WrappedItem13Screen = createWrappedScreen(Item13Screen, '本部');
+const WrappedItem14Screen = createWrappedScreen(Item14Screen, '会計');
+const WrappedItem15Screen = createWrappedScreen(Item15Screen, '物品');
+const WrappedItem16Screen = createWrappedScreen(Item16Screen, '企画者');
 const WrappedJimuShiftScreen = createWrappedScreen(JimuShiftScreen, '当日部員');
 const WrappedSettingsThemeScreen = createWrappedScreen(SettingsThemeScreen, 'テーマ設定');
 
@@ -96,7 +106,7 @@ const DrawerNavigator = () => {
         swipeEnabled: isMobile,
       }}
     >
-      {/* 項目1〜10、事務シフト（Error Boundaryでラップ済み） */}
+      {/* 項目1〜10、項目12〜16、当日部員（Error Boundaryでラップ済み） */}
       <Drawer.Screen name="Item1" component={WrappedItem1Screen} />
       <Drawer.Screen name="Item2" component={WrappedItem2Screen} />
       <Drawer.Screen name="Item3" component={WrappedItem3Screen} />
@@ -107,6 +117,11 @@ const DrawerNavigator = () => {
       <Drawer.Screen name="Item8" component={WrappedItem8Screen} />
       <Drawer.Screen name="Item9" component={WrappedItem9Screen} />
       <Drawer.Screen name="Item10" component={WrappedItem10Screen} />
+      <Drawer.Screen name="Item12" component={WrappedItem12Screen} />
+      <Drawer.Screen name="Item13" component={WrappedItem13Screen} />
+      <Drawer.Screen name="Item14" component={WrappedItem14Screen} />
+      <Drawer.Screen name="Item15" component={WrappedItem15Screen} />
+      <Drawer.Screen name="Item16" component={WrappedItem16Screen} />
       <Drawer.Screen name="JimuShift" component={WrappedJimuShiftScreen} />
       <Drawer.Screen name="SettingsTheme" component={WrappedSettingsThemeScreen} />
     </Drawer.Navigator>
