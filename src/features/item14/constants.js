@@ -1,3 +1,36 @@
 /**
- * 項目14（会計）の定数
+ * Item14 (Accounting) constants.
  */
+
+export const ITEM14_SECTION_OPTIONS = [
+  { value: 'inbox', label: '一覧' },
+  { value: 'detail', label: '詳細' },
+];
+
+export const ITEM14_INBOX_STATUS_OPTIONS = [
+  { value: 'all', label: 'すべて' },
+  { value: 'unread', label: '未読' },
+  { value: 'working', label: '対応中' },
+  { value: 'done', label: '完了' },
+];
+
+export const ITEM14_TICKET_STATUS_OPTIONS = [
+  { value: 'new', label: '新規' },
+  { value: 'acknowledged', label: '受付済' },
+  { value: 'in_progress', label: '対応中' },
+  { value: 'waiting_external', label: '他部署確認待ち' },
+  { value: 'resolved', label: '解決' },
+  { value: 'closed', label: 'クローズ' },
+];
+
+export const ITEM14_MESSAGE_KIND_OPTIONS = [
+  { value: 'reply', label: '回答（公開）' },
+  { value: 'memo', label: '対応メモ（内部）' },
+];
+
+export const ITEM14_STATUS_BUCKET_LABELS = {
+  all: 'すべて',
+  unread: '未読',
+  working: '対応中',
+  done: '完了',
+};

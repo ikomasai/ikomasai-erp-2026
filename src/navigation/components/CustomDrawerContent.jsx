@@ -1,6 +1,6 @@
 /**
  * カスタムDrawerコンテンツ
- * サイドバーのUI・スタイルをカスタマイズ
+ * 役割別に使う画面へ最短で遷移できるよう、情報密度と視認性を重視した構成。
  */
 
 import React from 'react';
@@ -8,214 +8,213 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
-  useWindowDimensions,
+  Alert,
+  Platform,
 } from 'react-native';
 import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { useTheme } from '../../shared/hooks/useTheme';
 import { canAccessScreen } from '../../services/supabase/permissionService';
+import drawerAccessConfig from '../config/drawerAccessConfig';
 
-/**
- * ドロワーアイテムコンポーネント
- * @param {Object} props - コンポーネントプロパティ
- * @param {string} props.label - 表示ラベル
- * @param {boolean} props.isActive - アクティブ状態かどうか
- * @param {Function} props.onPress - タップ時のコールバック
- * @param {Object} props.theme - テーマオブジェクト
- * @returns {JSX.Element} ドロワーアイテム
- */
-const DrawerItem = ({ label, isActive, onPress, theme }) => {
-  return (
-    <TouchableOpacity
+const { buildAccessibleDrawerItems } = drawerAccessConfig;
+
+const ITEM_ICON_MAP = Object.freeze({
+  Item1: 'grid-outline',
+  Item2: 'list-outline',
+  Item3: 'chatbubbles-outline',
+  Item4: 'construct-outline',
+  Item5: 'business-outline',
+  Item6: 'folder-open-outline',
+  Item7: 'analytics-outline',
+  Item8: 'map-outline',
+  Item9: 'document-text-outline',
+  Item10: 'archive-outline',
+  JimuShift: 'calendar-outline',
+  Item12: 'walk-outline',
+  Item13: 'desktop-outline',
+  Item14: 'calculator-outline',
+  Item15: 'cube-outline',
+  Item16: 'megaphone-outline',
+  SettingsTheme: 'color-palette-outline',
+});
+
+const SectionTitle = ({ label, theme }) => (
+  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>{label}</Text>
+);
+
+const DrawerItem = ({ label, iconName, isActive, onPress, theme }) => (
+  <TouchableOpacity
+    style={[
+      styles.drawerItem,
+      {
+        borderColor: isActive ? theme.primary : theme.border,
+        backgroundColor: isActive ? theme.primary : theme.drawerSurface || theme.surface,
+      },
+    ]}
+    onPress={onPress}
+    activeOpacity={0.86}
+  >
+    <Ionicons
+      name={iconName || 'ellipse-outline'}
+      size={18}
+      color={isActive ? theme.white || '#FFFFFF' : theme.textSecondary}
+    />
+    <Text
       style={[
-        styles.drawerItem,
-        { 
-          backgroundColor: isActive ? theme.primary : 'transparent',
-        }
-      ]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <Text style={[
         styles.drawerItemText,
-        { 
-          color: isActive ? '#FFFFFF' : theme.textSecondary,
-          fontWeight: isActive ? '600' : 'normal',
-        }
-      ]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
+        {
+          color: isActive ? theme.white || '#FFFFFF' : theme.text,
+          fontWeight: isActive ? '700' : '600',
+        },
+      ]}
+      numberOfLines={1}
+    >
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
+
+const confirmLogout = (onConfirm) => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (window.confirm('ログアウトしますか？')) {
+      onConfirm();
+    }
+    return;
+  }
+
+  Alert.alert('ログアウト', 'ログアウトしますか？', [
+    { text: 'キャンセル', style: 'cancel' },
+    { text: 'ログアウト', style: 'destructive', onPress: onConfirm },
+  ]);
 };
 
-/**
- * カスタムDrawerコンテンツコンポーネント
- * @param {Object} props - React Navigationから渡されるprops
- * @returns {JSX.Element} カスタムDrawer
- */
 const CustomDrawerContent = (props) => {
-  /** 画面サイズを取得 */
-  const { width } = useWindowDimensions();
-  /** SafeAreaのInsets */
   const insets = useSafeAreaInsets();
-  /** 現在のルート名 */
   const currentRouteName = props.state.routeNames[props.state.index];
-  /** 認証コンテキスト */
   const { userInfo, logout } = useAuth();
-  /** テーマコンテキスト */
   const { theme } = useTheme();
 
-  /**
-   * 画面遷移処理
-   * @param {string} screenName - 遷移先画面名
-   */
   const navigateTo = (screenName) => {
     props.navigation.navigate(screenName);
   };
 
-  /**
-   * ログアウト処理
-   */
   const handleLogout = async () => {
-    // Web版での確認ダイアログ
-    const confirmed = window.confirm('ログアウトしますか？');
-
-    if (!confirmed) {
-      return;
-    }
-
-    const { success, error } = await logout();
-    if (!success) {
-      window.alert('ログアウトに失敗しました');
-    }
-  };
-
-  /**
-   * 項目ラベルのマッピング
-   * 項目番号に対応する表示名を定義
-   */
-  const ITEM_LABELS = {
-    11: '当日部員',
-    12: '巡回',
-    13: '本部',
-    14: '会計',
-    15: '物品',
-    16: '企画者',
-  };
-
-  /**
-   * アクセス可能な項目をフィルタリング
-   */
-  /**
-   * 画面名のマッピング
-   * 項目番号に対応するナビゲーション画面名を定義
-   */
-  const SCREEN_NAME_MAP = {
-    11: 'JimuShift',
-    12: 'Item12',
-    13: 'Item13',
-    14: 'Item14',
-    15: 'Item15',
-    16: 'Item16',
-  };
-
-  /**
-   * 権限チェック用のスクリーン名マッピング
-   * Supabaseのpermissions.screensに格納されている名前と対応
-   */
-  const PERMISSION_NAME_MAP = {
-    11: '当日部員',
-    12: 'item12',
-    13: 'item13',
-    14: 'item14',
-    15: 'item15',
-    16: 'item16',
-  };
-
-  const accessibleItems = Array.from({ length: 16 }, (_, index) => {
-    const itemNumber = index + 1;
-    // カスタム権限名があればそれを使用、なければデフォルト
-    const permissionName = PERMISSION_NAME_MAP[itemNumber] || `item${itemNumber}`;
-    const isAccessible = canAccessScreen(userInfo?.roles || [], permissionName);
-    // カスタムラベルがあればそれを使用、なければデフォルト
-    const label = ITEM_LABELS[itemNumber] || `項目${itemNumber}`;
-    // カスタム画面名があればそれを使用、なければデフォルト
-    const navigationName = SCREEN_NAME_MAP[itemNumber] || `Item${itemNumber}`;
-
-    return {
-      number: itemNumber,
-      label: label,
-      screenName: navigationName,
-      isAccessible,
+    const run = async () => {
+      const { success } = await logout();
+      if (!success && Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('ログアウトに失敗しました。');
+      }
     };
-  }).filter((item) => item.isAccessible);
+    confirmLogout(run);
+  };
+
+  const accessibleItems = buildAccessibleDrawerItems({
+    userRoles: userInfo?.roles || [],
+    canAccessScreenFn: canAccessScreen,
+  });
+
+  const opsItems = accessibleItems.filter((item) => ['Item12', 'Item13', 'Item14', 'Item15', 'Item16'].includes(item.screenName));
+  const basicItems = accessibleItems.filter((item) => !['Item12', 'Item13', 'Item14', 'Item15', 'Item16'].includes(item.screenName));
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}>
-      {/* ヘッダー */}
-      <View style={[styles.header, { borderBottomColor: theme.border }]}>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>生駒祭 ERP</Text>
-        <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>2026</Text>
-        {userInfo && (
-          <View style={[styles.userInfo, { borderTopColor: theme.border }]}>
-            <Text style={[styles.userName, { color: theme.text }]}>{userInfo.name}</Text>
-            {userInfo.roles && userInfo.roles.length > 0 && (
-              <Text style={[styles.userOrganization, { color: theme.textSecondary }]}>
-                {userInfo.roles.map((role) => role.name).join(', ')}
-              </Text>
-            )}
-          </View>
-        )}
-      </View>
-
-      {/* メニューアイテム */}
-      <ScrollView
-        style={styles.menuContainer}
-        contentContainerStyle={styles.menuContent}
-        showsVerticalScrollIndicator={false}
+    <View style={[styles.container, { backgroundColor: theme.drawerBackground || theme.surface }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            paddingTop: insets.top + 14,
+            borderBottomColor: theme.border,
+            backgroundColor: theme.drawerSurface || theme.surface,
+          },
+        ]}
       >
-        {/* アクセス可能な項目のみ表示 */}
-        {accessibleItems.length > 0 ? (
-          accessibleItems.map((item) => (
-            <DrawerItem
-              key={item.screenName}
-              label={item.label}
-              isActive={currentRouteName === item.screenName}
-              onPress={() => navigateTo(item.screenName)}
-              theme={theme}
-            />
-          ))
-        ) : (
-          <View style={styles.noAccessContainer}>
-            <Text style={[styles.noAccessText, { color: theme.textSecondary }]}>
-              アクセス可能な項目がありません
+        <Text style={[styles.headerTitle, { color: theme.text }]}>生駒祭 ERP</Text>
+        <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>企画管理部統合システム 2026</Text>
+        <View style={[styles.userPanel, { borderColor: theme.border, backgroundColor: theme.surfaceSecondary || theme.surface }]}>
+          <Ionicons name="person-circle-outline" size={20} color={theme.primary} />
+          <View style={styles.userMeta}>
+            <Text style={[styles.userName, { color: theme.text }]} numberOfLines={1}>
+              {userInfo?.name || 'ユーザー'}
+            </Text>
+            <Text style={[styles.userRoleText, { color: theme.textSecondary }]} numberOfLines={2}>
+              {(userInfo?.roles || []).map((role) => role.name).join(' / ') || 'ロール未設定'}
             </Text>
           </View>
-        )}
+        </View>
+      </View>
 
-        {/* 設定セクション */}
-        <View style={[styles.settingsSection, { borderTopColor: theme.border }]}>
-          <Text style={[styles.settingsSectionTitle, { color: theme.textSecondary }]}>設定</Text>
+      <DrawerContentScrollView
+        {...props}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {opsItems.length > 0 ? (
+          <View style={styles.sectionBlock}>
+            <SectionTitle label="業務メニュー" theme={theme} />
+            {opsItems.map((item) => (
+              <DrawerItem
+                key={item.screenName}
+                label={item.label}
+                iconName={ITEM_ICON_MAP[item.screenName]}
+                isActive={currentRouteName === item.screenName}
+                onPress={() => navigateTo(item.screenName)}
+                theme={theme}
+              />
+            ))}
+          </View>
+        ) : null}
+
+        {basicItems.length > 0 ? (
+          <View style={styles.sectionBlock}>
+            <SectionTitle label="その他" theme={theme} />
+            {basicItems.map((item) => (
+              <DrawerItem
+                key={item.screenName}
+                label={item.label}
+                iconName={ITEM_ICON_MAP[item.screenName]}
+                isActive={currentRouteName === item.screenName}
+                onPress={() => navigateTo(item.screenName)}
+                theme={theme}
+              />
+            ))}
+          </View>
+        ) : null}
+
+        <View style={styles.sectionBlock}>
+          <SectionTitle label="設定" theme={theme} />
           <DrawerItem
-            label="⚙️ テーマ設定"
+            label="テーマ設定"
+            iconName={ITEM_ICON_MAP.SettingsTheme}
             isActive={currentRouteName === 'SettingsTheme'}
             onPress={() => navigateTo('SettingsTheme')}
             theme={theme}
           />
         </View>
-      </ScrollView>
+      </DrawerContentScrollView>
 
-      {/* フッター */}
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 16, borderTopColor: theme.border }]}>
-        {/* ログアウトボタン */}
-        <TouchableOpacity style={[styles.logoutButton, { backgroundColor: theme.error }]} onPress={handleLogout}>
+      <View
+        style={[
+          styles.footer,
+          {
+            borderTopColor: theme.border,
+            paddingBottom: insets.bottom + 14,
+            backgroundColor: theme.drawerSurface || theme.surface,
+          },
+        ]}
+      >
+        <TouchableOpacity
+          style={[styles.logoutButton, { backgroundColor: theme.error }]}
+          onPress={handleLogout}
+          activeOpacity={0.88}
+        >
+          <Ionicons name="log-out-outline" size={16} color="#FFFFFF" />
           <Text style={styles.logoutButtonText}>ログアウト</Text>
         </TouchableOpacity>
-        <Text style={[styles.footerText, { color: theme.textSecondary }]}>v1.0.0</Text>
+        <Text style={[styles.footerText, { color: theme.textSecondary }]}>Version 1.0.0</Text>
       </View>
     </View>
   );
@@ -226,86 +225,98 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingHorizontal: 20,
-    paddingVertical: 24,
     borderBottomWidth: 1,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    gap: 6,
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   headerSubtitle: {
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '600',
   },
-  userInfo: {
-    marginTop: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
+  userPanel: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  userMeta: {
+    flex: 1,
+    minWidth: 0,
   },
   userName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
   },
-  userOrganization: {
-    fontSize: 12,
-    marginTop: 4,
+  userRoleText: {
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '500',
   },
-  menuContainer: {
-    flex: 1,
+  scrollContent: {
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    gap: 16,
   },
-  menuContent: {
-    paddingVertical: 12,
+  sectionBlock: {
+    gap: 6,
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginLeft: 4,
+    marginBottom: 2,
   },
   drawerItem: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    marginHorizontal: 8,
-    marginVertical: 2,
-    borderRadius: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   drawerItemText: {
-    fontSize: 16,
-  },
-  noAccessContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 32,
-    alignItems: 'center',
-  },
-  noAccessText: {
+    flex: 1,
     fontSize: 14,
-    textAlign: 'center',
-  },
-  settingsSection: {
-    marginTop: 20,
-    paddingTop: 12,
-    borderTopWidth: 1,
-  },
-  settingsSectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    paddingHorizontal: 20,
-    marginBottom: 8,
   },
   footer: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
     borderTopWidth: 1,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    gap: 8,
   },
   logoutButton: {
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 12,
+    paddingVertical: 11,
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
   },
   logoutButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
   },
   footerText: {
-    fontSize: 12,
+    fontSize: 11,
+    textAlign: 'center',
+    fontWeight: '600',
   },
 });
 
 export default CustomDrawerContent;
+

@@ -23,6 +23,12 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 /**
+ * Test-only client override.
+ * Runtime application code must not depend on this.
+ */
+let supabaseClientTestOverride = null;
+
+/**
  * 設定不足エラーを生成する
  * @returns {Error} 設定不足エラー
  */
@@ -52,11 +58,32 @@ export const supabase = isSupabaseConfigured
  * @returns {Object} Supabaseクライアント
  */
 export const getSupabaseClient = () => {
+  if (supabaseClientTestOverride) {
+    return supabaseClientTestOverride;
+  }
+
   if (!isSupabaseConfigured || !supabase) {
     throw createMissingConfigError();
   }
 
   return supabase;
+};
+
+/**
+ * Set Supabase client override for automated tests.
+ * @param {Object|null} clientOverride - Mock supabase client.
+ * @returns {void}
+ */
+export const __setSupabaseClientForTest = (clientOverride) => {
+  supabaseClientTestOverride = clientOverride || null;
+};
+
+/**
+ * Reset test-only Supabase client override.
+ * @returns {void}
+ */
+export const __resetSupabaseClientForTest = () => {
+  supabaseClientTestOverride = null;
 };
 
 /**

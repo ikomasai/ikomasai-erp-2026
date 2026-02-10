@@ -1,78 +1,86 @@
 /**
- * プレースホルダーコンテンツ
- * 未実装機能やエラー時に表示する共通コンポーネント
+ * プレースホルダー表示
+ * 未実装画面・一時的なエラー画面の共通表示コンポーネント。
  */
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 
-/**
- * プレースホルダーコンテンツコンポーネント
- * @param {Object} props - コンポーネントプロパティ
- * @param {string} props.title - 表示タイトル
- * @param {string} [props.message] - 表示メッセージ（省略時はデフォルトメッセージ）
- * @param {boolean} [props.isError] - エラー状態かどうか
- * @returns {JSX.Element} プレースホルダーコンテンツ
- */
 const PlaceholderContent = ({ title, message, isError = false }) => {
   const { theme } = useTheme();
-  
-  /** デフォルトメッセージ */
-  const defaultMessage = isError
-    ? 'エラーが発生しました。しばらくしてから再度お試しください。'
-    : 'この機能は現在開発中です';
 
-  /** 表示するアイコン */
-  const icon = isError ? '⚠️' : '🚧';
+  const iconName = isError ? 'alert-circle-outline' : 'construct-outline';
+  const accentColor = isError ? theme.error : theme.primary;
+  const resolvedMessage = message || (isError
+    ? '画面表示中に問題が発生しました。再読み込みを試してください。'
+    : 'この機能は現在仕上げ中です。次のフェーズで利用可能になります。');
 
   return (
-    <View style={styles.content}>
-      <View style={[
-        styles.placeholderBox, 
-        { backgroundColor: theme.surface },
-        isError && { borderWidth: 2, borderColor: theme.error }
-      ]}>
-        <Text style={styles.placeholderIcon}>{icon}</Text>
-        <Text style={[styles.placeholderTitle, { color: theme.text }]}>{title}</Text>
-        <Text style={[styles.placeholderDescription, { color: theme.textSecondary }]}>
-          {message || defaultMessage}
-        </Text>
+    <View style={styles.root}>
+      <View
+        style={[
+          styles.card,
+          {
+            borderColor: isError ? theme.error : theme.border,
+            backgroundColor: theme.surface,
+          },
+        ]}
+      >
+        <View style={[styles.iconWrap, { backgroundColor: `${accentColor}22`, borderColor: `${accentColor}66` }]}>
+          <Ionicons name={iconName} size={30} color={accentColor} />
+        </View>
+        <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
+        <Text style={[styles.message, { color: theme.textSecondary }]}>{resolvedMessage}</Text>
       </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  content: {
+  root: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
-  },
-  placeholderBox: {
     alignItems: 'center',
-    padding: 40,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 520,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    alignItems: 'center',
+    gap: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
     elevation: 4,
   },
-  placeholderIcon: {
-    fontSize: 48,
-    marginBottom: 16,
+  iconWrap: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
   },
-  placeholderTitle: {
+  title: {
     fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 8,
+    fontWeight: '800',
+    textAlign: 'center',
   },
-  placeholderDescription: {
-    fontSize: 16,
+  message: {
+    fontSize: 14,
+    lineHeight: 22,
     textAlign: 'center',
   },
 });
 
 export default PlaceholderContent;
+

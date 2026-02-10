@@ -4,6 +4,9 @@
  */
 
 import { supabase } from '../../services/supabase/client';
+import themeModeCompatibility from '../utils/themeModeCompatibility';
+
+const { normalizeThemeMode } = themeModeCompatibility;
 
 export const themeSettingsService = {
   async getThemeSettings(userId) {
@@ -19,7 +22,11 @@ export const themeSettingsService = {
         return null;
       }
 
-      return data?.theme_mode || null;
+      if (!data?.theme_mode) {
+        return null;
+      }
+
+      return normalizeThemeMode(data.theme_mode);
     } catch (error) {
       console.error('Failed to get theme settings:', error);
       return null;
@@ -28,10 +35,11 @@ export const themeSettingsService = {
 
   async saveThemeSettings(userId, themeMode) {
     try {
+      const normalizedThemeMode = normalizeThemeMode(themeMode);
       const { error } = await supabase
         .from('user_profiles')
         .update({
-          theme_mode: themeMode,
+          theme_mode: normalizedThemeMode,
           updated_at: new Date().toISOString(),
         })
         .eq('user_id', userId);

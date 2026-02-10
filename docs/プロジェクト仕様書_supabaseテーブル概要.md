@@ -1,6 +1,6 @@
 # Supabase テーブル概要
 
-最終更新日: 2026/02/09
+最終更新日: 2026/02/10
 
 ---
 
@@ -14,6 +14,8 @@
 3. [リレーション図](#リレーション図)
 4. [RLS ポリシー一覧](#rls-ポリシー一覧)
 5. [コードベースでのデータ取得方法](#コードベースでのデータ取得方法)
+6. [追加ドメインテーブル（フェーズ7〜10）](#追加ドメインテーブルフェーズ710)
+7. [初期データ投入手順（roles.permissions）](#初期データ投入手順rolespermissions)
 
 ---
 
@@ -41,7 +43,7 @@
 | user_id | uuid | NO | NULL | ユーザーID（FK → auth.users.id） |
 | name | text | NO | NULL | ユーザー名（表示名） |
 | organization | text | YES | NULL | 所属団体名 |
-| theme_mode | text | NO | 'light' | テーマ設定（`light` / `dark` / `joshi` / `world_trigger` / `eva`） |
+| theme_mode | text | NO | 'light' | テーマ設定（`light` / `dark` / `joshi` / `cyber` / `neon`） |
 | password_changed_at | timestamp with time zone | YES | NULL | パスワード変更日時（null の場合は初回ログインと判定） |
 | created_at | timestamp with time zone | NO | now() | レコード作成日時 |
 | updated_at | timestamp with time zone | NO | now() | レコード更新日時 |
@@ -51,6 +53,10 @@
 - `src/services/supabase/userService.js` — プロフィール取得・更新
 - `src/shared/services/themeSettingsService.js` — テーマ設定の取得・保存
 - `src/features/auth/services/passwordService.js` — パスワード変更日時の更新
+
+互換メモ:
+- 旧値 `world_trigger` は `cyber` に変換して扱う
+- 旧値 `eva` は `neon` に変換して扱う
 
 ---
 
@@ -112,6 +118,11 @@ Supabase の `permissions.screens` に含まれる値と、コード側の `PERM
 | --- | --- | --- |
 | `item1` ~ `item10` | `Item1` ~ `Item10`（デフォルト） | `項目1` ~ `項目10`（デフォルト） |
 | `当日部員` | `JimuShift` | `当日部員` |
+| `item12` | `Item12` | `巡回` |
+| `item13` | `Item13` | `本部` |
+| `item14` | `Item14` | `会計` |
+| `item15` | `Item15` | `物品` |
+| `item16` | `Item16` | `企画者` |
 
 ※ `PERMISSION_NAME_MAP` にカスタム定義がない場合、`item{番号}` がデフォルトの権限名として使用される。
 
@@ -358,3 +369,66 @@ const { error } = await getSupabaseClient()
 | `hasRole(userRoles, roleName)` | 特定の役職を持っているか | 役職配列, 役職名 |
 
 ※ これらの関数は Supabase に直接アクセスせず、取得済みの `userInfo.roles` を使用してクライアント側で判定する。
+
+---
+
+## 6. 追加ドメインテーブル（フェーズ7〜10）
+
+`docs/database/006_phase7_domain_tables_ddl.sql` と `docs/database/009_phase10_rls.sql` で、既存3テーブル（`user_profiles` / `user_roles` / `roles`）を変更せずに加えたテーブル一覧。
+
+### 6.1 共通マスタ
+
+| テーブル名 | 用途 |
+| --- | --- |
+| `organizations` | 団体/部署マスタ（出展団体、本部、会計、物品など） |
+| `user_organizations` | ユーザーと団体の紐づけ |
+| `locations` | 場所マスタ |
+| `events` | 企画イベント情報 |
+| `event_organizations` | 企画イベントと団体の関係 |
+
+### 6.2 チケット関連
+
+| テーブル名 | 用途 |
+| --- | --- |
+| `support_tickets` | 連絡チケット本体 |
+| `ticket_messages` | チケット返信スレッド |
+| `ticket_attachments` | 添付ファイル管理 |
+
+### 6.3 鍵関連
+
+| テーブル名 | 用途 |
+| --- | --- |
+| `keys` | 鍵マスタ |
+| `key_reservations` | 鍵の事前申請 |
+| `key_loans` | 鍵の貸出/返却履歴 |
+
+### 6.4 巡回・評価関連
+
+| テーブル名 | 用途 |
+| --- | --- |
+| `patrol_tasks` | 巡回タスク本体 |
+| `patrol_task_results` | 巡回タスク完了結果 |
+| `patrol_checks` | 巡回ログ |
+| `evaluation_checks` | 企画評価（承認待ち含む） |
+
+### 6.5 無線ログ
+
+| テーブル名 | 用途 |
+| --- | --- |
+| `radio_logs` | 本部/巡回の無線ログ |
+
+補足:
+- 通知系（`notifications`）は将来フェーズで実装予定。現フェーズではスコープ外。
+- RLSは `docs/database/009_phase10_rls.sql` でロール境界（Exhibitor/HQ/Accounting/Property/Patrol）を定義済み。
+
+---
+
+## 7. 初期データ投入手順（roles.permissions）
+
+初期投入の詳細手順は `docs/database/010_initial_seed_roles_permissions.md` を参照。
+
+最低限の投入対象:
+- `roles`（HQ / Patrol / Accounting / Property / Exhibitor）
+- 各ロールの `permissions.screens` に `item12`〜`item16` を付与
+- 必要な `permissions.features`（画面内操作権限）をロールごとに定義
+- `user_roles` と `user_organizations` を環境の運用ユーザーへ割り当て
