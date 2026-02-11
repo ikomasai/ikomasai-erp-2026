@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useTheme } from '../../../shared/hooks/useTheme';
@@ -142,6 +143,8 @@ const OptionChips = ({ options, selectedValue, onSelect, theme }) => {
 const Item13Screen = ({ navigation }) => {
   const { theme } = useTheme();
   const { user, userInfo } = useAuth();
+  const { width } = useWindowDimensions();
+  const isDesktopLayout = width >= 1180;
 
   const [section, setSection] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(true);
@@ -1304,7 +1307,10 @@ const Item13Screen = ({ navigation }) => {
         horizontal
         showsHorizontalScrollIndicator={false}
         style={[styles.sectionTabs, { borderBottomColor: theme.border }]}
-        contentContainerStyle={styles.sectionTabsContent}
+        contentContainerStyle={[
+          styles.sectionTabsContent,
+          isDesktopLayout ? styles.sectionTabsContentDesktop : null,
+        ]}
       >
         {ITEM13_SECTION_OPTIONS.map((item) => {
           const selected = section === item.value;
@@ -1312,7 +1318,7 @@ const Item13Screen = ({ navigation }) => {
             <TouchableOpacity
               key={item.value}
               style={[
-                styles.chip,
+                styles.sectionTabChip,
                 {
                   borderColor: selected ? theme.primary : theme.border,
                   backgroundColor: selected ? theme.primary : theme.surface,
@@ -1320,7 +1326,7 @@ const Item13Screen = ({ navigation }) => {
               ]}
               onPress={() => setSection(item.value)}
             >
-              <Text style={{ color: selected ? '#FFFFFF' : theme.text, fontSize: 12 }}>{item.label}</Text>
+              <Text style={[styles.sectionTabLabel, { color: selected ? '#FFFFFF' : theme.text }]}>{item.label}</Text>
             </TouchableOpacity>
           );
         })}
@@ -1332,7 +1338,13 @@ const Item13Screen = ({ navigation }) => {
           <Text style={[styles.helperText, { color: theme.textSecondary }]}>本部データを読み込み中...</Text>
         </View>
       ) : (
-        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={[
+            styles.contentContainer,
+            isDesktopLayout ? styles.contentContainerDesktop : null,
+          ]}
+        >
           <View style={[styles.scopeCard, { borderColor: theme.border, backgroundColor: theme.surface }]}> 
             <Text style={[styles.scopeTitle, { color: theme.text }]}>現在の本部スコープ</Text>
             <Text style={[styles.scopeText, { color: theme.textSecondary }]}> 
@@ -1358,15 +1370,43 @@ const Item13Screen = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  sectionTabs: { borderBottomWidth: 1 },
-  sectionTabsContent: { gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  sectionTabs: {
+    borderBottomWidth: 1,
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 60,
+  },
+  sectionTabsContent: {
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  sectionTabsContentDesktop: {
+    minWidth: 1120,
+    alignSelf: 'center',
+  },
+  sectionTabChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    minHeight: 38,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTabLabel: { fontSize: 12, fontWeight: '700' },
   content: { flex: 1 },
   contentContainer: {
-    maxWidth: 980,
+    maxWidth: 1120,
     width: '100%',
     alignSelf: 'center',
-    padding: 12,
-    gap: 10,
+    padding: 14,
+    gap: 12,
+  },
+  contentContainerDesktop: {
+    maxWidth: 1320,
+    paddingHorizontal: 18,
   },
   center: {
     flex: 1,
@@ -1374,11 +1414,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
-  sectionBlock: { gap: 10 },
+  sectionBlock: { gap: 12 },
   sectionTitle: { fontSize: 18, fontWeight: '700' },
-  panel: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 8 },
+  panel: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 2,
+  },
   panelTitle: { fontSize: 15, fontWeight: '700' },
-  scopeCard: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 4 },
+  scopeCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 5,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
   scopeTitle: { fontSize: 14, fontWeight: '700' },
   scopeText: { fontSize: 12 },
   rowBetween: {
@@ -1387,8 +1447,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   rowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 7 },
-  card: { borderWidth: 1, borderRadius: 10, padding: 8, gap: 4 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  card: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 5,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
   itemNo: { fontSize: 12, fontWeight: '700' },
   itemTitle: { fontSize: 14, fontWeight: '600' },
   metaTextStrong: { fontSize: 12, fontWeight: '700' },
@@ -1397,20 +1467,20 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 13, fontWeight: '600', marginTop: 4 },
   helperText: { fontSize: 12 },
   errorText: { fontSize: 13, lineHeight: 20 },
-  input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 14 },
+  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
   inputMulti: {
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     minHeight: 84,
     fontSize: 14,
     textAlignVertical: 'top',
   },
-  button: { borderRadius: 8, paddingVertical: 11, alignItems: 'center', justifyContent: 'center' },
+  button: { borderRadius: 12, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
   buttonMini: {
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1423,22 +1493,27 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     minWidth: 140,
-    gap: 4,
+    gap: 5,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
   summaryLabel: { fontSize: 12 },
   summaryValue: { fontSize: 22, fontWeight: '700' },
-  logItem: { borderWidth: 1, borderRadius: 8, padding: 8, gap: 4 },
+  logItem: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 4 },
   logSeverity: { fontSize: 12, fontWeight: '700' },
   logTime: { fontSize: 11 },
   logText: { fontSize: 13, lineHeight: 18 },
   logMeta: { fontSize: 11 },
-  inlineNotice: { borderWidth: 1, borderRadius: 8, padding: 8, gap: 6 },
-  linkedTaskItem: { borderWidth: 1, borderRadius: 8, padding: 8, gap: 2 },
-  messageCard: { borderWidth: 1, borderRadius: 8, padding: 8, gap: 3 },
+  inlineNotice: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 6 },
+  linkedTaskItem: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 3 },
+  messageCard: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 4 },
 });
 
 export default Item13Screen;

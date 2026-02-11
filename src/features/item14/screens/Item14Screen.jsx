@@ -2,16 +2,19 @@
  * Item14 screen (Accounting).
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useTheme } from '../../../shared/hooks/useTheme';
@@ -79,6 +82,7 @@ const OptionChips = ({ options, selectedValue, onSelect, theme }) => {
 const Item14Screen = ({ navigation }) => {
   const { theme } = useTheme();
   const { user, userInfo } = useAuth();
+  const { width } = useWindowDimensions();
 
   const [section, setSection] = useState('inbox');
   const [inboxStatus, setInboxStatus] = useState('unread');
@@ -97,6 +101,13 @@ const Item14Screen = ({ navigation }) => {
   });
   const [statusForm, setStatusForm] = useState({
     ticketStatus: 'acknowledged',
+  });
+  const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
+  const detailDrawerProgress = useRef(new Animated.Value(0)).current;
+  const detailDrawerWidth = width;
+  const detailDrawerTranslateX = detailDrawerProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [detailDrawerWidth, 0],
   });
 
   const selectedTicket = useMemo(
@@ -156,7 +167,7 @@ const Item14Screen = ({ navigation }) => {
 
     if (detailResult.error) {
       setTicketDetail(null);
-      setErrorMessage('チケット詳細の取得に失敗しました。');
+      setErrorMessage('連絡詳細の取得に失敗しました。');
     } else {
       const detail = detailResult.ticket || null;
       setTicketDetail(detail);
@@ -228,6 +239,36 @@ const Item14Screen = ({ navigation }) => {
     setInboxStatus(statusBucket);
     await loadTickets(statusBucket);
   };
+
+  const openDetailDrawer = useCallback(() => {
+    setIsDetailDrawerOpen(true);
+    Animated.timing(detailDrawerProgress, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [detailDrawerProgress]);
+
+  const closeDetailDrawer = useCallback(() => {
+    Animated.timing(detailDrawerProgress, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setIsDetailDrawerOpen(false);
+        setSection('inbox');
+      }
+    });
+  }, [detailDrawerProgress]);
+
+  useEffect(() => {
+    if (!selectedTicketId && isDetailDrawerOpen) {
+      closeDetailDrawer();
+    }
+  }, [closeDetailDrawer, isDetailDrawerOpen, selectedTicketId]);
 
   /**
    * Post reply/public memo to ticket.
@@ -329,7 +370,7 @@ const Item14Screen = ({ navigation }) => {
           一覧（{ITEM14_STATUS_BUCKET_LABELS[inboxStatus] || inboxStatus}）
         </Text>
         {tickets.length === 0 ? (
-          <Text style={[styles.helperText, { color: theme.textSecondary }]}>対象チケットはありません。</Text>
+          <Text style={[styles.helperText, { color: theme.textSecondary }]}>対象の連絡はありません。</Text>
         ) : (
           tickets.map((ticket) => (
             <TouchableOpacity
@@ -344,6 +385,7 @@ const Item14Screen = ({ navigation }) => {
               onPress={() => {
                 setSelectedTicketId(ticket.id);
                 setSection('detail');
+                openDetailDrawer();
               }}
             >
               <Text style={[styles.itemNo, { color: theme.primary }]}>{ticket.ticket_no}</Text>
@@ -369,13 +411,13 @@ const Item14Screen = ({ navigation }) => {
       {!ticketDetail ? (
         <View style={[styles.panel, { borderColor: theme.border, backgroundColor: theme.surface }]}>
           <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-            一覧からチケットを選択してください。
+            一覧から連絡を選択してください。
           </Text>
         </View>
       ) : (
         <View style={[styles.panel, { borderColor: theme.border, backgroundColor: theme.surface }]}>
           <View style={styles.rowBetween}>
-            <Text style={[styles.panelTitle, { color: theme.text }]}>会計チケット詳細</Text>
+            <Text style={[styles.panelTitle, { color: theme.text }]}>会計連絡の詳細</Text>
             <TouchableOpacity
               style={[styles.buttonMini, { backgroundColor: theme.primary }]}
               onPress={() => loadTicketDetail(ticketDetail.id)}
@@ -491,9 +533,6 @@ const Item14Screen = ({ navigation }) => {
   );
 
   const renderSection = () => {
-    if (section === 'detail') {
-      return renderDetailSection();
-    }
     return renderInboxSection();
   };
 
@@ -513,15 +552,29 @@ const Item14Screen = ({ navigation }) => {
             <TouchableOpacity
               key={option.value}
               style={[
-                styles.chip,
+                styles.sectionTabChip,
                 {
                   borderColor: selected ? theme.primary : theme.border,
                   backgroundColor: selected ? theme.primary : theme.surface,
                 },
               ]}
-              onPress={() => setSection(option.value)}
+              onPress={() => {
+                if (option.value === 'detail') {
+                  if (!selectedTicketId) {
+                    Alert.alert('未選択', '一覧から連絡を選択してください。');
+                    return;
+                  }
+                  setSection('detail');
+                  openDetailDrawer();
+                  return;
+                }
+                setSection(option.value);
+                if (isDetailDrawerOpen) {
+                  closeDetailDrawer();
+                }
+              }}
             >
-              <Text style={{ color: selected ? '#FFFFFF' : theme.text, fontSize: 12 }}>{option.label}</Text>
+              <Text style={[styles.sectionTabLabel, { color: selected ? '#FFFFFF' : theme.text }]}>{option.label}</Text>
             </TouchableOpacity>
           );
         })}
@@ -535,12 +588,12 @@ const Item14Screen = ({ navigation }) => {
       ) : (
         <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
           <View style={[styles.scopeCard, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-            <Text style={[styles.scopeTitle, { color: theme.text }]}>現在の会計スコープ</Text>
+            <Text style={[styles.scopeTitle, { color: theme.text }]}>現在の会計担当範囲</Text>
             <Text style={[styles.scopeText, { color: theme.textSecondary }]}>
               ユーザー: {userInfo?.name || user?.email || user?.id || '-'}
             </Text>
             <Text style={[styles.scopeText, { color: theme.textSecondary }]}>
-              「distribution_change」専用一覧（対象外チケットは非表示）
+              「distribution_change」専用一覧（対象外の連絡は非表示）
             </Text>
           </View>
 
@@ -553,34 +606,175 @@ const Item14Screen = ({ navigation }) => {
           {renderSection()}
         </ScrollView>
       )}
+
+      {isDetailDrawerOpen ? (
+        <View style={styles.drawerLayer} pointerEvents="box-none">
+          <Animated.View
+            style={[
+              styles.drawerBackdrop,
+              {
+                opacity: detailDrawerProgress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 0.26],
+                }),
+              },
+            ]}
+          />
+          <TouchableOpacity style={styles.drawerBackdropHit} activeOpacity={1} onPress={closeDetailDrawer} />
+
+          <Animated.View
+            style={[
+              styles.drawerPanel,
+              {
+                width: detailDrawerWidth,
+                borderLeftColor: theme.border,
+                backgroundColor: theme.background,
+                transform: [{ translateX: detailDrawerTranslateX }],
+              },
+            ]}
+          >
+            <View style={[styles.drawerHeader, { borderBottomColor: theme.border, backgroundColor: theme.surface }]}>
+              <Text style={[styles.drawerTitle, { color: theme.text }]}>連絡詳細</Text>
+              <TouchableOpacity
+                style={[styles.drawerCloseButton, { borderColor: theme.border, backgroundColor: theme.background }]}
+                onPress={closeDetailDrawer}
+              >
+                <Text style={[styles.drawerCloseText, { color: theme.text }]}>閉じる</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              style={styles.drawerContent}
+              contentContainerStyle={styles.drawerContentContainer}
+              showsVerticalScrollIndicator={false}
+            >
+              {renderDetailSection()}
+            </ScrollView>
+          </Animated.View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  sectionTabs: { borderBottomWidth: 1 },
-  sectionTabsContent: { gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  sectionTabs: {
+    borderBottomWidth: 1,
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 60,
+  },
+  sectionTabsContent: {
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  sectionTabChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    minHeight: 38,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTabLabel: { fontSize: 12, fontWeight: '700' },
   content: { flex: 1 },
   contentContainer: {
-    maxWidth: 920,
+    maxWidth: 1024,
     width: '100%',
     alignSelf: 'center',
-    padding: 12,
-    gap: 10,
+    padding: 14,
+    gap: 12,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  sectionBlock: { gap: 10 },
-  panel: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 8 },
-  inlinePanel: { borderWidth: 1, borderRadius: 8, padding: 8, gap: 6 },
+  sectionBlock: { gap: 12 },
+  drawerLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 20,
+    alignItems: 'flex-end',
+  },
+  drawerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000000',
+  },
+  drawerBackdropHit: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  drawerPanel: {
+    height: '100%',
+    borderLeftWidth: 1,
+  },
+  drawerHeader: {
+    height: 56,
+    borderBottomWidth: 1,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  drawerTitle: { fontSize: 14, fontWeight: '700' },
+  drawerCloseButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  drawerCloseText: { fontSize: 12, fontWeight: '700' },
+  drawerContent: { flex: 1 },
+  drawerContentContainer: { padding: 12, paddingBottom: 24 },
+  panel: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  inlinePanel: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 7,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
   panelTitle: { fontSize: 15, fontWeight: '700' },
-  scopeCard: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 4 },
+  scopeCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 5,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
   scopeTitle: { fontSize: 14, fontWeight: '700' },
   scopeText: { fontSize: 12 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   rowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 7 },
-  card: { borderWidth: 1, borderRadius: 10, padding: 8, gap: 4 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  card: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 5,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
   itemNo: { fontSize: 12, fontWeight: '700' },
   itemTitle: { fontSize: 14, fontWeight: '600' },
   metaTextStrong: { fontSize: 12, fontWeight: '700' },
@@ -589,21 +783,21 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 13, fontWeight: '600', marginTop: 4 },
   helperText: { fontSize: 12 },
   errorText: { fontSize: 13, lineHeight: 20 },
-  attachItem: { borderWidth: 1, borderRadius: 8, padding: 8, gap: 2 },
-  messageItem: { borderWidth: 1, borderRadius: 8, padding: 8, gap: 3 },
+  attachItem: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 3 },
+  messageItem: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 4 },
   inputMulti: {
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     minHeight: 84,
     fontSize: 14,
     textAlignVertical: 'top',
   },
-  button: { borderRadius: 8, paddingVertical: 11, alignItems: 'center', justifyContent: 'center' },
+  button: { borderRadius: 12, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
   buttonMini: {
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',

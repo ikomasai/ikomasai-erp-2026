@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useTheme } from '../../../shared/hooks/useTheme';
@@ -79,6 +80,8 @@ const OptionChips = ({ options, selectedValue, onSelect, theme }) => {
 const Item12Screen = ({ navigation }) => {
   const { theme } = useTheme();
   const { user, userInfo } = useAuth();
+  const { width } = useWindowDimensions();
+  const isDesktopLayout = width >= 1080;
 
   const [activeSection, setActiveSection] = useState('tasks');
   const [tasks, setTasks] = useState([]);
@@ -640,7 +643,7 @@ const Item12Screen = ({ navigation }) => {
             <TouchableOpacity
               key={option.value}
               style={[
-                styles.chip,
+                styles.sectionTabChip,
                 {
                   borderColor: isSelected ? theme.primary : theme.border,
                   backgroundColor: isSelected ? theme.primary : theme.surface,
@@ -648,7 +651,7 @@ const Item12Screen = ({ navigation }) => {
               ]}
               onPress={() => setActiveSection(option.value)}
             >
-              <Text style={{ color: isSelected ? '#FFFFFF' : theme.text, fontSize: 12 }}>
+              <Text style={[styles.sectionTabLabel, { color: isSelected ? '#FFFFFF' : theme.text }]}>
                 {option.label}
               </Text>
             </TouchableOpacity>
@@ -662,7 +665,13 @@ const Item12Screen = ({ navigation }) => {
           <Text style={[styles.helperText, { color: theme.textSecondary }]}>巡回データを読み込み中...</Text>
         </View>
       ) : (
-        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={[
+            styles.contentContainer,
+            isDesktopLayout ? styles.contentContainerDesktop : null,
+          ]}
+        >
           <View style={[styles.scopeCard, { borderColor: theme.border, backgroundColor: theme.surface }]}>
             <Text style={[styles.scopeTitle, { color: theme.text }]}>現在の巡回スコープ</Text>
             <Text style={[styles.scopeText, { color: theme.textSecondary }]}>
@@ -688,29 +697,83 @@ const Item12Screen = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  sectionTabs: { borderBottomWidth: 1 },
-  sectionTabsContent: { paddingHorizontal: 12, paddingVertical: 8, gap: 8 },
+  sectionTabs: {
+    borderBottomWidth: 1,
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 60,
+  },
+  sectionTabsContent: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
+    alignItems: 'center',
+  },
+  sectionTabChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    minHeight: 38,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTabLabel: { fontSize: 12, fontWeight: '700' },
   content: { flex: 1 },
   contentContainer: {
-    maxWidth: 860,
+    maxWidth: 1024,
     width: '100%',
     alignSelf: 'center',
-    padding: 12,
-    gap: 10,
+    padding: 14,
+    gap: 12,
   },
-  scopeCard: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 4 },
+  contentContainerDesktop: {
+    maxWidth: 1200,
+    paddingHorizontal: 18,
+  },
+  scopeCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 5,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
   scopeTitle: { fontSize: 14, fontWeight: '700' },
   scopeText: { fontSize: 12 },
-  sectionBlock: { gap: 10 },
+  sectionBlock: { gap: 12 },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   sectionTitle: { fontSize: 18, fontWeight: '700' },
-  panel: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 8 },
+  panel: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 2,
+  },
   panelTitle: { fontSize: 15, fontWeight: '700' },
-  taskCard: { borderWidth: 1, borderRadius: 10, padding: 8, gap: 4 },
+  taskCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 5,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
   taskTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -720,22 +783,22 @@ const styles = StyleSheet.create({
   taskTypeText: { fontSize: 14, fontWeight: '600' },
   taskMetaText: { fontSize: 12 },
   chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 7 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
   fieldLabel: { fontSize: 13, fontWeight: '600', marginTop: 4 },
-  input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 14 },
+  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
   inputMulti: {
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     fontSize: 14,
     minHeight: 84,
     textAlignVertical: 'top',
   },
-  button: { borderRadius: 8, paddingVertical: 11, alignItems: 'center', justifyContent: 'center' },
+  button: { borderRadius: 12, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
   buttonMini: {
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -744,7 +807,7 @@ const styles = StyleSheet.create({
   helperText: { fontSize: 12 },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
   errorText: { fontSize: 13, lineHeight: 20 },
-  alertItem: { borderWidth: 1, borderRadius: 8, padding: 8, gap: 2 },
+  alertItem: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 3 },
   alertTextStrong: { fontSize: 12, fontWeight: '700' },
   alertText: { fontSize: 12 },
 });

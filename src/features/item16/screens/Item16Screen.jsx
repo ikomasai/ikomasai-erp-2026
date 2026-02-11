@@ -2,16 +2,19 @@
  * Item16 screen (Exhibitor).
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -129,6 +132,7 @@ const OptionChips = ({ options, selectedValue, onSelect, theme }) => {
 const Item16Screen = ({ navigation }) => {
   const { theme } = useTheme();
   const { user, userInfo } = useAuth();
+  const { width } = useWindowDimensions();
 
   const [section, setSection] = useState('tickets');
   const [isLoading, setIsLoading] = useState(true);
@@ -146,6 +150,13 @@ const Item16Screen = ({ navigation }) => {
   const [ticketDetail, setTicketDetail] = useState(null);
   const [ticketMessages, setTicketMessages] = useState([]);
   const [replyBody, setReplyBody] = useState('');
+  const [isTicketDrawerOpen, setIsTicketDrawerOpen] = useState(false);
+  const ticketDrawerProgress = useRef(new Animated.Value(0)).current;
+  const ticketDrawerWidth = width;
+  const ticketDrawerTranslateX = ticketDrawerProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [ticketDrawerWidth, 0],
+  });
 
   const [ticketForm, setTicketForm] = useState({
     ticketType: 'emergency',
@@ -208,7 +219,7 @@ const Item16Screen = ({ navigation }) => {
     const { tickets: list, error } = await selectExhibitorTickets(organizationId);
     if (error) {
       setTickets([]);
-      setErrorMessage('チケット一覧の取得に失敗しました。');
+      setErrorMessage('連絡一覧の取得に失敗しました。');
       return;
     }
 
@@ -231,7 +242,7 @@ const Item16Screen = ({ navigation }) => {
 
     if (detailResult.error) {
       setTicketDetail(null);
-      setErrorMessage('チケット詳細の取得に失敗しました。');
+      setErrorMessage('連絡詳細の取得に失敗しました。');
     } else {
       setTicketDetail(detailResult.ticket || null);
     }
@@ -338,7 +349,7 @@ const Item16Screen = ({ navigation }) => {
       }
       setSection('tickets');
     } catch (error) {
-      Alert.alert('送信失敗', error.message || 'チケット作成に失敗しました。');
+      Alert.alert('送信失敗', error.message || '連絡作成に失敗しました。');
     } finally {
       setIsBusy(false);
     }
@@ -426,11 +437,46 @@ const Item16Screen = ({ navigation }) => {
     }
   };
 
+  const openTicketDrawer = useCallback(() => {
+    setIsTicketDrawerOpen(true);
+    Animated.timing(ticketDrawerProgress, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [ticketDrawerProgress]);
+
+  const closeTicketDrawer = useCallback(() => {
+    Animated.timing(ticketDrawerProgress, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setIsTicketDrawerOpen(false);
+      }
+    });
+  }, [ticketDrawerProgress]);
+
+  useEffect(() => {
+    if (section !== 'tickets' && isTicketDrawerOpen) {
+      closeTicketDrawer();
+    }
+  }, [closeTicketDrawer, isTicketDrawerOpen, section]);
+
+  useEffect(() => {
+    if (!selectedTicketId && isTicketDrawerOpen) {
+      closeTicketDrawer();
+    }
+  }, [closeTicketDrawer, isTicketDrawerOpen, selectedTicketId]);
+
   const renderTicketSection = () => (
     <View style={styles.sectionBlock}>
       <View style={[styles.panel, { borderColor: theme.border, backgroundColor: theme.surface }]}>
         <View style={styles.rowBetween}>
-          <Text style={[styles.panelTitle, { color: theme.text }]}>自団体チケット一覧</Text>
+          <Text style={[styles.panelTitle, { color: theme.text }]}>自団体の連絡一覧</Text>
           <TouchableOpacity
             style={[styles.buttonMini, { backgroundColor: theme.primary }]}
             onPress={() => loadTickets(organization?.id)}
@@ -448,7 +494,7 @@ const Item16Screen = ({ navigation }) => {
         />
 
         {filteredTickets.length === 0 ? (
-          <Text style={[styles.helperText, { color: theme.textSecondary }]}>対象チケットはありません。</Text>
+          <Text style={[styles.helperText, { color: theme.textSecondary }]}>対象の連絡はありません。</Text>
         ) : (
           filteredTickets.map((ticket) => (
             <TouchableOpacity
@@ -460,7 +506,10 @@ const Item16Screen = ({ navigation }) => {
                   backgroundColor: theme.surfaceSecondary || theme.background,
                 },
               ]}
-              onPress={() => setSelectedTicketId(ticket.id)}
+              onPress={() => {
+                setSelectedTicketId(ticket.id);
+                openTicketDrawer();
+              }}
               activeOpacity={0.9}
             >
               <View style={styles.rowBetween}>
@@ -468,75 +517,101 @@ const Item16Screen = ({ navigation }) => {
                 <Text style={[styles.metaText, { color: theme.textSecondary }]}>経過: {formatElapsedText(ticket.created_at)}</Text>
               </View>
               <Text style={[styles.itemTitle, { color: theme.text }]}>{ticket.title}</Text>
-              <Text style={[styles.metaText, { color: theme.textSecondary }]}>種別: {TICKET_TYPE_LABEL_MAP[ticket.ticket_type] || ticket.ticket_type}</Text>
-              <Text style={[styles.metaText, { color: theme.textSecondary }]}>状態: {ITEM16_TICKET_STATUS_LABELS[ticket.ticket_status] || ticket.ticket_status}</Text>
+              <Text style={[styles.metaText, { color: theme.textSecondary }]}>
+                種別: {TICKET_TYPE_LABEL_MAP[ticket.ticket_type] || ticket.ticket_type}
+              </Text>
+              <Text style={[styles.metaText, { color: theme.textSecondary }]}>
+                状態: {ITEM16_TICKET_STATUS_LABELS[ticket.ticket_status] || ticket.ticket_status}
+              </Text>
               <Text style={[styles.metaText, { color: theme.textSecondary }]}>更新: {toLocalDateTimeText(ticket.updated_at)}</Text>
             </TouchableOpacity>
           ))
         )}
       </View>
-
-      {ticketDetail ? (
-        <View style={[styles.panel, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-          <Text style={[styles.panelTitle, { color: theme.text }]}>チケット詳細</Text>
-          <Text style={[styles.itemNo, { color: theme.primary }]}>{ticketDetail.ticket_no}</Text>
-          <Text style={[styles.itemTitle, { color: theme.text }]}>{ticketDetail.title}</Text>
-          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{ticketDetail.description}</Text>
-          <Text style={[styles.metaText, { color: theme.textSecondary }]}>種別: {TICKET_TYPE_LABEL_MAP[ticketDetail.ticket_type] || ticketDetail.ticket_type}</Text>
-          <Text style={[styles.metaText, { color: theme.textSecondary }]}>状態: {ITEM16_TICKET_STATUS_LABELS[ticketDetail.ticket_status] || ticketDetail.ticket_status}</Text>
-          <Text style={[styles.metaText, { color: theme.textSecondary }]}>優先度: {PRIORITY_LABEL_MAP[ticketDetail.priority] || ticketDetail.priority}</Text>
-          <Text style={[styles.metaText, { color: theme.textSecondary }]}>作成日時: {toLocalDateTimeText(ticketDetail.created_at)}</Text>
-
-          <View style={[styles.inlinePanel, { borderColor: theme.border }]}>
-            <Text style={[styles.fieldLabel, { color: theme.text }]}>返信スレッド</Text>
-            {isThreadLoading ? (
-              <ActivityIndicator size="small" color={theme.primary} />
-            ) : ticketMessages.length === 0 ? (
-              <Text style={[styles.helperText, { color: theme.textSecondary }]}>返信はまだありません。</Text>
-            ) : (
-              ticketMessages.map((message) => (
-                <View
-                  key={message.id}
-                  style={[styles.messageCard, { borderColor: theme.border, backgroundColor: theme.background }]}
-                >
-                  <Text style={[styles.metaTextStrong, { color: theme.text }]}>{message.author_name || message.author_id}</Text>
-                  <Text style={[styles.bodyText, { color: theme.text }]}>{message.body}</Text>
-                  <Text style={[styles.metaText, { color: theme.textSecondary }]}>{toLocalDateTimeText(message.created_at)}</Text>
-                </View>
-              ))
-            )}
-
-            <TextInput
-              style={[
-                styles.inputMulti,
-                {
-                  borderColor: theme.border,
-                  color: theme.text,
-                  backgroundColor: theme.surfaceSecondary || theme.background,
-                },
-              ]}
-              value={replyBody}
-              onChangeText={setReplyBody}
-              placeholder="本部への追記や補足を入力"
-              placeholderTextColor={theme.textSecondary}
-              multiline
-            />
-            <TouchableOpacity
-              style={[styles.button, { backgroundColor: theme.primary }]}
-              onPress={handlePostReply}
-              disabled={isBusy}
-            >
-              <Text style={styles.buttonText}>返信を投稿</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
     </View>
   );
 
+  const renderTicketDetailSection = () => {
+    if (!ticketDetail) {
+      return (
+        <View style={[styles.panel, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+          <Text style={[styles.helperText, { color: theme.textSecondary }]}>
+            一覧から連絡を選択すると、ここに詳細が表示されます。
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={[styles.panel, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+        <Text style={[styles.panelTitle, { color: theme.text }]}>連絡詳細</Text>
+        <Text style={[styles.itemNo, { color: theme.primary }]}>{ticketDetail.ticket_no}</Text>
+        <Text style={[styles.itemTitle, { color: theme.text }]}>{ticketDetail.title}</Text>
+        <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{ticketDetail.description}</Text>
+        <Text style={[styles.metaText, { color: theme.textSecondary }]}>
+          種別: {TICKET_TYPE_LABEL_MAP[ticketDetail.ticket_type] || ticketDetail.ticket_type}
+        </Text>
+        <Text style={[styles.metaText, { color: theme.textSecondary }]}>
+          状態: {ITEM16_TICKET_STATUS_LABELS[ticketDetail.ticket_status] || ticketDetail.ticket_status}
+        </Text>
+        <Text style={[styles.metaText, { color: theme.textSecondary }]}>
+          優先度: {PRIORITY_LABEL_MAP[ticketDetail.priority] || ticketDetail.priority}
+        </Text>
+        <Text style={[styles.metaText, { color: theme.textSecondary }]}>
+          作成日時: {toLocalDateTimeText(ticketDetail.created_at)}
+        </Text>
+
+        <View style={[styles.inlinePanel, { borderColor: theme.border }]}>
+          <Text style={[styles.fieldLabel, { color: theme.text }]}>返信スレッド</Text>
+          {isThreadLoading ? (
+            <ActivityIndicator size="small" color={theme.primary} />
+          ) : ticketMessages.length === 0 ? (
+            <Text style={[styles.helperText, { color: theme.textSecondary }]}>返信はまだありません。</Text>
+          ) : (
+            ticketMessages.map((message) => (
+              <View
+                key={message.id}
+                style={[styles.messageCard, { borderColor: theme.border, backgroundColor: theme.background }]}
+              >
+                <Text style={[styles.metaTextStrong, { color: theme.text }]}>{message.author_name || message.author_id}</Text>
+                <Text style={[styles.bodyText, { color: theme.text }]}>{message.body}</Text>
+                <Text style={[styles.metaText, { color: theme.textSecondary }]}>
+                  {toLocalDateTimeText(message.created_at)}
+                </Text>
+              </View>
+            ))
+          )}
+
+          <TextInput
+            style={[
+              styles.inputMulti,
+              {
+                borderColor: theme.border,
+                color: theme.text,
+                backgroundColor: theme.surfaceSecondary || theme.background,
+              },
+            ]}
+            value={replyBody}
+            onChangeText={setReplyBody}
+            placeholder="本部への追記や補足を入力"
+            placeholderTextColor={theme.textSecondary}
+            multiline
+          />
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: theme.primary }]}
+            onPress={handlePostReply}
+            disabled={isBusy}
+          >
+            <Text style={styles.buttonText}>返信を投稿</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const renderCreateSection = () => (
     <View style={[styles.panel, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-      <Text style={[styles.panelTitle, { color: theme.text }]}>新規チケット作成</Text>
+      <Text style={[styles.panelTitle, { color: theme.text }]}>新規連絡の作成</Text>
       <Text style={[styles.helperText, { color: theme.textSecondary }]}>緊急連絡・ルール問い合わせ・変更連絡をここから送信します。</Text>
 
       <Text style={[styles.fieldLabel, { color: theme.text }]}>種別</Text>
@@ -622,7 +697,7 @@ const Item16Screen = ({ navigation }) => {
         onPress={handleCreateTicket}
         disabled={isBusy}
       >
-        <Text style={styles.buttonText}>チケットを送信</Text>
+        <Text style={styles.buttonText}>連絡を送信</Text>
       </TouchableOpacity>
     </View>
   );
@@ -790,15 +865,20 @@ const Item16Screen = ({ navigation }) => {
             <TouchableOpacity
               key={item.value}
               style={[
-                styles.chip,
+                styles.sectionTabChip,
                 {
                   borderColor: selected ? theme.primary : theme.border,
                   backgroundColor: selected ? theme.primary : theme.surface,
                 },
               ]}
-              onPress={() => setSection(item.value)}
+              onPress={() => {
+                setSection(item.value);
+                if (item.value !== 'tickets' && isTicketDrawerOpen) {
+                  closeTicketDrawer();
+                }
+              }}
             >
-              <Text style={{ color: selected ? '#FFFFFF' : theme.text, fontSize: 12, fontWeight: '700' }}>
+              <Text style={[styles.sectionTabLabel, { color: selected ? '#FFFFFF' : theme.text }]}>
                 {item.label}
               </Text>
             </TouchableOpacity>
@@ -816,7 +896,7 @@ const Item16Screen = ({ navigation }) => {
           <View style={[styles.scopeCard, { borderColor: theme.border, backgroundColor: theme.surface }]}>
             <View style={styles.rowBetween}>
               <View style={styles.scopeTextWrap}>
-                <Text style={[styles.scopeTitle, { color: theme.text }]}>現在の出展スコープ</Text>
+                <Text style={[styles.scopeTitle, { color: theme.text }]}>現在の出展担当範囲</Text>
                 <Text style={[styles.scopeText, { color: theme.textSecondary }]}>団体: {organization?.name || '-'}</Text>
                 <Text style={[styles.scopeText, { color: theme.textSecondary }]}>ユーザー: {userInfo?.name || user?.email || user?.id || '-'}</Text>
               </View>
@@ -844,6 +924,52 @@ const Item16Screen = ({ navigation }) => {
           {renderSection()}
         </ScrollView>
       )}
+
+      {isTicketDrawerOpen ? (
+        <View style={styles.drawerLayer} pointerEvents="box-none">
+          <Animated.View
+            style={[
+              styles.drawerBackdrop,
+              {
+                opacity: ticketDrawerProgress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 0.26],
+                }),
+              },
+            ]}
+          />
+          <TouchableOpacity style={styles.drawerBackdropHit} activeOpacity={1} onPress={closeTicketDrawer} />
+
+          <Animated.View
+            style={[
+              styles.drawerPanel,
+              {
+                width: ticketDrawerWidth,
+                borderLeftColor: theme.border,
+                backgroundColor: theme.background,
+                transform: [{ translateX: ticketDrawerTranslateX }],
+              },
+            ]}
+          >
+            <View style={[styles.drawerHeader, { borderBottomColor: theme.border, backgroundColor: theme.surface }]}>
+              <Text style={[styles.drawerTitle, { color: theme.text }]}>連絡詳細</Text>
+              <TouchableOpacity
+                style={[styles.drawerCloseButton, { borderColor: theme.border, backgroundColor: theme.background }]}
+                onPress={closeTicketDrawer}
+              >
+                <Text style={[styles.drawerCloseText, { color: theme.text }]}>閉じる</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              style={styles.drawerContent}
+              contentContainerStyle={styles.drawerContentContainer}
+              showsVerticalScrollIndicator={false}
+            >
+              {renderTicketDetailSection()}
+            </ScrollView>
+          </Animated.View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -852,19 +978,33 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   sectionTabs: {
     borderBottomWidth: 1,
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 60,
   },
   sectionTabsContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
+    alignItems: 'center',
   },
+  sectionTabChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    minHeight: 38,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTabLabel: { fontSize: 12, fontWeight: '700' },
   content: { flex: 1 },
   contentContainer: {
-    maxWidth: 920,
+    maxWidth: 1024,
     width: '100%',
     alignSelf: 'center',
-    padding: 12,
-    gap: 10,
+    padding: 14,
+    gap: 12,
   },
   center: {
     flex: 1,
@@ -872,23 +1012,73 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
-  sectionBlock: { gap: 10 },
+  sectionBlock: { gap: 12 },
+  drawerLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 20,
+    alignItems: 'flex-end',
+  },
+  drawerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000000',
+  },
+  drawerBackdropHit: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  drawerPanel: {
+    height: '100%',
+    borderLeftWidth: 1,
+  },
+  drawerHeader: {
+    height: 56,
+    borderBottomWidth: 1,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  drawerTitle: { fontSize: 14, fontWeight: '700' },
+  drawerCloseButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  drawerCloseText: { fontSize: 12, fontWeight: '700' },
+  drawerContent: { flex: 1 },
+  drawerContentContainer: { padding: 12, paddingBottom: 24 },
   panel: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 12,
-    gap: 9,
+    gap: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 2,
   },
   inlinePanel: {
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 10,
-    gap: 8,
+    gap: 7,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
   },
   scopeCard: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 12,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
   scopeTextWrap: {
     flex: 1,
@@ -915,21 +1105,31 @@ const styles = StyleSheet.create({
   },
   chip: {
     borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   ticketCard: {
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 10,
-    gap: 3,
+    gap: 4,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
   },
   messageCard: {
     borderWidth: 1,
-    borderRadius: 10,
-    padding: 9,
+    borderRadius: 12,
+    padding: 10,
     gap: 3,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
   },
   panelTitle: {
     fontSize: 15,
@@ -969,28 +1169,28 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
   },
   inputMulti: {
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     minHeight: 88,
     fontSize: 14,
     textAlignVertical: 'top',
   },
   button: {
-    borderRadius: 10,
+    borderRadius: 12,
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
   buttonMini: {
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
     alignItems: 'center',
