@@ -1,0 +1,289 @@
+  --non-interactive is not supported, use $CI=1 instead
+env: load .env
+env: export EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_GAS_WEB_APP_URL EXPO_PUBLIC_SHIFT_SPREADSHEET_ID EXPO_PUBLIC_FESTIVAL_START_DATE EXPO_PUBLIC_FESTIVAL_END_DATE EXPO_PUBLIC_OPENWEATHERMAP_API_KEY
+Starting project at d:\dev\ikomasai-erp-2026
+Starting Metro Bundler
+Waiting on http://localhost:8085
+Logs for your project will appear below.
+Web Bundled 1305ms index.js (735 modules)
+ LOG  [web] Logs will appear in the browser console
+Web Bundled 15ms index.js (1 module)
+Web .\index.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 13ms index.js (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 17ms index.js (1 module)
+Web Bundled 21ms index.js (1 module)
+ LOG  [web] Logs will appear in the browser console
+It looks like you're trying to use TypeScript but don't have the required
+dependencies installed. Installing typescript@~5.9.2, @types/react@~19.1.10
+- Installing typescript@~5.9.2, @types/react@~19.1.10
+
+Web Bundled 16ms index.js (1 module)
+Web Bundled 14ms index.js (1 module)
+ LOG  [web] Logs will appear in the browser console
+ LOG  [web] Logs will appear in the browser console
+› Installing 2 other packages using npm
+- Installing typescript@~5.9.2, @types/react@~19.1.10
+› Using ~5.9.2 instead of ~5.9.2 for typescript and ~19.1.10 instead of ~19.1.10 for @types/react because these versions was explicitly provided. Packages excluded from dependency validation should be listed in expo.install.exclude in package.json. Learn more: https://docs.expo.dev/more/expo-cli/#configuring-dependency-validation
+- Installing typescript@~5.9.2, @types/react@~19.1.10
+> npm install
+- Installing typescript@~5.9.2, @types/react@~19.1.10
+Unable to resolve "@supabase/functions-js" from "node_modules\@supabase\supabase-js\dist\index.mjs"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { [33mFunctionRegion[39m[33m,[39m [33mFunctionsClient[39m[33m,[39m [33mFunctionsError[39m[33m,[39m [33mFunctionsFetchError[39m[33m,[39m [33mFunctionsHttpError[39m[33m,[39m [33mFunctionsRelayError[39m } [36mfrom[39m [32m"@supabase/functions-js"[39m[33m;[39m
+ [90m   |[39m                                                                                                                                [31m[1m^[22m[39m
+ [90m 2 |[39m [36mimport[39m { [33mPostgrestClient[39m[33m,[39m [33mPostgrestError[39m } [36mfrom[39m [32m"@supabase/postgrest-js"[39m[33m;[39m
+ [90m 3 |[39m [36mimport[39m { [33mRealtimeClient[39m } [36mfrom[39m [32m"@supabase/realtime-js"[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { [33mStorageClient[39m } [36mfrom[39m [32m"@supabase/storage-js"[39m[33m;[39m[0m
+
+Import stack:
+
+ node_modules\@supabase\supabase-js\dist\index.mjs
+ | import "@supabase/functions-js"
+
+ src\services\supabase\client.js
+ | import "@supabase/supabase-js"
+
+ src\services\supabase\authService.js
+ | import "./client.js"
+
+ src\shared\contexts\AuthContext.js
+ | import "../../services/supabase/authService.js"
+
+ App.js
+ | import "./src/shared/contexts/AuthContext"
+
+ index.js
+ | import "./App"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+
+added 95 packages, removed 46 packages, changed 98 packages, and audited 775 packages in 27s
+
+69 packages are looking for funding
+  run `npm fund` for details
+
+3 vulnerabilities (1 moderate, 2 high)
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+√ Installed typescript@~5.9.2, @types/react@~19.1.10
+Unable to resolve "expo" from "index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m { registerRootComponent } [36mfrom[39m [32m'expo'[39m[33m;[39m
+ [90m   |[39m                                        [31m[1m^[22m[39m
+ [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m [33mApp[39m [36mfrom[39m [32m'./App'[39m[33m;[39m
+ [90m 4 |[39m [36mimport[39m { registerServiceWorker } [36mfrom[39m [32m'./src/shared/utils/serviceWorker'[39m[33m;[39m[0m
+
+Import stack:
+
+ index.js
+ | import "expo"
+
+ 
+ | import "./index"
+
+Unable to resolve "@react-navigation/native" from "node_modules\@react-navigation\native-stack\lib\module\navigators\createNativeStackNavigator.js"
+[0m [90m 1 |[39m [32m"use strict"[39m[33m;[39m
+ [90m 2 |[39m
+[31m[1m>[22m[39m[90m 3 |[39m [36mimport[39m { createNavigatorFactory[33m,[39m [33mStackActions[39m[33m,[39m [33mStackRouter[39m[33m,[39m useNavigationBuilder } [36mfrom[39m [32m'@react-navigation/native'[39m[33m;[39m
+ [90m   |[39m                                                                                          [31m[1m^[22m[39m
+ [90m 4 |[39m [36mimport[39m [33m*[39m [36mas[39m [33mReact[39m [36mfrom[39m [32m'react'[39m[33m;[39m
+ [90m 5 |[39m [36mimport[39m { [33mNativeStackView[39m } [36mfrom[39m [32m'../views/NativeStackView'[39m[33m;[39m
+ [90m 6 |[39m [36mimport[39m { jsx [36mas[39m _jsx } [36mfrom[39m [32m"react/jsx-runtime"[39m[33m;[39m[0m
+
+Import stack:
+
+ node_modules\@react-navigation\native-stack\lib\module\navigators\createNativeStackNavigator.js
+ | import "@react-navigation/native"
+
+ node_modules\@react-navigation\native-stack\lib\module\index.js
+ | import "./navigators/createNativeStackNavigator.js"
+
+ src\navigation\AppNavigator.jsx
+ | import "@react-navigation/native-stack"
+
+ App.js
+ | import "./src/navigation/AppNavigator"
+
+ index.js
+ | import "./App"
+
+ 
+ | import "./index"
+
+d:\dev\ikomasai-erp-2026\node_modules\expo\node_modules\@expo\cli\build\src\utils\errors.js:130
+    throw error;
+    ^
+
+Error: ENOENT: no such file or directory, watch 'd:\dev\ikomasai-erp-2026\node_modules\.concurrently-iwBUeUJq'
+    at FSWatcher.<computed> (node:internal/fs/watchers:247:19)
+    at Object.watch (node:fs:2550:36)
+    at FallbackWatcher._watchdir (d:\dev\ikomasai-erp-2026\node_modules\metro-file-map\src\watchers\FallbackWatcher.js:119:33)
+    at d:\dev\ikomasai-erp-2026\node_modules\metro-file-map\src\watchers\FallbackWatcher.js:219:22
+    at Walker.<anonymous> (d:\dev\ikomasai-erp-2026\node_modules\metro-file-map\src\watchers\FallbackWatcher.js:358:5)
+    at Walker.emit (node:events:518:28)
+    at d:\dev\ikomasai-erp-2026\node_modules\walker\lib\walker.js:69:16
+    at FSReqCallback.oncomplete (node:fs:188:23) {
+  errno: -4058,
+  syscall: 'watch',
+  code: 'ENOENT',
+  path: 'd:\\dev\\ikomasai-erp-2026\\node_modules\\.concurrently-iwBUeUJq',
+  filename: 'd:\\dev\\ikomasai-erp-2026\\node_modules\\.concurrently-iwBUeUJq'
+}
+
+Node.js v22.14.0
