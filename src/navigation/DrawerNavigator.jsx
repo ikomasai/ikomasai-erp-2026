@@ -61,7 +61,7 @@ const createWrappedScreen = (ScreenComponent, screenName) => {
 
 /* Error Boundaryでラップした画面コンポーネント */
 const WrappedEventsStallsList01Screen = createWrappedScreen(EventsStallsList01Screen, '企画・屋台一覧');
-const WrappedItem2Screen = createWrappedScreen(Item2Screen, '項目2');
+const WrappedItem2Screen = createWrappedScreen(Item2Screen, '厚生部呼び出し');
 const WrappedItem3Screen = createWrappedScreen(Item3Screen, '項目3');
 const WrappedItem4Screen = createWrappedScreen(Item4Screen, '落とし物検索');
 const WrappedItem5Screen = createWrappedScreen(Item5Screen, '項目5');
@@ -106,7 +106,7 @@ const DrawerNavigator = () => {
         component={WrappedEventsStallsList01Screen}
         options={{ title: '企画・屋台一覧' }}
       />
-      <Drawer.Screen name="Item2" component={WrappedItem2Screen} />
+      <Drawer.Screen name="Item2" component={WrappedItem2Screen} options={{ title: '厚生部呼び出し' }} />
       <Drawer.Screen name="Item3" component={WrappedItem3Screen} />
       <Drawer.Screen name="Item4" component={WrappedItem4Screen} options={{ title: '落とし物検索' }} />
       <Drawer.Screen name="Item5" component={WrappedItem5Screen} />

@@ -21,6 +21,7 @@
     "@supabase/supabase-js": "^2.89.0",
     "expo": "^54.0.30",
     "expo-location": "^19.0.8",
+    "expo-sqlite": "^55.0.10",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -36,7 +37,7 @@
   "private": true,
   "devDependencies": {
     "@types/react": "~19.1.10",
-    "typescript": "~5.9.2",
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "typescript": "~5.9.2"
   }
 }
