@@ -3,11 +3,7 @@
  */
 
 import { getSupabaseClient } from '../../../services/supabase/client';
-import {
-  ITEM2_CALL_STATUSES,
-  ITEM2_CALL_TYPES,
-  ITEM2_SYSTEM_MESSAGES,
-} from '../constants';
+import { ITEM2_CALL_STATUSES, ITEM2_CALL_TYPES } from '../constants';
 
 /**
  * 配列値を uuid 配列へ正規化する
@@ -15,7 +11,6 @@ import {
  * @returns {Array<string>} 正規化後の配列
  */
 const normalizeUserIdArray = (value) => {
-  /** 正規化済み配列 */
   const normalizedValue = Array.isArray(value)
     ? value.filter((item) => typeof item === 'string' && item.length > 0)
     : [];
@@ -24,23 +19,44 @@ const normalizeUserIdArray = (value) => {
 };
 
 /**
+ * schema cache エラーから不足カラム名を抽出する
+ * @param {unknown} error - エラー
+ * @returns {string|null} 不足カラム名
+ */
+const extractMissingColumnName = (error) => {
+  const errorMessage = error?.message ?? error?.details ?? '';
+  if (typeof errorMessage !== 'string') {
+    return null;
+  }
+
+  const matched = errorMessage.match(/Could not find the '([^']+)' column of 'item2_calls'/);
+  return matched?.[1] ?? null;
+};
+
+/**
+ * 呼び出し登録を実行する
+ * @param {Object} payload - 登録内容
+ * @returns {Promise<Object>} 登録結果
+ */
+const performInsertItem2Call = async (payload) => {
+  const supabase = getSupabaseClient();
+  return supabase
+    .from('item2_calls')
+    .insert(payload)
+    .select('*')
+    .single();
+};
+
+/**
  * 呼び出しデータを UI 向けに整形する
  * @param {Object} row - DB レコード
  * @returns {Object} 整形済みデータ
  */
 const mapCallRow = (row) => {
-  /** チャットルーム情報 */
-  const room = Array.isArray(row?.item2_chat_rooms) ? row.item2_chat_rooms[0] : row?.item2_chat_rooms;
-
   return {
     ...row,
     assigned_to: normalizeUserIdArray(row?.assigned_to),
-    room: room
-      ? {
-          ...room,
-          assigned_to: normalizeUserIdArray(room?.assigned_to),
-        }
-      : null,
+    requester_roles: Array.isArray(row?.requester_roles) ? row.requester_roles : [],
   };
 };
 
@@ -52,92 +68,71 @@ const mapCallRow = (row) => {
  */
 export const selectItem2Calls = async ({ emergencyOnly = false } = {}) => {
   try {
-    /** Supabase クライアント */
     const supabase = getSupabaseClient();
-    /** クエリビルダー */
     let query = supabase
       .from('item2_calls')
-      .select(`
-        *,
-        item2_chat_rooms (
-          id,
-          call_id,
-          assigned_to,
-          last_message_preview,
-          last_message_at,
-          created_at,
-          updated_at
-        )
-      `)
+      .select('*')
       .order('created_at', { ascending: false });
 
     if (emergencyOnly) {
       query = query.eq('call_type', ITEM2_CALL_TYPES.EMERGENCY);
     }
 
-    /** クエリ結果 */
     const { data, error } = await query;
 
     if (error) {
       return { calls: [], error };
     }
 
-    return { calls: (data ?? []).map(mapCallRow), error: null };
+    const rawCalls = data ?? [];
+    const requesterUserIds = Array.from(new Set(rawCalls.map((callItem) => callItem.requester_user_id).filter(Boolean)));
+    let requesterRolesMap = new Map();
+
+    if (requesterUserIds.length > 0) {
+      const requesterRolesResult = await supabase
+        .from('user_roles')
+        .select(`
+          user_id,
+          roles (
+            id,
+            name,
+            display_name
+          )
+        `)
+        .in('user_id', requesterUserIds);
+
+      if (requesterRolesResult.error) {
+        return { calls: [], error: requesterRolesResult.error };
+      }
+
+      requesterRolesMap = (requesterRolesResult.data ?? []).reduce((roleMap, item) => {
+        const userId = item?.user_id;
+        const role = Array.isArray(item?.roles) ? item.roles[0] : item?.roles;
+
+        if (!userId || !role?.id) {
+          return roleMap;
+        }
+
+        const existingRoles = roleMap.get(userId) ?? [];
+        if (existingRoles.some((existingRole) => existingRole.id === role.id)) {
+          return roleMap;
+        }
+
+        roleMap.set(userId, [...existingRoles, role]);
+        return roleMap;
+      }, new Map());
+    }
+
+    const calls = rawCalls.map((callItem) => {
+      return mapCallRow({
+        ...callItem,
+        requester_roles: requesterRolesMap.get(callItem.requester_user_id) ?? [],
+      });
+    });
+
+    return { calls, error: null };
   } catch (error) {
     return { calls: [], error };
-  }
-};
-
-/**
- * チャットルームを保証する
- * @param {string} callId - 呼び出しID
- * @returns {Promise<Object>} ルーム情報
- */
-export const ensureItem2ChatRoom = async (callId) => {
-  try {
-    /** Supabase クライアント */
-    const supabase = getSupabaseClient();
-    /** 既存ルーム取得結果 */
-    const existingResult = await supabase
-      .from('item2_chat_rooms')
-      .select('*')
-      .eq('call_id', callId)
-      .maybeSingle();
-
-    if (existingResult.error) {
-      return { room: null, error: existingResult.error };
-    }
-
-    if (existingResult.data) {
-      return {
-        room: {
-          ...existingResult.data,
-          assigned_to: normalizeUserIdArray(existingResult.data.assigned_to),
-        },
-        error: null,
-      };
-    }
-
-    /** 新規作成結果 */
-    const insertResult = await supabase
-      .from('item2_chat_rooms')
-      .insert({ call_id: callId, assigned_to: [] })
-      .select('*')
-      .single();
-
-    if (insertResult.error) {
-      return { room: null, error: insertResult.error };
-    }
-
-    return {
-      room: {
-        ...insertResult.data,
-        assigned_to: normalizeUserIdArray(insertResult.data.assigned_to),
-      },
-      error: null,
-    };
-  } catch (error) {
-    return { room: null, error };
   }
 };
 
@@ -148,68 +143,28 @@ export const ensureItem2ChatRoom = async (callId) => {
  */
 export const insertItem2Call = async (payload) => {
   try {
-    /** Supabase クライアント */
-    const supabase = getSupabaseClient();
-    /** 呼び出し登録結果 */
-    const insertResult = await supabase
-      .from('item2_calls')
-      .insert(payload)
-      .select('*')
-      .single();
+    let insertPayload = { ...payload };
+    let insertResult = await performInsertItem2Call(insertPayload);
+
+    // マイグレーション未反映の環境でも最低限の呼び出し作成を継続する
+    while (insertResult.error) {
+      const missingColumnName = extractMissingColumnName(insertResult.error);
+      if (!missingColumnName || !(missingColumnName in insertPayload)) {
+        break;
+      }
+
+      const { [missingColumnName]: _, ...nextPayload } = insertPayload;
+      insertPayload = nextPayload;
+      insertResult = await performInsertItem2Call(insertPayload);
+    }
 
     if (insertResult.error) {
-      return { call: null, room: null, error: insertResult.error };
+      return { call: null, error: insertResult.error };
     }
 
-    /** 作成された呼び出し */
-    const createdCall = insertResult.data;
-    /** ルーム作成結果 */
-    const roomResult = await ensureItem2ChatRoom(createdCall.id);
-
-    if (roomResult.error) {
-      return { call: createdCall, room: null, error: roomResult.error };
-    }
-
-    if (payload.call_type === ITEM2_CALL_TYPES.NON_URGENT && payload.purpose === 'その他') {
-      await supabase.from('item2_chat_rooms').update({
-        last_message_preview: ITEM2_SYSTEM_MESSAGES.OTHER_PURPOSE,
-        last_message_at: new Date().toISOString(),
-      }).eq('id', roomResult.room.id);
-    }
-
-    return { call: mapCallRow({ ...createdCall, item2_chat_rooms: roomResult.room }), room: roomResult.room, error: null };
+    return { call: mapCallRow(insertResult.data), error: null };
   } catch (error) {
-    return { call: null, room: null, error };
-  }
-};
-
-/**
- * チャット対応者を更新する
- * @param {string} roomId - ルームID
- * @param {Array<string>} assignedTo - 担当者一覧
- * @returns {Promise<Object>} 更新結果
- */
-export const updateItem2ChatAssignees = async (roomId, assignedTo) => {
-  try {
-    /** Supabase クライアント */
-    const supabase = getSupabaseClient();
-    /** 正規化済み担当者一覧 */
-    const normalizedAssignedTo = normalizeUserIdArray(assignedTo);
-    /** 更新結果 */
-    const { data, error } = await supabase
-      .from('item2_chat_rooms')
-      .update({ assigned_to: normalizedAssignedTo, updated_at: new Date().toISOString() })
-      .eq('id', roomId)
-      .select('*')
-      .single();
-
-    if (error) {
-      return { room: null, error };
-    }
-
-    return { room: { ...data, assigned_to: normalizeUserIdArray(data.assigned_to) }, error: null };
-  } catch (error) {
-    return { room: null, error };
+    return { call: null, error };
   }
 };
 
@@ -223,17 +178,30 @@ export const updateItem2ChatAssignees = async (roomId, assignedTo) => {
  */
 export const updateItem2CallAssignees = async ({ callId, assignedTo, actorId = null }) => {
   try {
-    /** Supabase クライアント */
     const supabase = getSupabaseClient();
-    /** 正規化済み対応者一覧 */
     const normalizedAssignedTo = normalizeUserIdArray(assignedTo);
-    /** 更新オブジェクト */
+    const { data: currentCall, error: currentCallError } = await supabase
+      .from('item2_calls')
+      .select('status')
+      .eq('id', callId)
+      .single();
+
+    if (currentCallError) {
+      return { call: null, error: currentCallError };
+    }
+
     const updates = {
       assigned_to: normalizedAssignedTo,
       updated_at: new Date().toISOString(),
     };
 
-    /** 更新結果 */
+    if (
+      normalizedAssignedTo.length > 0
+      && currentCall?.status === ITEM2_CALL_STATUSES.UNHANDLED
+    ) {
+      updates.status = ITEM2_CALL_STATUSES.IN_PROGRESS;
+    }
+
     const { data, error } = await supabase
       .from('item2_calls')
       .update(updates)
@@ -256,7 +224,7 @@ export const updateItem2CallAssignees = async ({ callId, assignedTo, actorId = n
       });
     }
 
-    return { call: { ...data, assigned_to: normalizeUserIdArray(data.assigned_to) }, error: null };
+    return { call: mapCallRow(data), error: null };
   } catch (error) {
     return { call: null, error };
   }
@@ -272,9 +240,7 @@ export const updateItem2CallAssignees = async ({ callId, assignedTo, actorId = n
  */
 export const updateItem2CallStatus = async ({ callId, status, resolvedBy = null }) => {
   try {
-    /** Supabase クライアント */
     const supabase = getSupabaseClient();
-    /** 更新内容 */
     const updates = {
       status,
       updated_at: new Date().toISOString(),
@@ -285,7 +251,6 @@ export const updateItem2CallStatus = async ({ callId, status, resolvedBy = null 
       updates.resolved_by = resolvedBy;
     }
 
-    /** 更新結果 */
     const { data, error } = await supabase
       .from('item2_calls')
       .update(updates)
@@ -297,7 +262,7 @@ export const updateItem2CallStatus = async ({ callId, status, resolvedBy = null 
       return { call: null, error };
     }
 
-    return { call: { ...data, assigned_to: normalizeUserIdArray(data.assigned_to) }, error: null };
+    return { call: mapCallRow(data), error: null };
   } catch (error) {
     return { call: null, error };
   }
@@ -309,11 +274,8 @@ export const updateItem2CallStatus = async ({ callId, status, resolvedBy = null 
  */
 export const selectItem2StaffUsers = async () => {
   try {
-    /** Supabase クライアント */
     const supabase = getSupabaseClient();
-    /** 対象ロール名 */
     const targetRoleNames = ['厚生部', '管理者'];
-    /** 対象ロール取得結果 */
     const targetRolesResult = await supabase
       .from('roles')
       .select('id, name, display_name')
@@ -327,16 +289,13 @@ export const selectItem2StaffUsers = async () => {
       return { users: [], error: targetRolesResult.error };
     }
 
-    /** 対象ロール一覧 */
     const targetRoles = targetRolesResult.data ?? [];
-    /** 対象ロールID一覧 */
     const targetRoleIds = targetRoles.map((role) => role.id);
 
     if (targetRoleIds.length === 0) {
       return { users: [], error: null };
     }
 
-    /** 厚生部所属ユーザー取得結果 */
     const userRoleResult = await supabase
       .from('user_roles')
       .select('user_id, role_id')
@@ -346,14 +305,12 @@ export const selectItem2StaffUsers = async () => {
       return { users: [], error: userRoleResult.error };
     }
 
-    /** ユーザーID一覧 */
     const userIds = Array.from(new Set((userRoleResult.data ?? []).map((item) => item.user_id)));
 
     if (userIds.length === 0) {
       return { users: [], error: null };
     }
 
-    /** プロフィール取得結果 */
     const profileResult = await supabase
       .from('user_profiles')
       .select('user_id, name, organization')
@@ -363,7 +320,6 @@ export const selectItem2StaffUsers = async () => {
       return { users: [], error: profileResult.error };
     }
 
-    /** 全ロール取得結果 */
     const allRolesResult = await supabase
       .from('user_roles')
       .select(`
@@ -380,19 +336,15 @@ export const selectItem2StaffUsers = async () => {
       return { users: [], error: allRolesResult.error };
     }
 
-    /** プロフィールマップ */
     const profileMap = new Map((profileResult.data ?? []).map((item) => [item.user_id, item]));
-    /** ユーザーロールマップ */
     const roleMap = new Map();
 
     (allRolesResult.data ?? []).forEach((item) => {
-      /** ロール情報 */
       const role = Array.isArray(item?.roles) ? item.roles[0] : item?.roles;
       if (!item?.user_id || !role?.id) {
         return;
       }
 
-      /** 既存ロール一覧 */
       const existingRoles = roleMap.get(item.user_id) ?? [];
       if (existingRoles.some((existingRole) => existingRole.id === role.id)) {
         return;
@@ -401,7 +353,6 @@ export const selectItem2StaffUsers = async () => {
       roleMap.set(item.user_id, [...existingRoles, role]);
     });
 
-    /** ユーザー一覧 */
     const users = userIds.map((userId) => {
       return {
         id: userId,

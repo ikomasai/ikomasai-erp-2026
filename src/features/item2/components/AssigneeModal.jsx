@@ -2,8 +2,16 @@
  * 対応者モーダル
  */
 
-import React from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useTheme } from '../../../shared/hooks/useTheme';
 
 /**
@@ -24,17 +32,55 @@ const withAlpha = (hexColor, alphaHex) => {
  * @param {Object} props - プロパティ
  * @returns {JSX.Element} モーダル
  */
+const normalizeText = (value) => {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+};
+
 const AssigneeModal = ({ visible, title, users, selectedUserIds, onToggleUser, onClose, onConfirm }) => {
   /** テーマ */
   const { theme } = useTheme();
+  const [searchText, setSearchText] = useState('');
+
+  useEffect(() => {
+    if (!visible) {
+      setSearchText('');
+    }
+  }, [visible]);
+
+  const filteredUsers = useMemo(() => {
+    const normalizedSearchText = normalizeText(searchText);
+
+    if (!normalizedSearchText) {
+      return users ?? [];
+    }
+
+    return (users ?? []).filter((user) => {
+      const targetText = normalizeText(`${user.name ?? ''} ${user.organization ?? ''}`);
+      return targetText.includes(normalizedSearchText);
+    });
+  }, [searchText, users]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={[styles.modalCard, { backgroundColor: theme.background, borderColor: theme.border }]}> 
           <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
+          <TextInput
+            value={searchText}
+            onChangeText={setSearchText}
+            placeholder="名前で検索"
+            placeholderTextColor={theme.textSecondary}
+            style={[
+              styles.searchInput,
+              {
+                color: theme.text,
+                borderColor: theme.border,
+                backgroundColor: theme.surface,
+              },
+            ]}
+          />
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-            {(users ?? []).map((user) => {
+            {filteredUsers.map((user) => {
               /** 選択状態 */
               const isSelected = selectedUserIds.includes(user.id);
               return (
@@ -61,6 +107,9 @@ const AssigneeModal = ({ visible, title, users, selectedUserIds, onToggleUser, o
                 </TouchableOpacity>
               );
             })}
+            {filteredUsers.length === 0 ? (
+              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>該当する名前がありません。</Text>
+            ) : null}
           </ScrollView>
           <View style={styles.buttonRow}>
             <TouchableOpacity style={[styles.button, styles.cancelButton, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={onClose}>
@@ -97,6 +146,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 16,
     color: '#212121',
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    marginBottom: 14,
   },
   list: {
     maxHeight: 360,
@@ -139,6 +196,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: '#616161',
     fontSize: 12,
+  },
+  emptyText: {
+    fontSize: 13,
+    textAlign: 'center',
+    paddingVertical: 18,
   },
   buttonRow: {
     marginTop: 16,

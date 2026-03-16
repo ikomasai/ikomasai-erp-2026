@@ -23,6 +23,8 @@ const NAVIGATION_TARGET_BY_TYPE = {
   shift_change_rejected: { screen: 'JimuShift', tab: 'requestHistory' },
   /** シフトリマインド（マイシフトタブへ） */
   shift_reminder: { screen: 'JimuShift', tab: 'myShift' },
+  /** 厚生部呼び出し作成（対応一覧へ） */
+  item2_call_created: { screen: 'Item2', tab: 'list' },
 };
 
 /**
@@ -56,6 +58,8 @@ export const getNavigationButtonLabel = (type) => {
       return '申請履歴を確認する';
     case 'shift_reminder':
       return 'マイシフトを確認する';
+    case 'item2_call_created':
+      return '対応一覧を確認する';
     default:
       return '確認する';
   }

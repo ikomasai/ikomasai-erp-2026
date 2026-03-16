@@ -24,27 +24,20 @@ const formatDateTime = (value) => {
  * @param {Object} props - プロパティ
  * @returns {JSX.Element} カード
  */
-const CallCard = ({
-  callData,
-  isEmergencyMode = false,
-  chatAssigneeLabel,
-  responderLabel,
-  onOpenChat,
-  onOpenAssigneeSettingModal,
-  onOpenChatAssigneeModal,
-  onOpenResponderModal,
-}) => {
-  /** テーマ */
+const CallCard = ({ callData, isEmergencyMode = false, responderLabel, onOpenResponderModal, onResolveCall }) => {
   const { theme } = useTheme();
-  /** 緊急呼び出しかどうか */
   const isEmergency = callData.call_type === 'emergency';
-  /** 要約 */
-  const summaryText = callData.call_type === 'emergency'
-    ? (callData.detail || '状況未入力')
-    : (callData.purpose || callData.detail || '内容未入力');
+  const summaryText = callData.detail || callData.purpose || '内容未入力';
+  const requesterRolesText = Array.isArray(callData.requester_roles) && callData.requester_roles.length > 0
+    ? callData.requester_roles
+      .map((role) => role.display_name || role.name)
+      .filter(Boolean)
+      .join('、')
+    : 'なし';
+  const shouldShowActionRow = typeof onOpenResponderModal === 'function' || typeof onResolveCall === 'function';
 
   return (
-    <TouchableOpacity style={[styles.card, { backgroundColor: theme.surface, shadowOpacity: theme.shadowOpacity, borderColor: theme.border }]} onPress={() => onOpenChat(callData)} activeOpacity={0.85}>
+    <View style={[styles.card, { backgroundColor: theme.surface, shadowOpacity: theme.shadowOpacity, borderColor: theme.border }]}> 
       <View style={styles.topRow}>
         <View style={styles.topLeft}>
           <Text style={[styles.typeText, { color: theme.textSecondary }]}>{isEmergency ? '緊急' : '不急'}</Text>
@@ -54,43 +47,29 @@ const CallCard = ({
       <Text style={[styles.summaryText, { color: theme.text }]}>{summaryText}</Text>
       <Text style={[styles.metaText, { color: theme.textSecondary }]}>場所: {callData.location_text}</Text>
       <Text style={[styles.metaText, { color: theme.textSecondary }]}>呼び出し者: {callData.requester_name}</Text>
+      <Text style={[styles.metaText, { color: theme.textSecondary }]}>呼び出し者ロール: {requesterRolesText}</Text>
       <Text style={[styles.metaText, { color: theme.textSecondary }]}>時刻: {formatDateTime(callData.created_at)}</Text>
-      {!isEmergencyMode ? (
-        <View style={styles.assigneeRow}>
-          <View style={styles.assigneeTextBox}>
-            <Text style={[styles.assigneeTitle, { color: theme.textSecondary }]}>救護者</Text>
-            <Text style={[styles.assigneeValue, { color: theme.text }]}>{responderLabel}</Text>
-            <Text style={[styles.assigneeTitle, { color: theme.textSecondary }]}>チャット対応者</Text>
-            <Text style={[styles.assigneeValue, { color: theme.text }]}>{chatAssigneeLabel}</Text>
-          </View>
-          {typeof onOpenAssigneeSettingModal === 'function' ? (
-            <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.primaryVariant }]} onPress={() => onOpenAssigneeSettingModal(callData)}>
-              <Text style={styles.actionButtonText}>担当者設定</Text>
-            </TouchableOpacity>
-          ) : typeof onOpenChatAssigneeModal === 'function' ? (
-            <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.primaryVariant }]} onPress={() => onOpenChatAssigneeModal(callData)}>
-              <Text style={styles.actionButtonText}>担当者設定</Text>
-            </TouchableOpacity>
-          ) : null}
+      <View style={styles.assigneeRow}>
+        <View style={styles.assigneeTextBox}>
+          <Text style={[styles.assigneeTitle, { color: theme.textSecondary }]}>救護者</Text>
+          <Text style={[styles.assigneeValue, { color: theme.text }]}>{responderLabel}</Text>
         </View>
-      ) : (
-        <View style={styles.assigneeRow}>
-          <View style={styles.assigneeTextBox}>
-            <Text style={[styles.assigneeTitle, { color: theme.textSecondary }]}>救護者</Text>
-            <Text style={[styles.assigneeValue, { color: theme.text }]}>{responderLabel}</Text>
-          </View>
-          {typeof onOpenAssigneeSettingModal === 'function' ? (
-            <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.primaryVariant }]} onPress={() => onOpenAssigneeSettingModal(callData)}>
-              <Text style={styles.actionButtonText}>担当者設定</Text>
-            </TouchableOpacity>
-          ) : typeof onOpenResponderModal === 'function' ? (
+      </View>
+      {shouldShowActionRow ? (
+        <View style={styles.actionRow}>
+          {typeof onOpenResponderModal === 'function' ? (
             <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.primaryVariant }]} onPress={() => onOpenResponderModal(callData)}>
-              <Text style={styles.actionButtonText}>救護者設定</Text>
+              <Text style={styles.actionButtonText}>{isEmergencyMode ? '救護者設定' : '担当者設定'}</Text>
+            </TouchableOpacity>
+          ) : null}
+          {typeof onResolveCall === 'function' ? (
+            <TouchableOpacity style={[styles.resolveButton, { borderColor: theme.border }]} onPress={() => onResolveCall(callData)}>
+              <Text style={[styles.resolveButtonText, { color: theme.text }]}>対応終了</Text>
             </TouchableOpacity>
           ) : null}
         </View>
-      )}
-    </TouchableOpacity>
+      ) : null}
+    </View>
   );
 };
 
@@ -150,6 +129,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 2,
   },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
   actionButton: {
     backgroundColor: '#1565c0',
     borderRadius: 10,
@@ -158,6 +142,16 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  resolveButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  resolveButtonText: {
     fontWeight: '700',
     fontSize: 12,
   },
