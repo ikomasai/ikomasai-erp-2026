@@ -2,7 +2,7 @@
  * item2 メイン画面
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -33,7 +33,7 @@ import {
   updateItem2CallAssignees,
   updateItem2CallStatus,
 } from '../services/item2CallService';
-import { notifyItem2CallCreated } from '../services/item2NotificationService';
+import { notifyItem2CallCreated, notifyItem2ResponderAssigned } from '../services/item2NotificationService';
 
 const ITEM2_STAFF_ROLE_NAME = '厚生部';
 const ITEM2_ADMIN_ROLE_NAME = '管理者';
@@ -57,13 +57,20 @@ const ITEM2_SELF_COMMUNICATION_DISPLAY = {
   no: '不可能',
 };
 const ITEM2_CONDITION_OPTIONS = [
-  { label: '怪我(出血なし)', value: 'injury_without_bleeding' },
-  { label: '怪我(出血あり)', value: 'injury_with_bleeding' },
+  { label: '軽い怪我(擦り傷や打撲など)', value: 'injury_light' },
+  { label: '中程度の怪我(切り傷や捻挫など)', value: 'injury_medium' },
+  { label: '重度の怪我(転落や骨折など)', value: 'injury_severe' },
   { label: '体調不良', value: 'physical_condition' },
-  { label: '転倒・転落(出血あり)', value: 'fall_with_bleeding' },
-  { label: '転倒・転落(出血なし)', value: 'fall_without_bleeding' },
   { label: 'その他(様子がおかしい/震えているなど)', value: 'other' },
 ];
+const ITEM2_BLEEDING_PRESENCE_OPTIONS = [
+  { label: 'ある', value: 'yes' },
+  { label: 'ない', value: 'no' },
+];
+const ITEM2_BLEEDING_PRESENCE_DISPLAY = {
+  yes: 'あり',
+  no: 'なし',
+};
 const ITEM2_OTHER_PERSON_CONSCIOUSNESS_OPTIONS = [
   { label: 'ある', value: 'alert' },
   { label: '反応が弱い', value: 'weak' },
@@ -92,6 +99,7 @@ const ITEM2_SELF_MOBILITY_OPTIONS = [
 const ITEM2_SWELLING_STATUS_OPTIONS = [
   { label: '腫れている', value: 'swollen' },
   { label: '内出血がある', value: 'bruised' },
+  { label: 'ない', value: 'none' },
   { label: 'わからない', value: 'unknown' },
   { label: 'その他', value: 'other' },
 ];
@@ -126,6 +134,7 @@ const INITIAL_FORM_ANSWERS = {
   mobility: '',
   locationText: '',
   conditionCategory: '',
+  bleedingPresence: '',
   painLocation: '',
   swellingStatus: '',
   swellingStatusOther: '',
@@ -136,6 +145,7 @@ const INITIAL_FORM_ANSWERS = {
   symptoms: [],
   symptomsOther: '',
   conditionOtherText: '',
+  suppliesNeeded: '',
 };
 
 const isItem2TableMissingError = (error) => {
@@ -175,6 +185,8 @@ const buildSummaryText = (answers) => {
     pushSummaryLine('文字入力・選択', ITEM2_SELF_COMMUNICATION_DISPLAY[answers.selfCanUseText] ?? '');
   }
 
+  pushSummaryLine('必要なもの', answers.suppliesNeeded.trim());
+
   if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF && answers.selfCanUseText === 'no') {
     return summaryLines.join('\n');
   }
@@ -189,44 +201,31 @@ const buildSummaryText = (answers) => {
   const conditionLabel = findOptionLabel(ITEM2_CONDITION_OPTIONS, answers.conditionCategory);
 
   switch (answers.conditionCategory) {
-    case 'injury_without_bleeding': {
+    case 'injury_light':
+    case 'injury_medium':
+    case 'injury_severe': {
+      pushSummaryLine('状態', conditionLabel);
+      pushSummaryLine('出血', ITEM2_BLEEDING_PRESENCE_DISPLAY[answers.bleedingPresence] ?? '');
+
+      if (answers.bleedingPresence === 'yes') {
+        pushSummaryLine('出血部位', answers.bleedingLocation.trim());
+        pushSummaryLine('出血量', answers.bleedingAmount.trim());
+        return summaryLines.join('\n');
+      }
+
       const swellingLabel = answers.swellingStatus === 'other'
         ? answers.swellingStatusOther.trim()
         : findOptionLabel(ITEM2_SWELLING_STATUS_OPTIONS, answers.swellingStatus);
-      pushSummaryLine('状態', conditionLabel);
       pushSummaryLine('痛みの部位', answers.painLocation.trim());
       pushSummaryLine('腫れ・内出血', swellingLabel);
       return summaryLines.join('\n');
     }
-    case 'injury_with_bleeding':
-      pushSummaryLine('状態', conditionLabel);
-      pushSummaryLine('出血部位', answers.bleedingLocation.trim());
-      pushSummaryLine('出血量', answers.bleedingAmount.trim());
-      return summaryLines.join('\n');
     case 'physical_condition': {
       const symptomLabels = answers.symptoms.map((symptom) => {
         return symptom === 'other' ? answers.symptomsOther.trim() : findOptionLabel(ITEM2_SYMPTOM_OPTIONS, symptom);
       }).filter(Boolean);
       pushSummaryLine('状態', conditionLabel);
       pushSummaryLine('症状', symptomLabels.join('、'));
-      return summaryLines.join('\n');
-    }
-    case 'fall_with_bleeding': {
-      const currentStateLabel = answers.currentState === 'other'
-        ? answers.currentStateOther.trim()
-        : findOptionLabel(ITEM2_CURRENT_STATE_OPTIONS, answers.currentState);
-      pushSummaryLine('状態', conditionLabel);
-      pushSummaryLine('出血部位', answers.bleedingLocation.trim());
-      pushSummaryLine('出血量', answers.bleedingAmount.trim());
-      pushSummaryLine('現状', currentStateLabel);
-      return summaryLines.join('\n');
-    }
-    case 'fall_without_bleeding': {
-      const currentStateLabel = answers.currentState === 'other'
-        ? answers.currentStateOther.trim()
-        : findOptionLabel(ITEM2_CURRENT_STATE_OPTIONS, answers.currentState);
-      pushSummaryLine('状態', conditionLabel);
-      pushSummaryLine('現状', currentStateLabel);
       return summaryLines.join('\n');
     }
     case 'other':
@@ -287,7 +286,11 @@ const validateFormAnswers = (answers) => {
     return '傷病者の状態を選択してください。';
   }
 
-  if (answers.conditionCategory === 'injury_without_bleeding') {
+  if (['injury_light', 'injury_medium', 'injury_severe'].includes(answers.conditionCategory) && !answers.bleedingPresence) {
+    return '出血の有無を選択してください。';
+  }
+
+  if (['injury_light', 'injury_medium', 'injury_severe'].includes(answers.conditionCategory) && answers.bleedingPresence === 'no') {
     if (!answers.swellingStatus) {
       return '腫れや内出血等の状態を選択してください。';
     }
@@ -296,12 +299,6 @@ const validateFormAnswers = (answers) => {
   if (answers.conditionCategory === 'physical_condition') {
     if (answers.symptoms.length === 0) {
       return '体調不良の症状を1つ以上選択してください。';
-    }
-  }
-
-  if (['fall_with_bleeding', 'fall_without_bleeding'].includes(answers.conditionCategory)) {
-    if (!answers.currentState) {
-      return '現状どのような状態かを選択してください。';
     }
   }
 
@@ -315,12 +312,16 @@ const Item2Screen = ({ navigation, route }) => {
   const [viewMode, setViewMode] = useState(ITEM2_VIEW_MODES.CREATE);
   const [staffUsers, setStaffUsers] = useState([]);
   const [screenError, setScreenError] = useState('');
+  const [createFeedback, setCreateFeedback] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [callTypeFilter, setCallTypeFilter] = useState('all');
   const [formAnswers, setFormAnswers] = useState(INITIAL_FORM_ANSWERS);
   const [resolveConfirmCall, setResolveConfirmCall] = useState(null);
   const [isResolveSubmitting, setIsResolveSubmitting] = useState(false);
+  const isCreateSubmittingRef = useRef(false);
+  const createAttemptIdRef = useRef(0);
+  const settledCreateAttemptIdRef = useRef(0);
   const responderModal = useAssignees();
   const canAccessStaffViews = Boolean(
     userInfo?.roles?.some((role) => {
@@ -331,10 +332,15 @@ const Item2Screen = ({ navigation, route }) => {
 
   useEffect(() => {
     const requestedTab = route?.params?.initialTab;
+    if (canAccessStaffViews) {
+      setViewMode(ITEM2_VIEW_MODES.LIST);
+      return;
+    }
+
     if ([ITEM2_VIEW_MODES.CREATE, ITEM2_VIEW_MODES.LIST].includes(requestedTab)) {
       setViewMode(requestedTab);
     }
-  }, [route?.params?.initialTab]);
+  }, [canAccessStaffViews, route?.params?.initialTab]);
 
   useEffect(() => {
     const loadStaffUsers = async () => {
@@ -399,6 +405,7 @@ const Item2Screen = ({ navigation, route }) => {
       if (key === 'selfCanUseText' && value !== 'yes') {
         nextAnswers.mobility = '';
         nextAnswers.conditionCategory = '';
+        nextAnswers.bleedingPresence = '';
         nextAnswers.painLocation = '';
         nextAnswers.swellingStatus = '';
         nextAnswers.swellingStatusOther = '';
@@ -412,6 +419,7 @@ const Item2Screen = ({ navigation, route }) => {
       }
 
       if (key === 'conditionCategory') {
+        nextAnswers.bleedingPresence = '';
         nextAnswers.painLocation = '';
         nextAnswers.swellingStatus = '';
         nextAnswers.swellingStatusOther = '';
@@ -422,6 +430,19 @@ const Item2Screen = ({ navigation, route }) => {
         nextAnswers.symptoms = [];
         nextAnswers.symptomsOther = '';
         nextAnswers.conditionOtherText = '';
+      }
+
+      if (key === 'bleedingPresence') {
+        if (value !== 'yes') {
+          nextAnswers.bleedingLocation = '';
+          nextAnswers.bleedingAmount = '';
+        }
+
+        if (value !== 'no') {
+          nextAnswers.painLocation = '';
+          nextAnswers.swellingStatus = '';
+          nextAnswers.swellingStatusOther = '';
+        }
       }
 
       if (key === 'swellingStatus' && value !== 'other') {
@@ -465,6 +486,27 @@ const Item2Screen = ({ navigation, route }) => {
         if (result.error) {
           Alert.alert('エラー', buildItem2ErrorMessage(result.error, '救護者の更新に失敗しました。'));
           return;
+        }
+
+        const previousAssignedTo = Array.isArray(callData.assigned_to) ? callData.assigned_to : [];
+        const nextAssignedTo = Array.isArray(result.call?.assigned_to) ? result.call.assigned_to : [];
+        const hasResponderChanged = (
+          previousAssignedTo.length !== nextAssignedTo.length
+          || previousAssignedTo.some((userId) => !nextAssignedTo.includes(userId))
+        );
+        if (hasResponderChanged && nextAssignedTo.length > 0) {
+          const responderNames = nextAssignedTo.map((userId) => {
+            const matchedUser = staffUsers.find((userItem) => userItem.id === userId);
+            return matchedUser?.name ?? '設定済み';
+          });
+          const notificationResult = await notifyItem2ResponderAssigned({
+            callData: result.call,
+            responderNames,
+            senderUserId: user?.id ?? null,
+          });
+          if (notificationResult.error) {
+            console.error('厚生部呼び出しの対応者通知の送信に失敗しました:', notificationResult.error);
+          }
         }
 
         patchCall({ ...callData, ...result.call });
@@ -519,20 +561,48 @@ const Item2Screen = ({ navigation, route }) => {
   };
 
   const handleCreateCall = async () => {
-    if (!user?.id) {
-      setScreenError('ログイン状態を確認できません。');
+    if (isCreateSubmittingRef.current) {
       return;
     }
 
-    const validationError = validateFormAnswers(formAnswers);
-    if (validationError) {
-      setScreenError(validationError);
-      return;
-    }
+    isCreateSubmittingRef.current = true;
+    const attemptId = createAttemptIdRef.current + 1;
+    createAttemptIdRef.current = attemptId;
+
+    const setCreateFeedbackForAttempt = (nextFeedback, { settle = false } = {}) => {
+      if (createAttemptIdRef.current !== attemptId) {
+        return;
+      }
+
+      if (
+        nextFeedback?.type === 'error'
+        && settledCreateAttemptIdRef.current === attemptId
+      ) {
+        return;
+      }
+
+      if (settle) {
+        settledCreateAttemptIdRef.current = attemptId;
+      }
+
+      setCreateFeedback(nextFeedback);
+    };
 
     try {
+      if (!user?.id) {
+        setCreateFeedbackForAttempt({ type: 'error', message: 'ログイン状態を確認できません。' }, { settle: true });
+        return;
+      }
+
+      const validationError = validateFormAnswers(formAnswers);
+      if (validationError) {
+        setCreateFeedbackForAttempt({ type: 'error', message: validationError }, { settle: true });
+        return;
+      }
+
       setIsCreating(true);
-      setScreenError('');
+      settledCreateAttemptIdRef.current = 0;
+      setCreateFeedback(null);
 
       const summaryText = buildSummaryText(formAnswers);
       const payload = {
@@ -553,6 +623,7 @@ const Item2Screen = ({ navigation, route }) => {
           currentStateOther: formAnswers.currentStateOther.trim(),
           symptomsOther: formAnswers.symptomsOther.trim(),
           conditionOtherText: formAnswers.conditionOtherText.trim(),
+          suppliesNeeded: formAnswers.suppliesNeeded.trim(),
           summaryText,
         },
       };
@@ -560,7 +631,8 @@ const Item2Screen = ({ navigation, route }) => {
       const result = await insertItem2Call(payload);
 
       if (!result.call) {
-        setScreenError(buildItem2ErrorMessage(result.error, '呼び出し作成に失敗しました。'));
+        const errorMessage = buildItem2ErrorMessage(result.error, '呼び出し作成に失敗しました。');
+        setCreateFeedbackForAttempt({ type: 'error', message: errorMessage }, { settle: true });
         return;
       }
 
@@ -574,11 +646,23 @@ const Item2Screen = ({ navigation, route }) => {
 
       await refreshCalls();
       setFormAnswers(INITIAL_FORM_ANSWERS);
-      setViewMode(ITEM2_VIEW_MODES.LIST);
+      setScreenError('');
+      setCreateFeedbackForAttempt({ type: 'success', message: '呼び出しを作成しました。' }, { settle: true });
     } catch (error) {
-      setScreenError(buildItem2ErrorMessage(error, '呼び出し作成に失敗しました。'));
+      const errorMessage = buildItem2ErrorMessage(error, '呼び出し作成に失敗しました。');
+      setCreateFeedbackForAttempt({ type: 'error', message: errorMessage }, { settle: true });
     } finally {
+      isCreateSubmittingRef.current = false;
       setIsCreating(false);
+    }
+  };
+
+  const closeCreateFeedback = () => {
+    const currentFeedback = createFeedback;
+    setCreateFeedback(null);
+
+    if (currentFeedback?.type === 'success') {
+      setViewMode(ITEM2_VIEW_MODES.LIST);
     }
   };
 
@@ -727,34 +811,36 @@ const Item2Screen = ({ navigation, route }) => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}> 
       <ThemedHeader title={ITEM2_TITLES.HOME} navigation={navigation} />
-      <View style={styles.modeRow}>
-        <TouchableOpacity
-          style={[
-            styles.modeButton,
-            { backgroundColor: theme.surface, borderColor: theme.border },
-            viewMode === ITEM2_VIEW_MODES.CREATE ? [styles.modeButtonActive, { backgroundColor: theme.primaryVariant }] : null,
-          ]}
-          onPress={() => setViewMode(ITEM2_VIEW_MODES.CREATE)}
-        >
-          <Text style={[styles.modeButtonText, { color: theme.textSecondary }, viewMode === ITEM2_VIEW_MODES.CREATE ? styles.modeButtonTextActive : null]}>呼び出し</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.modeButton,
-            { backgroundColor: theme.surface, borderColor: theme.border },
-            viewMode === ITEM2_VIEW_MODES.LIST ? [styles.modeButtonActive, { backgroundColor: theme.primaryVariant }] : null,
-          ]}
-          onPress={() => setViewMode(ITEM2_VIEW_MODES.LIST)}
-        >
-          <Text style={[styles.modeButtonText, { color: theme.textSecondary }, viewMode === ITEM2_VIEW_MODES.LIST ? styles.modeButtonTextActive : null]}>
-            {canAccessStaffViews ? '対応一覧' : '履歴'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+      {!canAccessStaffViews ? (
+        <View style={styles.modeRow}>
+          <TouchableOpacity
+            style={[
+              styles.modeButton,
+              { backgroundColor: theme.surface, borderColor: theme.border },
+              viewMode === ITEM2_VIEW_MODES.CREATE ? [styles.modeButtonActive, { backgroundColor: theme.primaryVariant }] : null,
+            ]}
+            onPress={() => setViewMode(ITEM2_VIEW_MODES.CREATE)}
+          >
+            <Text style={[styles.modeButtonText, { color: theme.textSecondary }, viewMode === ITEM2_VIEW_MODES.CREATE ? styles.modeButtonTextActive : null]}>呼び出し</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.modeButton,
+              { backgroundColor: theme.surface, borderColor: theme.border },
+              viewMode === ITEM2_VIEW_MODES.LIST ? [styles.modeButtonActive, { backgroundColor: theme.primaryVariant }] : null,
+            ]}
+            onPress={() => setViewMode(ITEM2_VIEW_MODES.LIST)}
+          >
+            <Text style={[styles.modeButtonText, { color: theme.textSecondary }, viewMode === ITEM2_VIEW_MODES.LIST ? styles.modeButtonTextActive : null]}>
+              履歴
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {screenError ? <Text style={[styles.errorText, { color: theme.error }]}>{screenError}</Text> : null}
 
-      {viewMode === ITEM2_VIEW_MODES.CREATE ? (
+      {!canAccessStaffViews && viewMode === ITEM2_VIEW_MODES.CREATE ? (
         <ScrollView contentContainerStyle={styles.formContent}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>呼び出し作成</Text>
           {renderChoiceQuestion({
@@ -808,7 +894,14 @@ const Item2Screen = ({ navigation, route }) => {
             options: ITEM2_CONDITION_OPTIONS,
           }) : null}
 
-          {formAnswers.conditionCategory === 'injury_without_bleeding' ? (
+          {['injury_light', 'injury_medium', 'injury_severe'].includes(formAnswers.conditionCategory) ? renderChoiceQuestion({
+            title: '出血はありますか？',
+            value: formAnswers.bleedingPresence,
+            onChange: (value) => updateFormAnswer('bleedingPresence', value),
+            options: ITEM2_BLEEDING_PRESENCE_OPTIONS,
+          }) : null}
+
+          {['injury_light', 'injury_medium', 'injury_severe'].includes(formAnswers.conditionCategory) && formAnswers.bleedingPresence === 'no' ? (
             <>
               {renderTextQuestion({
                 title: `${conditionSubjectLabel}どこを痛がっていますか？`,
@@ -831,7 +924,7 @@ const Item2Screen = ({ navigation, route }) => {
             </>
           ) : null}
 
-          {['injury_with_bleeding', 'fall_with_bleeding'].includes(formAnswers.conditionCategory) ? (
+          {['injury_light', 'injury_medium', 'injury_severe'].includes(formAnswers.conditionCategory) && formAnswers.bleedingPresence === 'yes' ? (
             <>
               {renderTextQuestion({
                 title: 'どこから出血していますか？',
@@ -850,29 +943,19 @@ const Item2Screen = ({ navigation, route }) => {
 
           {formAnswers.conditionCategory === 'physical_condition' ? renderSymptomsQuestion() : null}
 
-          {['fall_with_bleeding', 'fall_without_bleeding'].includes(formAnswers.conditionCategory) ? (
-            <>
-              {renderChoiceQuestion({
-                title: '現状どのような状態ですか？',
-                value: formAnswers.currentState,
-                onChange: (value) => updateFormAnswer('currentState', value),
-                options: ITEM2_CURRENT_STATE_OPTIONS,
-              })}
-              {formAnswers.currentState === 'other' ? renderTextQuestion({
-                title: 'その他の状態を入力してください',
-                value: formAnswers.currentStateOther,
-                onChange: (value) => updateFormAnswer('currentStateOther', value),
-                placeholder: '例: 壁にもたれかかっている',
-              }) : null}
-            </>
-          ) : null}
-
           {formAnswers.conditionCategory === 'other' ? renderTextQuestion({
             title: 'その他の状態を入力してください',
             value: formAnswers.conditionOtherText,
             onChange: (value) => updateFormAnswer('conditionOtherText', value),
             placeholder: '例: 様子がおかしい、震えている',
             multiline: true,
+          }) : null}
+
+          {formAnswers.requesterRelation ? renderTextQuestion({
+            title: 'なにか必要なものはありますか？',
+            value: formAnswers.suppliesNeeded,
+            onChange: (value) => updateFormAnswer('suppliesNeeded', value),
+            placeholder: '例: 水、タオル、椅子',
           }) : null}
 
           {formAnswers.requesterRelation ? renderTextQuestion({
@@ -942,6 +1025,34 @@ const Item2Screen = ({ navigation, route }) => {
           </View>
         </View>
       </Modal>
+
+      {createFeedback ? (
+        <View style={styles.feedbackOverlay}>
+          <View style={styles.modalBackdrop}>
+            <View style={[styles.modalCard, { backgroundColor: theme.background, borderColor: theme.border }]}>
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: createFeedback.type === 'success' ? theme.primaryVariant : theme.error },
+                ]}
+              >
+                {createFeedback.type === 'success' ? '呼び出し成功' : '呼び出し失敗'}
+              </Text>
+              <Text style={[styles.modalMessage, { color: theme.text }]}>
+                {createFeedback.message}
+              </Text>
+              <View style={styles.modalButtonRow}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalConfirmButton, { backgroundColor: theme.primaryVariant }]}
+                  onPress={closeCreateFeedback}
+                >
+                  <Text style={styles.modalConfirmText}>閉じる</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 };
@@ -1088,6 +1199,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
+  },
+  feedbackOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
+    elevation: 1000,
   },
   modalCard: {
     width: '100%',

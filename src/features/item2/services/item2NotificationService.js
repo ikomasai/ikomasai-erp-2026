@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../../../services/supabase/client';
-import { sendNotificationToRoles } from '../../../shared/services/notificationService';
+import { sendNotificationToRoles, sendNotificationToUser } from '../../../shared/services/notificationService';
 import { ITEM2_CALL_TYPES } from '../constants';
 
 const ITEM2_STAFF_ROLE_NAME = '厚生部';
@@ -28,6 +28,12 @@ const buildItem2NotificationBody = (callData) => {
   return `${requesterName}さんから${urgencyLabel}の呼び出しが作成されました。場所: ${locationText}`;
 };
 
+const buildItem2ResponderAssignedBody = ({ callData, responderNames }) => {
+  const locationText = callData.location_text || '場所未入力';
+  const responderText = responderNames.length > 0 ? responderNames.join('、') : '未設定';
+  return `対応者が決まりました。救護者: ${responderText}。場所: ${locationText}`;
+};
+
 export const notifyItem2CallCreated = async ({ callData, senderUserId = null }) => {
   try {
     if (!callData?.id) {
@@ -54,6 +60,37 @@ export const notifyItem2CallCreated = async ({ callData, senderUserId = null }) 
         status: callData.status,
         requester_name: callData.requester_name,
         location_text: callData.location_text,
+      },
+      senderUserId,
+    );
+  } catch (error) {
+    return { notification: null, recipientsCount: 0, error };
+  }
+};
+
+export const notifyItem2ResponderAssigned = async ({
+  callData,
+  responderNames = [],
+  senderUserId = null,
+}) => {
+  try {
+    if (!callData?.id || !callData?.requester_user_id) {
+      return { notification: null, recipientsCount: 0, error: new Error('呼び出しデータが不正です') };
+    }
+
+    return sendNotificationToUser(
+      callData.requester_user_id,
+      '厚生部呼び出し',
+      buildItem2ResponderAssignedBody({ callData, responderNames }),
+      {
+        type: 'item2_responder_assigned',
+        call_id: callData.id,
+        call_type: callData.call_type,
+        status: callData.status,
+        requester_name: callData.requester_name,
+        location_text: callData.location_text,
+        assigned_to: Array.isArray(callData.assigned_to) ? callData.assigned_to : [],
+        responder_names: responderNames,
       },
       senderUserId,
     );

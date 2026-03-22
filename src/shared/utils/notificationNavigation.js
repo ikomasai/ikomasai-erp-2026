@@ -25,6 +25,8 @@ const NAVIGATION_TARGET_BY_TYPE = {
   shift_reminder: { screen: 'JimuShift', tab: 'myShift' },
   /** 厚生部呼び出し作成（対応一覧へ） */
   item2_call_created: { screen: 'Item2', tab: 'list' },
+  /** 厚生部呼び出しの対応者設定（呼び出し履歴/対応一覧へ） */
+  item2_responder_assigned: { screen: 'Item2', tab: 'list' },
 };
 
 /**
@@ -60,6 +62,8 @@ export const getNavigationButtonLabel = (type) => {
       return 'マイシフトを確認する';
     case 'item2_call_created':
       return '対応一覧を確認する';
+    case 'item2_responder_assigned':
+      return '呼び出し状況を確認する';
     default:
       return '確認する';
   }
