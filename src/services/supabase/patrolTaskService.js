@@ -102,10 +102,17 @@ export const listPatrolTasks = async ({
 
     const normalizedAssignedTo = normalizeText(assignedTo);
     if (normalizedAssignedTo) {
+      // 緊急対応タスクは担当者フィルタに関わらず常に表示する。
+      // それ以外のタスクは「未割当または自分が担当」に限定する。
       if (includeUnassigned) {
-        query = query.or(`assigned_to.is.null,assigned_to.eq.${normalizedAssignedTo}`);
+        query = query.or(
+          `task_type.eq.${PATROL_TASK_TYPES.EMERGENCY_SUPPORT},assigned_to.is.null,assigned_to.eq.${normalizedAssignedTo}`
+        );
       } else {
-        query = query.eq('assigned_to', normalizedAssignedTo);
+        // includeUnassigned=false の場合も緊急対応は除外しない
+        query = query.or(
+          `task_type.eq.${PATROL_TASK_TYPES.EMERGENCY_SUPPORT},assigned_to.eq.${normalizedAssignedTo}`
+        );
       }
     }
 

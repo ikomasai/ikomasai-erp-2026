@@ -336,6 +336,72 @@ export const sendNotificationToRoleNames = async (roleNames, title, body, metada
 };
 
 /**
+ * 指定組織に所属するロール名一覧のユーザーへ通知を送信
+ * @param {Object} input - 送信パラメータ
+ * @param {string|null|undefined} input.organizationId - 対象組織ID
+ * @param {string[]|undefined} input.organizationIds - 対象組織ID一覧
+ * @param {string|null|undefined} input.organizationName - 対象組織名
+ * @param {string[]|undefined} input.organizationNames - 対象組織名一覧
+ * @param {string[]} input.roleNames - 通知先ロール名一覧
+ * @param {string} input.title - 通知タイトル
+ * @param {string} input.body - 通知本文
+ * @param {Object} [input.metadata={}] - 通知メタデータ
+ * @param {string|null} [input.senderUserId=null] - 送信者ユーザーID
+ * @returns {Promise<Object>} notification, recipientsCount, error
+ */
+export const sendNotificationToOrganizationRoleNames = async ({
+  organizationId = null,
+  organizationIds = [],
+  organizationName = null,
+  organizationNames = [],
+  roleNames,
+  title,
+  body,
+  metadata = {},
+  senderUserId = null,
+}) => {
+  try {
+    if (!Array.isArray(roleNames) || roleNames.length === 0) {
+      return { notification: null, recipientsCount: 0, error: new Error('通知先ロール名が未指定です') };
+    }
+
+    /** 正規化済み組織ID一覧 */
+    const normalizedOrganizationIds = [organizationId, ...(organizationIds || [])].filter(Boolean);
+    /** 正規化済み組織名一覧 */
+    const normalizedOrganizationNames = [organizationName, ...(organizationNames || [])].filter(Boolean);
+
+    if (normalizedOrganizationIds.length === 0 && normalizedOrganizationNames.length === 0) {
+      return { notification: null, recipientsCount: 0, error: new Error('通知先組織が未指定です') };
+    }
+
+    const { data, error } = await dispatchNotification({
+      targetType: 'roles',
+      roleNames,
+      organizationIds: normalizedOrganizationIds,
+      organizationNames: normalizedOrganizationNames,
+      title,
+      body,
+      metadata,
+      senderUserId,
+    });
+
+    if (error) {
+      return { notification: null, recipientsCount: 0, error };
+    }
+
+    emitNotificationUpdate();
+    return {
+      notification: { id: data?.notificationId ?? '' },
+      recipientsCount: data?.recipientsCount ?? 0,
+      push: data?.push ?? null,
+      error: null,
+    };
+  } catch (error) {
+    return { notification: null, recipientsCount: 0, error };
+  }
+};
+
+/**
  * 自分宛ての通知一覧を取得
  * @param {string} userId
  * @returns {Promise<Object>} items, error

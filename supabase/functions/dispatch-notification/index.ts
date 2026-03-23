@@ -9,6 +9,10 @@ interface DispatchPayload {
   userId?: string;
   roleIds?: string[];
   roleNames?: string[];
+  organizationId?: string;
+  organizationIds?: string[];
+  organizationName?: string;
+  organizationNames?: string[];
   title: string;
   body: string;
   metadata?: Record<string, unknown>;
@@ -69,34 +73,6 @@ const INTERNAL_NOTIFY_TOKEN = Deno.env.get('INTERNAL_NOTIFY_TOKEN');
 const PUSH_NOTIFICATION_ICON = '/icons/icon-192.png';
 const PUSH_NOTIFICATION_BADGE = '/icons/icon-192.png';
 const PUSH_TTL_SECONDS = 60 * 60 * 24;
-const ADMIN_ROLE_NAMES = ['管理者', 'Admin', 'Administrator', '祭実長', '部長', '事務部', '実長', '渉外部'];
-const PATROL_ASSIGN_ROLE_NAMES = [
-  '企画管理部',
-  '本部',
-  'HQ',
-  'Headquarters',
-  '管理者',
-  'Admin',
-  'Administrator',
-];
-const SUPPORT_USER_NOTIFICATION_EVENTS = ['message_created', 'status_changed'];
-const SUPPORT_ROLE_NAME_TARGETS = {
-  hq: ['企画管理部', '本部', 'HQ', 'Headquarters', '管理者', 'Admin', 'Administrator'],
-  accounting: ['会計部', '会計', 'Accounting', '管理者', 'Admin', 'Administrator'],
-  property: ['物品部', '物品', 'Property', '管理者', 'Admin', 'Administrator'],
-  patrol: [
-    '警備部',
-    '巡回',
-    'Patrol',
-    '企画管理部',
-    '本部',
-    'HQ',
-    'Headquarters',
-    '管理者',
-    'Admin',
-    'Administrator',
-  ],
-} as const;
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-notify-token',
@@ -137,17 +113,6 @@ const uniqueValues = (values: string[]) => {
 };
 
 /**
- * 役割名配列が指定候補を含むか判定する
- * @param {string[]} actualRoleNames - ユーザーの役割名一覧
- * @param {string[]} expectedRoleNames - 判定対象の役割名一覧
- * @returns {boolean} 含む場合はtrue
- */
-const hasAnyRoleName = (actualRoleNames: string[], expectedRoleNames: string[]) => {
-  const actualSet = new Set(uniqueValues(actualRoleNames));
-  return uniqueValues(expectedRoleNames).some((roleName) => actualSet.has(roleName));
-};
-
-/**
  * 通知認可エラーの調査に必要なメタデータだけを抽出する
  * @param {Record<string, unknown> | undefined} metadata - 通知メタデータ
  * @returns {Record<string, unknown>} ログ用メタデータ
@@ -162,6 +127,30 @@ const pickAuthorizationMetadata = (metadata?: Record<string, unknown>) => {
     notifyTarget: normalizeText(metadata?.notify_target) || null,
     status: normalizeText(metadata?.status) || null,
   };
+};
+
+/**
+ * 組織ID一覧を正規化する
+ * @param {DispatchPayload} payload - 送信リクエスト
+ * @returns {string[]} 正規化済み組織ID一覧
+ */
+const getNormalizedOrganizationIds = (payload: DispatchPayload) => {
+  return uniqueValues([
+    ...(payload.organizationIds ?? []),
+    normalizeText(payload.organizationId),
+  ]);
+};
+
+/**
+ * 組織名一覧を正規化する
+ * @param {DispatchPayload} payload - 送信リクエスト
+ * @returns {string[]} 正規化済み組織名一覧
+ */
+const getNormalizedOrganizationNames = (payload: DispatchPayload) => {
+  return uniqueValues([
+    ...(payload.organizationNames ?? []),
+    normalizeText(payload.organizationName),
+  ]);
 };
 
 /**
@@ -326,38 +315,6 @@ const summarizeSubscriptionsForLog = (
 };
 
 /**
- * 通知認可ログを出力する
- * @param {string} label - ログ識別子
- * @param {Record<string, unknown>} detail - ログ詳細
- * @returns {void}
- */
-const logAuthorizationDebug = (label: string, detail: Record<string, unknown>) => {
-  console.warn(`[dispatch-notification] ${label}`, detail);
-};
-
-/**
- * 連絡案件に紐づく許可ロール名一覧を返す
- * @param {string} ticketType - 連絡案件種別
- * @param {string} notifyTarget - 通知先種別
- * @returns {string[]} 許可ロール名一覧
- */
-const getRoleNamesForTicket = (ticketType: string, notifyTarget: string) => {
-  if (ticketType === 'start_report' || ticketType === 'end_report' || ticketType === 'emergency') {
-    return uniqueValues([
-      ...SUPPORT_ROLE_NAME_TARGETS.hq,
-      ...SUPPORT_ROLE_NAME_TARGETS.patrol,
-    ]);
-  }
-  if (notifyTarget === 'accounting') {
-    return SUPPORT_ROLE_NAME_TARGETS.accounting;
-  }
-  if (notifyTarget === 'property') {
-    return SUPPORT_ROLE_NAME_TARGETS.property;
-  }
-  return SUPPORT_ROLE_NAME_TARGETS.hq;
-};
-
-/**
  * Supabaseサービスロールクライアントを作成する
  * @returns {import('@supabase/supabase-js').SupabaseClient} Supabaseクライアント
  */
@@ -398,57 +355,6 @@ const getBearerToken = (request: Request) => {
 };
 
 /**
- * 管理者系ロールを持つか判定する
- * targetType=user の通知（個人宛て）はこのロールのみ送信可能
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} userId - ユーザーID
- * @returns {Promise<boolean>} 送信権限がある場合true
- */
-const isAdminSender = async (supabase: ReturnType<typeof createServiceClient>, userId: string) => {
-  const senderRoleNames = await selectUserRoleNames(supabase, userId);
-  return hasAnyRoleName(senderRoleNames, ADMIN_ROLE_NAMES);
-};
-
-/**
- * 指定ユーザーの役割名一覧を取得する
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} userId - ユーザーID
- * @returns {Promise<string[]>} 役割名一覧
- */
-const selectUserRoleNames = async (
-  supabase: ReturnType<typeof createServiceClient>,
-  userId: string
-): Promise<string[]> => {
-  const normalizedUserId = normalizeText(userId);
-  if (!normalizedUserId) {
-    return [];
-  }
-
-  const { data, error } = await supabase
-    .from('user_roles')
-    .select('roles!inner(name,display_name)')
-    .eq('user_id', normalizedUserId);
-
-  if (error) {
-    console.error('user role fetch error:', error);
-    throw new Error('Failed to resolve user roles');
-  }
-
-  const roleNames = (data ?? []).flatMap((row) => {
-    const roles = Array.isArray(row.roles) ? row.roles : row.roles ? [row.roles] : [];
-    return roles.flatMap((role) => [normalizeText(role.name), normalizeText(role.display_name)]);
-  });
-
-  return uniqueValues(roleNames);
-};
-
-/**
- * 連絡案件の権限判定に必要な最小情報を取得する
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} ticketId - 連絡案件ID
- * @returns {Promise<{id: string; created_by: string | null; ticket_type: string | null; notify_target: string | null} | null>} 連絡案件
- */
-/**
  * ロール名一覧からロールID一覧を解決する
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
  * @param {string[] | undefined} roleNames - ロール名一覧
@@ -483,185 +389,81 @@ const selectRoleIdsByNames = async (
   );
 };
 
-const selectSupportTicketForAuthorization = async (
+/**
+ * 組織名一覧から組織ID一覧を解決する
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
+ * @param {string[] | undefined} organizationNames - 組織名一覧
+ * @returns {Promise<string[]>} 組織ID一覧
+ */
+const selectOrganizationIdsByNames = async (
   supabase: ReturnType<typeof createServiceClient>,
-  ticketId: string
-) => {
-  const normalizedTicketId = normalizeText(ticketId);
-  if (!normalizedTicketId) {
-    return null;
+  organizationNames?: string[]
+): Promise<string[]> => {
+  const normalizedOrganizationNames = uniqueValues(organizationNames ?? []);
+  if (normalizedOrganizationNames.length === 0) {
+    return [];
   }
 
   const { data, error } = await supabase
-    .from('support_tickets')
-    .select('id,created_by,ticket_type,notify_target')
-    .eq('id', normalizedTicketId)
-    .single();
+    .from('organizations')
+    .select('id,name,code');
 
   if (error) {
-    console.error('support ticket auth lookup error:', error);
-    throw new Error('Failed to resolve support ticket');
+    console.error('organization fetch error:', error);
+    throw new Error('Failed to resolve organizations');
   }
 
-  return data;
+  return uniqueValues(
+    (data ?? [])
+      .filter((organization) => {
+        const organizationName = normalizeText(organization.name);
+        const organizationCode = normalizeText(organization.code);
+        return (
+          normalizedOrganizationNames.includes(organizationName) ||
+          normalizedOrganizationNames.includes(organizationCode)
+        );
+      })
+      .map((organization) => organization.id)
+  );
 };
 
 /**
- * 巡回タスクの権限判定に必要な最小情報を取得する
+ * 組織所属でユーザー一覧を絞り込む
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} taskId - 巡回タスクID
- * @returns {Promise<{id: string; assigned_to: string | null} | null>} 巡回タスク
+ * @param {string[]} userIds - 候補ユーザーID一覧
+ * @param {string[]} organizationIds - 対象組織ID一覧
+ * @returns {Promise<string[]>} 組織所属に一致したユーザーID一覧
  */
-const selectPatrolTaskForAuthorization = async (
+const filterUserIdsByOrganizationIds = async (
   supabase: ReturnType<typeof createServiceClient>,
-  taskId: string
+  userIds: string[],
+  organizationIds: string[]
 ) => {
-  const normalizedTaskId = normalizeText(taskId);
-  if (!normalizedTaskId) {
-    return null;
+  const normalizedUserIds = uniqueValues(userIds);
+  const normalizedOrganizationIds = uniqueValues(organizationIds);
+
+  if (normalizedUserIds.length === 0 || normalizedOrganizationIds.length === 0) {
+    return normalizedUserIds;
   }
 
   const { data, error } = await supabase
-    .from('patrol_tasks')
-    .select('id,assigned_to')
-    .eq('id', normalizedTaskId)
-    .single();
+    .from('user_organizations')
+    .select('user_id')
+    .in('user_id', normalizedUserIds)
+    .in('organization_id', normalizedOrganizationIds);
 
   if (error) {
-    console.error('patrol task auth lookup error:', error);
-    throw new Error('Failed to resolve patrol task');
+    console.error('user organization resolve error:', error);
+    throw new Error('Failed to resolve organization users');
   }
 
-  return data;
-};
-
-/**
- * 連絡案件由来の個人宛て通知を許可できるか判定する
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} senderUserId - 送信者ユーザーID
- * @param {string} targetUserId - 宛先ユーザーID
- * @param {Record<string, unknown> | undefined} metadata - 通知メタデータ
- * @returns {Promise<boolean>} 許可できる場合true
- */
-const canSendSupportUserNotification = async (
-  supabase: ReturnType<typeof createServiceClient>,
-  senderUserId: string,
-  targetUserId: string,
-  metadata?: Record<string, unknown>
-) => {
-  if (normalizeText(metadata?.source) !== 'support_ticket') {
-    return false;
-  }
-
-  const event = normalizeText(metadata?.event);
-  if (!SUPPORT_USER_NOTIFICATION_EVENTS.includes(event)) {
-    return false;
-  }
-
-  const ticket = await selectSupportTicketForAuthorization(
-    supabase,
-    normalizeText(metadata?.ticket_id)
-  );
-  if (!ticket) {
-    return false;
-  }
-
-  const ticketCreatorId = normalizeText(ticket.created_by);
-  const relatedRoleNames = getRoleNamesForTicket(
-    normalizeText(ticket.ticket_type),
-    normalizeText(ticket.notify_target)
-  );
-  const [senderRoleNames, targetRoleNames] = await Promise.all([
-    selectUserRoleNames(supabase, senderUserId),
-    selectUserRoleNames(supabase, targetUserId),
-  ]);
-
-  const senderAllowed =
-    normalizeText(senderUserId) === ticketCreatorId || hasAnyRoleName(senderRoleNames, relatedRoleNames);
-  const targetAllowed =
-    normalizeText(targetUserId) === ticketCreatorId || hasAnyRoleName(targetRoleNames, relatedRoleNames);
-
-  if (!senderAllowed || !targetAllowed) {
-    logAuthorizationDebug('support-user-notification-denied', {
-      senderUserId: normalizeText(senderUserId) || null,
-      targetUserId: normalizeText(targetUserId) || null,
-      ticketCreatorId: ticketCreatorId || null,
-      senderRoleNames,
-      targetRoleNames,
-      relatedRoleNames,
-      metadata: pickAuthorizationMetadata(metadata),
-    });
-  }
-
-  return senderAllowed && targetAllowed;
-};
-
-/**
- * 巡回割当の個人宛て通知を許可できるか判定する
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} senderUserId - 送信者ユーザーID
- * @param {string} targetUserId - 宛先ユーザーID
- * @param {Record<string, unknown> | undefined} metadata - 通知メタデータ
- * @returns {Promise<boolean>} 許可できる場合true
- */
-const canSendPatrolAssignmentNotification = async (
-  supabase: ReturnType<typeof createServiceClient>,
-  senderUserId: string,
-  targetUserId: string,
-  metadata?: Record<string, unknown>
-) => {
-  if (normalizeText(metadata?.source) !== 'patrol_task' || normalizeText(metadata?.event) !== 'assigned') {
-    return false;
-  }
-
-  const task = await selectPatrolTaskForAuthorization(supabase, normalizeText(metadata?.task_id));
-  if (!task || normalizeText(task.assigned_to) !== normalizeText(targetUserId)) {
-    return false;
-  }
-
-  const senderRoleNames = await selectUserRoleNames(supabase, senderUserId);
-  const senderAllowed = hasAnyRoleName(senderRoleNames, PATROL_ASSIGN_ROLE_NAMES);
-
-  if (!senderAllowed) {
-    logAuthorizationDebug('patrol-assignment-notification-denied', {
-      senderUserId: normalizeText(senderUserId) || null,
-      targetUserId: normalizeText(targetUserId) || null,
-      senderRoleNames,
-      requiredRoleNames: PATROL_ASSIGN_ROLE_NAMES,
-      metadata: pickAuthorizationMetadata(metadata),
-    });
-  }
-
-  return senderAllowed;
-};
-
-/**
- * 管理部統合システムの業務イベントで許可される個人宛て通知か判定する
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} senderUserId - 送信者ユーザーID
- * @param {string} targetUserId - 宛先ユーザーID
- * @param {Record<string, unknown> | undefined} metadata - 通知メタデータ
- * @returns {Promise<boolean>} 許可できる場合true
- */
-const isWorkflowUserNotificationAllowed = async (
-  supabase: ReturnType<typeof createServiceClient>,
-  senderUserId: string,
-  targetUserId: string,
-  metadata?: Record<string, unknown>
-) => {
-  if (
-    await canSendSupportUserNotification(supabase, senderUserId, targetUserId, metadata)
-  ) {
-    return true;
-  }
-
-  return canSendPatrolAssignmentNotification(supabase, senderUserId, targetUserId, metadata);
+  return uniqueValues((data ?? []).map((item) => item.user_id));
 };
 
 /**
  * 呼び出し元を認証し送信者情報を返す
- * - targetType=roles: 認証済みユーザー全員に許可（企画者からの連絡案件通知に対応）
- * - targetType=user: 管理者ロール、または管理部統合システムの許可済み業務イベントのみ許可
+ * - targetType=roles: 認証済みユーザー全員に許可
+ * - targetType=user: 宛先 userId が指定されていれば常に個人通知を許可
  * @param {Request} request - リクエスト
  * @param {DispatchPayload} payload - リクエストボディ
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
@@ -698,11 +500,18 @@ const authenticateRequester = async (
     throw new Error('Invalid user token');
   }
 
-  // targetType=roles（ロール宛て）は認証済みユーザー全員に許可（企画者からの通知に対応）
-  // targetType=user（個人宛て）は管理者ロール、または許可済み業務イベントのみ許可
+  const normalizedSenderUserId = normalizeText(user.id);
+
+  if (payload.targetType === 'user') {
+    const normalizedTargetUserId = normalizeText(payload.userId);
+    if (!normalizedTargetUserId) {
+      throw new Error('userId is required');
+    }
+  }
+
   return {
     type: 'user',
-    senderUserId: user.id,
+    senderUserId: normalizedSenderUserId,
   };
 };
 
@@ -742,8 +551,27 @@ const resolveRecipients = async (
     throw new Error('Failed to resolve role users');
   }
 
-  const recipients = new Set((data ?? []).map((item) => item.user_id));
-  return Array.from(recipients);
+  /** ロール解決で得た候補ユーザーID一覧 */
+  const roleRecipientUserIds = uniqueValues((data ?? []).map((item) => item.user_id));
+  /** 組織IDフィルタ一覧 */
+  const organizationIds = getNormalizedOrganizationIds(payload);
+  /** 組織名フィルタ一覧 */
+  const organizationNames = getNormalizedOrganizationNames(payload);
+
+  if (organizationIds.length === 0 && organizationNames.length === 0) {
+    return roleRecipientUserIds;
+  }
+
+  /** 組織名から解決した組織ID一覧 */
+  const resolvedOrganizationIds = await selectOrganizationIdsByNames(supabase, organizationNames);
+  /** 送信対象の組織ID一覧 */
+  const filteredOrganizationIds = uniqueValues([...organizationIds, ...resolvedOrganizationIds]);
+
+  if (filteredOrganizationIds.length === 0) {
+    return [];
+  }
+
+  return filterUserIdsByOrganizationIds(supabase, roleRecipientUserIds, filteredOrganizationIds);
 };
 
 /**
@@ -1061,12 +889,11 @@ Deno.serve(async (request) => {
         targetType: payload.targetType,
         roleIds: uniqueValues(payload.roleIds ?? []),
         roleNames: uniqueValues(payload.roleNames ?? []),
+        organizationIds: getNormalizedOrganizationIds(payload),
+        organizationNames: getNormalizedOrganizationNames(payload),
         metadata: metadataSummary,
         error: message,
       });
-      if (message === 'Forbidden') {
-        return createJsonResponse({ error: message }, 403);
-      }
       return createJsonResponse({ error: message }, 401);
     }
 
@@ -1087,6 +914,8 @@ Deno.serve(async (request) => {
         targetType: payload.targetType,
         roleIds: uniqueValues(payload.roleIds ?? []),
         roleNames: uniqueValues(payload.roleNames ?? []),
+        organizationIds: getNormalizedOrganizationIds(payload),
+        organizationNames: getNormalizedOrganizationNames(payload),
         metadata: metadataSummary,
       });
       return createJsonResponse({ error: '送信先ユーザーが見つかりません' }, 400);
@@ -1099,6 +928,8 @@ Deno.serve(async (request) => {
       targetType: payload.targetType,
       roleIds: uniqueValues(payload.roleIds ?? []),
       roleNames: uniqueValues(payload.roleNames ?? []),
+      organizationIds: getNormalizedOrganizationIds(payload),
+      organizationNames: getNormalizedOrganizationNames(payload),
       recipients: recipientEntries,
       title: payload.title.trim(),
       metadata: metadataSummary,

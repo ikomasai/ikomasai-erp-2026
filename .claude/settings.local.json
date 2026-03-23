@@ -57,7 +57,8 @@
       "WebFetch(domain:firebase.google.com)",
       "WebFetch(domain:docs.expo.dev)",
       "WebFetch(domain:reactnative.dev)",
-      "Bash(grep -r \"useEffect\" /Users/yuki_hamuro/Documents/GitHub/ikomasai-erp-2026/src/features/01_Events* --include=\"*.jsx\" -A 5)"
+      "Bash(grep -r \"useEffect\" /Users/yuki_hamuro/Documents/GitHub/ikomasai-erp-2026/src/features/01_Events* --include=\"*.jsx\" -A 5)",
+      "Bash(grep -n \"その他タブのScrollViewエリア\\\\|!\\(isHQRole && activeTab === ''tickets''\\)\" src/features/support/components/SupportDeskScreen.jsx)"
     ],
     "deny": [
       "Read(.env)",

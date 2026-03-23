@@ -1,0 +1,183 @@
+ INFO  Accepting connections at http://localhost:4173
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 13 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /_expo/static/js/web/index-9254373019e743718874f8f978c6a95f.js
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 7 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /service-worker.js
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 2 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /assets/assets/fonts/Ionicons.b4eb097d35f44ed943676fd56f6bdc51.ttf
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /assets/assets/fonts/MaterialCommunityIcons.6e435534bd35da5fef04168860a9b8fa.ttf
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /index.html
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 301 in 0 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /manifest.json
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 304 in 3 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /index
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 301 in 0 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 5 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /icons/icon-192.png
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 3 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 304 in 2 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 10 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 4 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /icons/icon-512.png
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /icons/icon-180.png
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 15 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:04 127.0.0.1 GET /_expo/static/js/web/index-9254373019e743718874f8f978c6a95f.js
+ HTTP  2026/3/23 22:54:04 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /service-worker.js
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /assets/assets/fonts/Ionicons.b4eb097d35f44ed943676fd56f6bdc51.ttf
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /assets/assets/fonts/MaterialCommunityIcons.6e435534bd35da5fef04168860a9b8fa.ttf
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /index.html
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 301 in 0 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /manifest.json
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /icons/icon-192.png
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /index
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 301 in 0 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 304 in 0 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /icons/icon-512.png
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /icons/icon-180.png
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 22:54:05 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/23 22:54:51 127.0.0.1 GET /assets/assets/icons/bell.6d244035d4c3c8feb3495cf93019c3b6.png
+ HTTP  2026/3/23 22:54:51 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:05:12 127.0.0.1 GET /
+ HTTP  2026/3/23 23:05:12 127.0.0.1 Returned 200 in 2 ms
+ HTTP  2026/3/23 23:05:12 127.0.0.1 GET /_expo/static/js/web/index-de10a200fe0ec103502546db4f602770.js
+ HTTP  2026/3/23 23:05:12 127.0.0.1 Returned 200 in 5 ms
+ HTTP  2026/3/23 23:05:12 127.0.0.1 GET /service-worker.js
+ HTTP  2026/3/23 23:05:12 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /assets/assets/fonts/Ionicons.b4eb097d35f44ed943676fd56f6bdc51.ttf
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /assets/assets/fonts/MaterialCommunityIcons.6e435534bd35da5fef04168860a9b8fa.ttf
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 200 in 3 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /index.html
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 301 in 1 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /manifest.json
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /index
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 301 in 0 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /icons/icon-192.png
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /icons/icon-512.png
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /icons/icon-180.png
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 200 in 8 ms
+ HTTP  2026/3/23 23:05:13 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 23:05:13 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/23 23:05:53 127.0.0.1 GET /assets/assets/icons/bell.6d244035d4c3c8feb3495cf93019c3b6.png
+ HTTP  2026/3/23 23:05:53 127.0.0.1 Returned 200 in 2 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /?sw_screen=Item15&sw_tab=tickets
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /_expo/static/js/web/index-de10a200fe0ec103502546db4f602770.js
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /service-worker.js
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /assets/assets/fonts/Ionicons.b4eb097d35f44ed943676fd56f6bdc51.ttf
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /assets/assets/fonts/MaterialCommunityIcons.6e435534bd35da5fef04168860a9b8fa.ttf
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /index.html
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 301 in 0 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /manifest.json
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /index
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 301 in 0 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 304 in 0 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /icons/icon-192.png
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /icons/icon-512.png
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /icons/icon-180.png
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:58 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 23:06:58 127.0.0.1 Returned 304 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /?sw_screen=Item14&sw_tab=tickets
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /_expo/static/js/web/index-de10a200fe0ec103502546db4f602770.js
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /service-worker.js
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /assets/assets/fonts/Ionicons.b4eb097d35f44ed943676fd56f6bdc51.ttf
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /assets/assets/fonts/MaterialCommunityIcons.6e435534bd35da5fef04168860a9b8fa.ttf
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /index.html
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 301 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /manifest.json
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /index
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 301 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 304 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /icons/icon-192.png
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /icons/icon-512.png
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /icons/icon-180.png
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/23 23:06:59 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/23 23:06:59 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/23 23:07:20 127.0.0.1 GET /assets/assets/icons/bell.6d244035d4c3c8feb3495cf93019c3b6.png
+ HTTP  2026/3/23 23:07:20 127.0.0.1 Returned 200 in 1 ms
+ HTTP  2026/3/24 1:01:05 127.0.0.1 GET /assets/assets/icons/bell.6d244035d4c3c8feb3495cf93019c3b6.png
+ HTTP  2026/3/24 1:01:05 127.0.0.1 Returned 200 in 8 ms
+ HTTP  2026/3/24 1:04:52 127.0.0.1 GET /
+ HTTP  2026/3/24 1:04:52 127.0.0.1 Returned 200 in 3 ms
+ HTTP  2026/3/24 1:04:52 127.0.0.1 GET /_expo/static/js/web/index-bfb64a3913ac2cbad6304a4a420477cc.js
+ HTTP  2026/3/24 1:04:52 127.0.0.1 Returned 200 in 5 ms
+ HTTP  2026/3/24 1:04:52 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/24 1:04:52 127.0.0.1 Returned 304 in 2 ms
+ HTTP  2026/3/24 1:04:52 127.0.0.1 GET /assets/assets/fonts/Ionicons.b4eb097d35f44ed943676fd56f6bdc51.ttf
+ HTTP  2026/3/24 1:04:52 127.0.0.1 GET /assets/assets/fonts/MaterialCommunityIcons.6e435534bd35da5fef04168860a9b8fa.ttf
+ HTTP  2026/3/24 1:04:52 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/24 1:04:52 127.0.0.1 Returned 304 in 3 ms
+ HTTP  2026/3/24 1:04:53 127.0.0.1 GET /assets/assets/icons/bell.6d244035d4c3c8feb3495cf93019c3b6.png
+ HTTP  2026/3/24 1:04:53 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/24 1:06:33 127.0.0.1 GET /
+ HTTP  2026/3/24 1:06:33 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/24 1:06:33 127.0.0.1 GET /_expo/static/js/web/index-bfb64a3913ac2cbad6304a4a420477cc.js
+ HTTP  2026/3/24 1:06:33 127.0.0.1 Returned 200 in 0 ms
+ HTTP  2026/3/24 1:06:33 127.0.0.1 GET /favicon.ico
+ HTTP  2026/3/24 1:06:33 127.0.0.1 Returned 304 in 0 ms
+ HTTP  2026/3/24 1:06:33 127.0.0.1 GET /assets/assets/fonts/Ionicons.b4eb097d35f44ed943676fd56f6bdc51.ttf
+ HTTP  2026/3/24 1:06:33 127.0.0.1 Returned 304 in 0 ms
+ HTTP  2026/3/24 1:06:33 127.0.0.1 GET /assets/assets/fonts/MaterialCommunityIcons.6e435534bd35da5fef04168860a9b8fa.ttf
+ HTTP  2026/3/24 1:06:33 127.0.0.1 Returned 304 in 1 ms
+ HTTP  2026/3/24 1:06:34 127.0.0.1 GET /assets/assets/icons/bell.6d244035d4c3c8feb3495cf93019c3b6.png
+ HTTP  2026/3/24 1:06:34 127.0.0.1 Returned 304 in 0 ms

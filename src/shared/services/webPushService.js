@@ -173,13 +173,21 @@ export const initializeWebPushSubscription = async (userId) => {
       return { enabled: false, error: null };
     }
 
+    registerServiceWorker();
+    const existingServiceWorkerRegistration = await navigator.serviceWorker.ready;
+    const existingSubscription = await existingServiceWorkerRegistration.pushManager.getSubscription();
+
+    if (existingSubscription) {
+      await savePushSubscription(existingSubscription);
+      return { enabled: Notification.permission === 'granted', error: null };
+    }
+
     const hasPermission = await requestNotificationPermissionIfNeeded(userId);
     if (!hasPermission) {
       return { enabled: false, error: null };
     }
 
-    registerServiceWorker();
-    const serviceWorkerRegistration = await navigator.serviceWorker.ready;
+    const serviceWorkerRegistration = existingServiceWorkerRegistration;
 
     let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
     if (!subscription) {

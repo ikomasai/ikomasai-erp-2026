@@ -256,6 +256,39 @@ const resolveNotificationPermission = async (requestPermission) => {
  * @param {boolean} [params.requestPermission=false] - 許可ダイアログを表示するか
  * @returns {Promise<{enabled: boolean, state: string, message: string}>} 再同期結果
  */
+const buildPermissionStateSnapshot = () => {
+  if (!canUseWebPush()) {
+    return {
+      enabled: false,
+      state: WEB_PUSH_SYNC_STATES.UNSUPPORTED,
+      message: '',
+    };
+  }
+
+  if (Notification.permission === 'granted') {
+    return {
+      enabled: true,
+      state: WEB_PUSH_SYNC_STATES.ENABLED,
+      message: '',
+    };
+  }
+
+  if (Notification.permission === 'denied') {
+    return {
+      enabled: false,
+      state: WEB_PUSH_SYNC_STATES.PERMISSION_DENIED,
+      message:
+        'ブラウザ通知がブロックされています。ブラウザ設定で通知を許可した後、再読み込みしてください。',
+    };
+  }
+
+  return {
+    enabled: false,
+    state: WEB_PUSH_SYNC_STATES.PERMISSION_REQUIRED,
+    message: '後ほど PWA で通知を受け取るには、ブラウザ通知の許可が必要です。',
+  };
+};
+
 export const syncWebPushSubscription = async ({ userId, requestPermission = false }) => {
   try {
     /** 正常なユーザーIDかどうか */
@@ -275,6 +308,14 @@ export const syncWebPushSubscription = async ({ userId, requestPermission = fals
         state: WEB_PUSH_SYNC_STATES.UNSUPPORTED,
         message: '',
       };
+    }
+
+    const existingRegistration = await ensureServiceWorkerRegistration();
+    const existingSubscription = await existingRegistration.pushManager.getSubscription();
+
+    if (existingSubscription) {
+      await savePushSubscription(existingSubscription);
+      return buildPermissionStateSnapshot();
     }
 
     /** 通知権限の確認結果 */

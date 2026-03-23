@@ -4,7 +4,7 @@
  * state管理とAPI呼び出しを担当し、子コンポーネントへpropsを渡す
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -281,6 +281,19 @@ const Item16Screen = ({ navigation, route }) => {
     userId: user?.id,
     enabled: Boolean(user?.id),
   });
+  /** 通知送信前に現在ブラウザの Push 購読を再同期する */
+  const syncPushSubscriptionBeforeNotify = useCallback(async () => {
+    if (Platform.OS !== 'web' || !user?.id) {
+      return null;
+    }
+
+    try {
+      return await pushNotice.refreshPushSubscription(false);
+    } catch (error) {
+      console.error('Push購読同期エラー:', error);
+      return null;
+    }
+  }, [pushNotice.refreshPushSubscription, user?.id]);
 
   // 画面切替
   const [activeTab, setActiveTab] = useState(
@@ -495,6 +508,8 @@ const Item16Screen = ({ navigation, route }) => {
     }
 
     const executeClose = async () => {
+      await syncPushSubscriptionBeforeNotify();
+
       setIsClosingLatestContact(true);
       const result = await updateTicketStatus({
         ticketId: selectedContact.id,
@@ -1150,6 +1165,8 @@ const Item16Screen = ({ navigation, route }) => {
         showMessage('送信エラー', 'ログイン情報が取得できません。再ログインしてください。');
         return;
       }
+
+      await syncPushSubscriptionBeforeNotify();
 
       setIsSubmitting(true);
 

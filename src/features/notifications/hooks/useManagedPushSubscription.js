@@ -36,7 +36,11 @@ export const useManagedPushSubscription = ({ navigation, userId, enabled = true 
       if (!enabled || Platform.OS !== 'web') {
         setPushState(WEB_PUSH_SYNC_STATES.UNSUPPORTED);
         setPushMessage('');
-        return;
+        return {
+          enabled: false,
+          state: WEB_PUSH_SYNC_STATES.UNSUPPORTED,
+          message: '',
+        };
       }
 
       setIsSyncingPush(true);
@@ -48,6 +52,7 @@ export const useManagedPushSubscription = ({ navigation, userId, enabled = true 
       setIsSyncingPush(false);
       setPushState(result.state);
       setPushMessage(result.message);
+      return result;
     },
     [enabled, userId]
   );
