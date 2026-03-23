@@ -6,6 +6,7 @@
 import {
   getUserProfilesByIds,
   sendNotificationToRoleNames as dispatchNotificationToRoleNames,
+  sendNotificationToOrganization,
   sendNotificationToUser,
 } from '../../shared/services/notificationService.js';
 
@@ -318,6 +319,183 @@ const buildNotificationBody = (lines) => {
 };
 
 /**
+ * 組織通知に使う対象情報を返す
+ * @param {Object} ticket - 連絡案件
+ * @param {Object|null} [context=null] - 通知文脈
+ * @returns {{ organizationId: string|null, organizationName: string|null }} 組織通知先
+ */
+const buildOrganizationTarget = (ticket, context = null) => {
+  /** 組織ID */
+  const organizationId = normalizeText(ticket?.org_id) || null;
+  /** 組織名 */
+  const organizationName =
+    normalizeText(ticket?.organizations?.name) ||
+    normalizeText(context?.organizationName) ||
+    null;
+
+  return {
+    organizationId,
+    organizationName,
+  };
+};
+
+/**
+ * Push が1件以上成功したか判定する
+ * @param {Object|null|undefined} notificationResult - 通知送信結果
+ * @returns {boolean} Push 成功がある場合 true
+ */
+const hasDeliveredPush = (notificationResult) => {
+  /** Push送信結果 */
+  const push = notificationResult?.push || null;
+  /** Push成功件数 */
+  const succeededCount = Number(push?.succeeded) || 0;
+  return succeededCount > 0;
+};
+
+/**
+ * Push集計を加算する
+ * @param {Array<Object>} pushResults - Push結果一覧
+ * @returns {{ attempted: number, succeeded: number, failed: number, removed: number }|null} 集計結果
+ */
+const mergePushStats = (pushResults) => {
+  /** 有効なPush結果一覧 */
+  const normalizedPushResults = (pushResults || []).filter(Boolean);
+  if (normalizedPushResults.length === 0) {
+    return null;
+  }
+
+  return normalizedPushResults.reduce(
+    (accumulator, push) => ({
+      attempted: accumulator.attempted + (Number(push.attempted) || 0),
+      succeeded: accumulator.succeeded + (Number(push.succeeded) || 0),
+      failed: accumulator.failed + (Number(push.failed) || 0),
+      removed: accumulator.removed + (Number(push.removed) || 0),
+    }),
+    {
+      attempted: 0,
+      succeeded: 0,
+      failed: 0,
+      removed: 0,
+    },
+  );
+};
+
+/**
+ * 複数通知結果をUI表示向けに統合する
+ * @param {Array<Object|null|undefined>} results - 通知送信結果一覧
+ * @returns {Object|null} 統合結果
+ */
+const mergeNotificationResults = (results) => {
+  /** 有効な通知結果一覧 */
+  const normalizedResults = (results || []).filter(Boolean);
+  if (normalizedResults.length === 0) {
+    return null;
+  }
+
+  /** 代表通知 */
+  const firstResult = normalizedResults[0];
+  /** Push集計 */
+  const mergedPush = mergePushStats(normalizedResults.map((result) => result.push));
+
+  return {
+    notification: firstResult.notification || null,
+    recipientsCount: normalizedResults.reduce(
+      (count, result) => count + (Number(result.recipientsCount) || 0),
+      0,
+    ),
+    push: mergedPush,
+  };
+};
+
+/**
+ * 個人通知の Push が届かない場合は組織通知へフォールバックする
+ * @param {Object} params - 通知パラメータ
+ * @param {Object} params.ticket - 連絡案件
+ * @param {string|null} [params.recipientUserId=null] - 個人通知先ユーザーID
+ * @param {string} params.title - タイトル
+ * @param {string} params.body - 本文
+ * @param {Object} [params.metadata={}] - メタデータ
+ * @param {string|null} [params.senderUserId=null] - 送信者ユーザーID
+ * @param {Object|null} [params.context=null] - 通知文脈
+ * @returns {Promise<{error: Error|null, data?: Object}>} 送信結果
+ */
+const notifyUserOrOrganization = async ({
+  ticket,
+  recipientUserId = null,
+  title,
+  body,
+  metadata = {},
+  senderUserId = null,
+  context = null,
+}) => {
+  /** 正規化済み個人通知先ユーザーID */
+  const normalizedRecipientUserId = normalizeText(recipientUserId);
+  /** 組織通知先 */
+  const organizationTarget = buildOrganizationTarget(ticket, context);
+  /** 通知送信結果一覧 */
+  const notificationResults = [];
+  /** 送信エラー */
+  let notificationError = null;
+
+  if (normalizedRecipientUserId) {
+    /** 個人通知結果 */
+    const userResult = await sendNotificationToUser(
+      normalizedRecipientUserId,
+      title,
+      body,
+      metadata,
+      senderUserId,
+    );
+
+    if (userResult.error) {
+      notificationError = userResult.error;
+    } else {
+      notificationResults.push(userResult);
+    }
+
+    if (!userResult.error && hasDeliveredPush(userResult)) {
+      return {
+        error: null,
+        data: mergeNotificationResults(notificationResults),
+      };
+    }
+  }
+
+  if (!organizationTarget.organizationId && !organizationTarget.organizationName) {
+    return {
+      error: notificationError,
+      data: mergeNotificationResults(notificationResults),
+    };
+  }
+
+  /** 組織通知結果 */
+  const organizationResult = await sendNotificationToOrganization({
+    organizationId: organizationTarget.organizationId,
+    organizationName: organizationTarget.organizationName,
+    title,
+    body,
+    metadata: {
+      ...metadata,
+      notify_scope: normalizedRecipientUserId ? 'organization_fallback' : 'organization',
+    },
+    senderUserId,
+  });
+
+  if (organizationResult.error) {
+    return {
+      error: notificationError || organizationResult.error,
+      data: mergeNotificationResults(notificationResults),
+    };
+  }
+
+  notificationResults.push(organizationResult);
+  return {
+    error: null,
+    data: mergeNotificationResults(notificationResults),
+  };
+};
+
+/**
  * 返信投稿時の通知を送信する
  * 出展団体の追記は担当ロールへ、担当側の返信は出展団体本人へ通知する
  * @param {Object} params - 通知パラメータ
@@ -356,30 +534,21 @@ export const notifySupportTicketMessageCreated = async ({ ticket, authorId, body
     });
   }
 
-  if (!ticketCreatorId) {
-    return { error: null };
-  }
-
-  /** 通知送信結果 */
-  const result = await sendNotificationToUser(
-    ticketCreatorId,
-    `${buildDepartmentLabel(ticket)}から回答: ${buildTicketContextHeadline(context)}`,
-    buildNotificationBody([
+  return notifyUserOrOrganization({
+    ticket,
+    recipientUserId: ticketCreatorId || null,
+    title: `${buildDepartmentLabel(ticket)}から回答: ${buildTicketContextHeadline(context)}`,
+    body: buildNotificationBody([
       ...buildTicketContextLines(context, '対応者'),
       `内容: ${previewText}`,
     ]),
-    buildTicketMetadata(ticket, {
+    metadata: buildTicketMetadata(ticket, {
       type: 'support_contact_update',
       event: 'message_created',
     }, context),
-    normalizedAuthorId,
-  );
-
-  if (result.error) {
-    return { error: result.error };
-  }
-
-  return { error: null, data: result };
+    senderUserId: normalizedAuthorId,
+    context,
+  });
 };
 
 /**
@@ -403,7 +572,7 @@ export const notifySupportTicketStatusChanged = async ({
   /** 状態ラベル */
   const statusLabel = TICKET_STATUS_LABELS[normalizeText(nextStatus)] || normalizeText(nextStatus) || '更新';
 
-  if (!ticket?.id || !ticketCreatorId || !normalizedActorUserId) {
+  if (!ticket?.id || !normalizedActorUserId) {
     return { error: null };
   }
 
@@ -413,27 +582,22 @@ export const notifySupportTicketStatusChanged = async ({
 
   /** 通知文脈 */
   const context = await resolveTicketContext(ticket, normalizedActorUserId);
-  /** 通知送信結果 */
-  const result = await sendNotificationToUser(
-    ticketCreatorId,
-    `${buildDepartmentLabel(ticket)}が状況更新: ${buildTicketContextHeadline(context)}`,
-    buildNotificationBody([
+  return notifyUserOrOrganization({
+    ticket,
+    recipientUserId: ticketCreatorId || null,
+    title: `${buildDepartmentLabel(ticket)}が状況更新: ${buildTicketContextHeadline(context)}`,
+    body: buildNotificationBody([
       ...buildTicketContextLines(context, '更新者'),
       `状況: ${statusLabel}`,
     ]),
-    buildTicketMetadata(ticket, {
+    metadata: buildTicketMetadata(ticket, {
       type: 'support_contact_update',
       event: 'status_changed',
       status: normalizeText(nextStatus) || null,
     }, context),
-    normalizedActorUserId,
-  );
-
-  if (result.error) {
-    return { error: result.error };
-  }
-
-  return { error: null, data: result };
+    senderUserId: normalizedActorUserId,
+    context,
+  });
 };
 
 /**

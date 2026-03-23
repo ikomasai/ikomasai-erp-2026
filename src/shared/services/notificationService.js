@@ -243,6 +243,65 @@ export const sendNotificationToUser = async (userId, title, body, metadata = {},
 };
 
 /**
+ * 組織に所属するユーザー全員へ通知を送信
+ * @param {Object} input - 送信パラメータ
+ * @param {string|null} [input.organizationId=null] - 対象組織ID
+ * @param {string[]} [input.organizationIds=[]] - 対象組織ID一覧
+ * @param {string|null} [input.organizationName=null] - 対象組織名
+ * @param {string[]} [input.organizationNames=[]] - 対象組織名一覧
+ * @param {string} input.title - タイトル
+ * @param {string} input.body - 本文
+ * @param {Object} [input.metadata={}] - メタデータ
+ * @param {string|null} [input.senderUserId=null] - 送信者ユーザーID
+ * @returns {Promise<Object>} notification, recipientsCount, error
+ */
+export const sendNotificationToOrganization = async ({
+  organizationId = null,
+  organizationIds = [],
+  organizationName = null,
+  organizationNames = [],
+  title,
+  body,
+  metadata = {},
+  senderUserId = null,
+}) => {
+  try {
+    /** 正規化済み組織ID一覧 */
+    const normalizedOrganizationIds = [organizationId, ...(organizationIds || [])].filter(Boolean);
+    /** 正規化済み組織名一覧 */
+    const normalizedOrganizationNames = [organizationName, ...(organizationNames || [])].filter(Boolean);
+
+    if (normalizedOrganizationIds.length === 0 && normalizedOrganizationNames.length === 0) {
+      return { notification: null, recipientsCount: 0, error: new Error('通知先組織が未指定です') };
+    }
+
+    const { data, error } = await dispatchNotification({
+      targetType: 'organization',
+      organizationIds: normalizedOrganizationIds,
+      organizationNames: normalizedOrganizationNames,
+      title,
+      body,
+      metadata,
+      senderUserId,
+    });
+
+    if (error) {
+      return { notification: null, recipientsCount: 0, error };
+    }
+
+    emitNotificationUpdate();
+    return {
+      notification: { id: data?.notificationId ?? '' },
+      recipientsCount: data?.recipientsCount ?? 0,
+      push: data?.push ?? null,
+      error: null,
+    };
+  } catch (error) {
+    return { notification: null, recipientsCount: 0, error };
+  }
+};
+
+/**
  * ロールの全ユーザーへ通知を送信
  * @param {string} roleId
  * @param {string} title

@@ -2,7 +2,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
 
-type TargetType = 'user' | 'roles';
+type TargetType = 'user' | 'roles' | 'organization';
 
 interface DispatchPayload {
   targetType: TargetType;
@@ -461,8 +461,60 @@ const filterUserIdsByOrganizationIds = async (
 };
 
 /**
+ * 送信対象の組織ID一覧を解決する
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
+ * @param {DispatchPayload} payload - 送信リクエスト
+ * @returns {Promise<string[]>} 解決済み組織ID一覧
+ */
+const resolveOrganizationIdsFromPayload = async (
+  supabase: ReturnType<typeof createServiceClient>,
+  payload: DispatchPayload
+) => {
+  /** 組織IDフィルタ一覧 */
+  const organizationIds = getNormalizedOrganizationIds(payload);
+  /** 組織名フィルタ一覧 */
+  const organizationNames = getNormalizedOrganizationNames(payload);
+
+  if (organizationIds.length === 0 && organizationNames.length === 0) {
+    return [];
+  }
+
+  /** 組織名から解決した組織ID一覧 */
+  const resolvedOrganizationIds = await selectOrganizationIdsByNames(supabase, organizationNames);
+  return uniqueValues([...organizationIds, ...resolvedOrganizationIds]);
+};
+
+/**
+ * 組織所属ユーザー一覧を取得する
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
+ * @param {string[]} organizationIds - 対象組織ID一覧
+ * @returns {Promise<string[]>} 組織所属ユーザーID一覧
+ */
+const selectUserIdsByOrganizationIds = async (
+  supabase: ReturnType<typeof createServiceClient>,
+  organizationIds: string[]
+) => {
+  const normalizedOrganizationIds = uniqueValues(organizationIds);
+  if (normalizedOrganizationIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('user_organizations')
+    .select('user_id')
+    .in('organization_id', normalizedOrganizationIds);
+
+  if (error) {
+    console.error('organization user resolve error:', error);
+    throw new Error('Failed to resolve organization users');
+  }
+
+  return uniqueValues((data ?? []).map((item) => item.user_id));
+};
+
+/**
  * 呼び出し元を認証し送信者情報を返す
- * - targetType=roles: 認証済みユーザー全員に許可
+ * - targetType=roles / organization: 認証済みユーザー全員に許可
  * - targetType=user: 宛先 userId が指定されていれば常に個人通知を許可
  * @param {Request} request - リクエスト
  * @param {DispatchPayload} payload - リクエストボディ
@@ -532,6 +584,16 @@ const resolveRecipients = async (
     return [payload.userId];
   }
 
+  if (payload.targetType === 'organization') {
+    /** 解決済み組織ID一覧 */
+    const organizationIds = await resolveOrganizationIdsFromPayload(supabase, payload);
+    if (organizationIds.length === 0) {
+      throw new Error('organizationId or organizationName is required');
+    }
+
+    return selectUserIdsByOrganizationIds(supabase, organizationIds);
+  }
+
   const roleIds = uniqueValues(payload.roleIds ?? []);
   if (roleIds.length === 0) {
     roleIds.push(...(await selectRoleIdsByNames(supabase, payload.roleNames)));
@@ -553,25 +615,22 @@ const resolveRecipients = async (
 
   /** ロール解決で得た候補ユーザーID一覧 */
   const roleRecipientUserIds = uniqueValues((data ?? []).map((item) => item.user_id));
-  /** 組織IDフィルタ一覧 */
-  const organizationIds = getNormalizedOrganizationIds(payload);
-  /** 組織名フィルタ一覧 */
-  const organizationNames = getNormalizedOrganizationNames(payload);
+  /** 組織フィルタ指定の有無 */
+  const hasOrganizationFilter =
+    getNormalizedOrganizationIds(payload).length > 0 ||
+    getNormalizedOrganizationNames(payload).length > 0;
+  /** 解決済み組織ID一覧 */
+  const organizationIds = await resolveOrganizationIdsFromPayload(supabase, payload);
 
-  if (organizationIds.length === 0 && organizationNames.length === 0) {
+  if (!hasOrganizationFilter) {
     return roleRecipientUserIds;
   }
 
-  /** 組織名から解決した組織ID一覧 */
-  const resolvedOrganizationIds = await selectOrganizationIdsByNames(supabase, organizationNames);
-  /** 送信対象の組織ID一覧 */
-  const filteredOrganizationIds = uniqueValues([...organizationIds, ...resolvedOrganizationIds]);
-
-  if (filteredOrganizationIds.length === 0) {
+  if (organizationIds.length === 0) {
     return [];
   }
 
-  return filterUserIdsByOrganizationIds(supabase, roleRecipientUserIds, filteredOrganizationIds);
+  return filterUserIdsByOrganizationIds(supabase, roleRecipientUserIds, organizationIds);
 };
 
 /**
@@ -835,8 +894,8 @@ const validatePayload = (payload: DispatchPayload) => {
     throw new Error('Invalid payload');
   }
 
-  if (payload.targetType !== 'user' && payload.targetType !== 'roles') {
-    throw new Error('targetType must be user or roles');
+  if (payload.targetType !== 'user' && payload.targetType !== 'roles' && payload.targetType !== 'organization') {
+    throw new Error('targetType must be user, roles, or organization');
   }
 
   if (!payload.title || typeof payload.title !== 'string') {
@@ -853,6 +912,14 @@ const validatePayload = (payload: DispatchPayload) => {
     uniqueValues(payload.roleNames ?? []).length === 0
   ) {
     throw new Error('roleIds or roleNames is required');
+  }
+
+  if (
+    payload.targetType === 'organization' &&
+    getNormalizedOrganizationIds(payload).length === 0 &&
+    getNormalizedOrganizationNames(payload).length === 0
+  ) {
+    throw new Error('organizationId or organizationName is required');
   }
 };
 
