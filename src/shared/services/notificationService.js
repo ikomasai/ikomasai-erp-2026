@@ -4,6 +4,11 @@
  */
 
 import { getSupabaseClient } from '../../services/supabase/client.js';
+import {
+  getEdgeFunctionAccessToken,
+  isUnauthorizedFunctionError,
+  recoverEdgeFunctionAccessToken,
+} from './edgeFunctionAuthService.js';
 
 const notificationEventTarget = new EventTarget();
 
@@ -14,45 +19,6 @@ export const subscribeNotificationUpdates = (handler) => {
 
 export const emitNotificationUpdate = () => {
   notificationEventTarget.dispatchEvent(new Event('change'));
-};
-
-/**
- * 現在有効なアクセストークンを取得する
- *
- * getSession() のみを使用し、手動 refreshSession() は一切呼ばない。
- * refreshSession() を手動で呼ぶと autoRefreshToken との競合でリフレッシュトークンが
- * 使用済みになり、Supabase JS クライアントが 400 を受けた際に内部でサインアウトを
- * 発火させる (_removeSession → SIGNED_OUT) ため使用しない。
- *
- * @returns {Promise<string|null>}
- */
-const getValidAccessToken = async () => {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.getSession();
-  if (error) {
-    return null;
-  }
-  return data?.session?.access_token ?? null;
-};
-
-/**
- * Edge Functionエラーが401かどうか
- * @param {unknown} error
- * @returns {boolean}
- */
-const isUnauthorizedFunctionError = (error) => {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  const maybeError = /** @type {{ context?: { status?: number }; status?: number; message?: string }} */ (error);
-  const status = maybeError.context?.status ?? maybeError.status;
-  if (status === 401) {
-    return true;
-  }
-
-  const message = (maybeError.message ?? '').toLowerCase();
-  return message.includes('401') || message.includes('unauthorized');
 };
 
 /**
@@ -185,7 +151,7 @@ export const getUserProfilesByIds = async (userIds) => {
  */
 const dispatchNotification = async (payload) => {
   try {
-    const accessToken = await getValidAccessToken();
+    const accessToken = await getEdgeFunctionAccessToken();
 
     if (!accessToken) {
       return { data: null, error: new Error('ログインセッションが見つかりません。再ログインしてください。') };
@@ -200,19 +166,26 @@ const dispatchNotification = async (payload) => {
       });
 
     let { data, error } = await invokeDispatch(accessToken);
+    /** 401復旧エラー */
+    let recoveryError = null;
 
     if (error && isUnauthorizedFunctionError(error)) {
-      // アクセストークンが期限切れの場合、autoRefreshToken の完了を待ってから再試行する。
-      // refreshSession() を手動で呼ぶとリフレッシュトークンのローテーション競合が発生して
-      // ユーザーがサインアウトされるため、待機後に getSession() で最新トークンを取得する。
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      const newToken = await getValidAccessToken();
-      if (newToken) {
+      /** 再発行結果 */
+      const recoveryResult = await recoverEdgeFunctionAccessToken();
+      recoveryError = recoveryResult.error;
+      if (recoveryResult.accessToken) {
+        const newToken = recoveryResult.accessToken;
         ({ data, error } = await invokeDispatch(newToken));
       }
     }
 
     if (error) {
+      if (recoveryError) {
+        return {
+          data: null,
+          error: recoveryError,
+        };
+      }
       return {
         data: null,
         error: await normalizeFunctionError(error, '通知送信に失敗しました'),

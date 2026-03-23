@@ -48,6 +48,20 @@ interface PushMessage {
   ttl: number;
 }
 
+interface UserLogEntry {
+  userId: string;
+  name: string | null;
+  organization: string | null;
+}
+
+interface PushDispatchLogContext {
+  traceId: string;
+  notificationId: string;
+  sender: UserLogEntry | null;
+  recipients: UserLogEntry[];
+  metadata: Record<string, unknown>;
+}
+
 const VAPID_PUBLIC_KEY = Deno.env.get('WEB_PUSH_VAPID_PUBLIC_KEY');
 const VAPID_PRIVATE_KEY = Deno.env.get('WEB_PUSH_VAPID_PRIVATE_KEY');
 const VAPID_SUBJECT = Deno.env.get('WEB_PUSH_VAPID_SUBJECT');
@@ -147,6 +161,167 @@ const pickAuthorizationMetadata = (metadata?: Record<string, unknown>) => {
     taskId: normalizeText(metadata?.task_id) || null,
     notifyTarget: normalizeText(metadata?.notify_target) || null,
     status: normalizeText(metadata?.status) || null,
+  };
+};
+
+/**
+ * IDのみ保持したログ用プロフィールを作る
+ * @param {string[]} userIds - 対象ユーザーID一覧
+ * @returns {UserLogEntry[]} ログ用プロフィール
+ */
+const createFallbackUserLogEntries = (userIds: string[]): UserLogEntry[] => {
+  return uniqueValues(userIds).map((userId) => ({
+    userId,
+    name: null,
+    organization: null,
+  }));
+};
+
+/**
+ * ログ向けのユーザープロフィール一覧を取得する
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
+ * @param {string[]} userIds - 対象ユーザーID一覧
+ * @returns {Promise<UserLogEntry[]>} ログ用プロフィール一覧
+ */
+const selectUserLogEntries = async (
+  supabase: ReturnType<typeof createServiceClient>,
+  userIds: string[]
+): Promise<UserLogEntry[]> => {
+  const normalizedUserIds = uniqueValues(userIds);
+  if (normalizedUserIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('user_id,name,organization')
+    .in('user_id', normalizedUserIds);
+
+  if (error) {
+    console.error('user profile fetch error:', error);
+    return createFallbackUserLogEntries(normalizedUserIds);
+  }
+
+  const profileMap = new Map(
+    (data ?? []).map((profile) => [
+      normalizeText(profile.user_id),
+      {
+        name: normalizeText(profile.name) || null,
+        organization: normalizeText(profile.organization) || null,
+      },
+    ])
+  );
+
+  return normalizedUserIds.map((userId) => {
+    const profile = profileMap.get(userId);
+    return {
+      userId,
+      name: profile?.name ?? null,
+      organization: profile?.organization ?? null,
+    };
+  });
+};
+
+/**
+ * ユーザーIDからログ用プロフィールを解決する
+ * @param {Map<string, UserLogEntry>} userEntryMap - ログ用プロフィールMap
+ * @param {string | null} userId - ユーザーID
+ * @returns {UserLogEntry | null} ログ用プロフィール
+ */
+const resolveUserLogEntry = (
+  userEntryMap: Map<string, UserLogEntry>,
+  userId: string | null
+): UserLogEntry | null => {
+  const normalizedUserId = normalizeText(userId);
+  if (!normalizedUserId) {
+    return null;
+  }
+
+  return (
+    userEntryMap.get(normalizedUserId) ?? {
+      userId: normalizedUserId,
+      name: null,
+      organization: null,
+    }
+  );
+};
+
+/**
+ * 通知ログを info で出力する
+ * @param {string} traceId - 追跡ID
+ * @param {string} label - ログ種別
+ * @param {Record<string, unknown>} detail - ログ詳細
+ * @returns {void}
+ */
+const logDispatchInfo = (traceId: string, label: string, detail: Record<string, unknown>) => {
+  console.info(`[dispatch-notification][${traceId}] ${label}`, detail);
+};
+
+/**
+ * 通知ログを warn で出力する
+ * @param {string} traceId - 追跡ID
+ * @param {string} label - ログ種別
+ * @param {Record<string, unknown>} detail - ログ詳細
+ * @returns {void}
+ */
+const logDispatchWarning = (traceId: string, label: string, detail: Record<string, unknown>) => {
+  console.warn(`[dispatch-notification][${traceId}] ${label}`, detail);
+};
+
+/**
+ * endpoint から Push provider host を取り出す
+ * @param {string} endpoint - Push endpoint
+ * @returns {string} provider host
+ */
+const getEndpointProviderHost = (endpoint: string) => {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return 'unknown';
+  }
+};
+
+/**
+ * 購読状況をログ用に集計する
+ * @param {{ user_id: string; endpoint: string }[]} subscriptions - Push購読一覧
+ * @param {UserLogEntry[]} recipients - 受信者プロフィール
+ * @returns {{ totalSubscriptions: number; byUser: Array<UserLogEntry & { count: number }>; byProvider: Array<{ provider: string; count: number }> }} 購読集計
+ */
+const summarizeSubscriptionsForLog = (
+  subscriptions: { user_id: string; endpoint: string }[],
+  recipients: UserLogEntry[]
+) => {
+  const recipientMap = new Map(recipients.map((recipient) => [recipient.userId, recipient]));
+  const countsByUser = new Map<string, number>();
+  const countsByProvider = new Map<string, number>();
+
+  subscriptions.forEach((subscription) => {
+    const normalizedUserId = normalizeText(subscription.user_id);
+    const provider = getEndpointProviderHost(subscription.endpoint);
+    countsByUser.set(normalizedUserId, (countsByUser.get(normalizedUserId) ?? 0) + 1);
+    countsByProvider.set(provider, (countsByProvider.get(provider) ?? 0) + 1);
+  });
+
+  const byUser = Array.from(countsByUser.entries())
+    .map(([userId, count]) => {
+      const recipient = recipientMap.get(userId);
+      return {
+        userId,
+        name: recipient?.name ?? null,
+        organization: recipient?.organization ?? null,
+        count,
+      };
+    })
+    .sort((left, right) => right.count - left.count || left.userId.localeCompare(right.userId));
+
+  const byProvider = Array.from(countsByProvider.entries())
+    .map(([provider, count]) => ({ provider, count }))
+    .sort((left, right) => right.count - left.count || left.provider.localeCompare(right.provider));
+
+  return {
+    totalSubscriptions: subscriptions.length,
+    byUser,
+    byProvider,
   };
 };
 
@@ -680,7 +855,8 @@ const buildPushMessage = (payload: DispatchPayload, notificationId: string): Pus
 const sendWebPush = async (
   supabase: ReturnType<typeof createServiceClient>,
   recipientUserIds: string[],
-  message: PushMessage
+  message: PushMessage,
+  logContext: PushDispatchLogContext
 ): Promise<PushStats> => {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY || !VAPID_SUBJECT) {
     throw new Error('VAPID secrets are not configured');
@@ -692,7 +868,7 @@ const sendWebPush = async (
 
   const { data: subscriptions, error } = await supabase
     .from('push_subscriptions')
-    .select('endpoint, p256dh, auth')
+    .select('user_id, endpoint, p256dh, auth')
     .in('user_id', recipientUserIds);
 
   if (error) {
@@ -701,8 +877,29 @@ const sendWebPush = async (
   }
 
   if (!subscriptions || subscriptions.length === 0) {
+    logDispatchWarning(logContext.traceId, 'push-subscription-missing', {
+      notificationId: logContext.notificationId,
+      sender: logContext.sender,
+      recipients: logContext.recipients,
+      metadata: logContext.metadata,
+      push: {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        removed: 0,
+      },
+    });
     return { attempted: 0, succeeded: 0, failed: 0, removed: 0 };
   }
+
+  const subscriptionSummary = summarizeSubscriptionsForLog(subscriptions, logContext.recipients);
+  logDispatchInfo(logContext.traceId, 'push-subscription-resolved', {
+    notificationId: logContext.notificationId,
+    sender: logContext.sender,
+    recipients: logContext.recipients,
+    metadata: logContext.metadata,
+    subscriptions: subscriptionSummary,
+  });
 
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
@@ -734,13 +931,7 @@ const sendWebPush = async (
         failed += 1;
         const statusCodeRaw = (error as { statusCode?: number | string })?.statusCode;
         const statusCode = Number(statusCodeRaw);
-        const endpointHost = (() => {
-          try {
-            return new URL(subscription.endpoint).host;
-          } catch {
-            return 'unknown';
-          }
-        })();
+        const endpointHost = getEndpointProviderHost(subscription.endpoint);
         const errorMessage =
           typeof (error as { message?: unknown })?.message === 'string'
             ? (error as { message: string }).message
@@ -756,6 +947,9 @@ const sendWebPush = async (
           invalidEndpoints.push(subscription.endpoint);
         }
         console.error('web push send error:', {
+          traceId: logContext.traceId,
+          notificationId: logContext.notificationId,
+          recipientUserId: subscription.user_id,
           endpoint: subscription.endpoint,
           statusCode: Number.isFinite(statusCode) ? statusCode : null,
           error,
@@ -776,16 +970,32 @@ const sendWebPush = async (
       console.error('invalid endpoint delete error:', deleteError);
     } else {
       removed = count ?? uniqueInvalidEndpoints.length;
+      logDispatchWarning(logContext.traceId, 'push-invalid-endpoint-removed', {
+        notificationId: logContext.notificationId,
+        removed,
+        invalidEndpointCount: uniqueInvalidEndpoints.length,
+      });
     }
   }
 
-  return {
+  const result = {
     attempted: subscriptions.length,
     succeeded,
     failed,
     removed,
     ...(sampleFailures.length > 0 ? { sampleFailures } : {}),
   };
+
+  logDispatchInfo(logContext.traceId, 'push-dispatch-finished', {
+    notificationId: logContext.notificationId,
+    sender: logContext.sender,
+    recipients: logContext.recipients,
+    metadata: logContext.metadata,
+    subscriptions: subscriptionSummary,
+    push: result,
+  });
+
+  return result;
 };
 
 /**
@@ -819,6 +1029,8 @@ const validatePayload = (payload: DispatchPayload) => {
 };
 
 Deno.serve(async (request) => {
+  const traceId = crypto.randomUUID();
+
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -836,12 +1048,22 @@ Deno.serve(async (request) => {
     validatePayload(payload);
 
     const supabase = createServiceClient();
+    const metadataSummary = pickAuthorizationMetadata(payload.metadata);
+    const requestedSenderUserId = normalizeText(payload.senderUserId) || null;
 
     let authContext: AuthContext;
     try {
       authContext = await authenticateRequester(request, payload, supabase);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unauthorized';
+      logDispatchWarning(traceId, 'dispatch-auth-rejected', {
+        requestedSenderUserId,
+        targetType: payload.targetType,
+        roleIds: uniqueValues(payload.roleIds ?? []),
+        roleNames: uniqueValues(payload.roleNames ?? []),
+        metadata: metadataSummary,
+        error: message,
+      });
       if (message === 'Forbidden') {
         return createJsonResponse({ error: message }, 403);
       }
@@ -849,9 +1071,39 @@ Deno.serve(async (request) => {
     }
 
     const recipientUserIds = await resolveRecipients(payload, supabase);
+    const relatedUserEntries = await selectUserLogEntries(supabase, [
+      ...(authContext.senderUserId ? [authContext.senderUserId] : []),
+      ...recipientUserIds,
+    ]);
+    const userEntryMap = new Map(relatedUserEntries.map((entry) => [entry.userId, entry]));
+    const senderEntry = resolveUserLogEntry(userEntryMap, authContext.senderUserId);
+    const recipientEntries = recipientUserIds
+      .map((userId) => resolveUserLogEntry(userEntryMap, userId))
+      .filter((entry): entry is UserLogEntry => Boolean(entry));
     if (recipientUserIds.length === 0) {
+      logDispatchWarning(traceId, 'dispatch-recipient-empty', {
+        senderUserId: authContext.senderUserId,
+        requestedSenderUserId,
+        targetType: payload.targetType,
+        roleIds: uniqueValues(payload.roleIds ?? []),
+        roleNames: uniqueValues(payload.roleNames ?? []),
+        metadata: metadataSummary,
+      });
       return createJsonResponse({ error: '送信先ユーザーが見つかりません' }, 400);
     }
+
+    logDispatchInfo(traceId, 'dispatch-prepared', {
+      authType: authContext.type,
+      sender: senderEntry,
+      requestedSenderUserId,
+      targetType: payload.targetType,
+      roleIds: uniqueValues(payload.roleIds ?? []),
+      roleNames: uniqueValues(payload.roleNames ?? []),
+      recipients: recipientEntries,
+      title: payload.title.trim(),
+      metadata: metadataSummary,
+      url: payload.url || '/notifications',
+    });
 
     const { data: notification, error: notificationError } = await supabase
       .from('notifications')
@@ -867,7 +1119,13 @@ Deno.serve(async (request) => {
       .single();
 
     if (notificationError || !notification) {
-      console.error('notification insert error:', notificationError);
+      console.error('notification insert error:', {
+        traceId,
+        sender: senderEntry,
+        recipients: recipientEntries,
+        metadata: metadataSummary,
+        error: notificationError,
+      });
       return createJsonResponse({ error: '通知の作成に失敗しました' }, 500);
     }
 
@@ -881,7 +1139,14 @@ Deno.serve(async (request) => {
       .insert(recipients);
 
     if (recipientsError) {
-      console.error('notification recipients insert error:', recipientsError);
+      console.error('notification recipients insert error:', {
+        traceId,
+        notificationId: notification.id,
+        sender: senderEntry,
+        recipients: recipientEntries,
+        metadata: metadataSummary,
+        error: recipientsError,
+      });
       return createJsonResponse({ error: '通知受信者の作成に失敗しました' }, 500);
     }
 
@@ -893,10 +1158,31 @@ Deno.serve(async (request) => {
     };
 
     try {
-      push = await sendWebPush(supabase, recipientUserIds, buildPushMessage(payload, notification.id));
+      push = await sendWebPush(supabase, recipientUserIds, buildPushMessage(payload, notification.id), {
+        traceId,
+        notificationId: notification.id,
+        sender: senderEntry,
+        recipients: recipientEntries,
+        metadata: metadataSummary,
+      });
     } catch (pushError) {
-      console.error('web push dispatch error:', pushError);
+      console.error('web push dispatch error:', {
+        traceId,
+        notificationId: notification.id,
+        sender: senderEntry,
+        recipients: recipientEntries,
+        metadata: metadataSummary,
+        error: pushError,
+      });
     }
+
+    logDispatchInfo(traceId, 'dispatch-finished', {
+      notificationId: notification.id,
+      sender: senderEntry,
+      recipients: recipientEntries,
+      metadata: metadataSummary,
+      push,
+    });
 
     return createJsonResponse({
       notificationId: notification.id,

@@ -5,6 +5,11 @@
 
 import { Platform } from 'react-native';
 import { getSupabaseClient } from './supabase/client.js';
+import {
+  getEdgeFunctionAccessToken,
+  isUnauthorizedFunctionError,
+  recoverEdgeFunctionAccessToken,
+} from '../shared/services/edgeFunctionAuthService.js';
 
 /** Push購読状態 */
 export const WEB_PUSH_SYNC_STATES = {
@@ -82,47 +87,6 @@ const canRegisterServiceWorkerNow = () => {
 };
 
 /**
- * 有効なアクセストークンを取得する
- * @returns {Promise<string|null>} アクセストークン
- */
-const getValidAccessToken = async () => {
-  /** Supabaseクライアント */
-  const supabase = getSupabaseClient();
-  /** セッション取得結果 */
-  const { data, error } = await supabase.auth.getSession();
-
-  if (error) {
-    return null;
-  }
-
-  return data?.session?.access_token ?? null;
-};
-
-/**
- * Edge Functionエラーが401かを判定する
- * @param {unknown} error - Edge Functionエラー
- * @returns {boolean} 401ならtrue
- */
-const isUnauthorizedFunctionError = (error) => {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  /** 参照用エラー */
-  const maybeError = /** @type {{ context?: { status?: number }; status?: number; message?: string }} */ (error);
-  /** HTTPステータス */
-  const status = maybeError.context?.status ?? maybeError.status;
-
-  if (status === 401) {
-    return true;
-  }
-
-  /** エラーメッセージ */
-  const message = (maybeError.message ?? '').toLowerCase();
-  return message.includes('401') || message.includes('unauthorized');
-};
-
-/**
  * Edge Functionエラーを整形する
  * @param {unknown} error - 元エラー
  * @returns {Promise<Error>} 整形済みエラー
@@ -180,7 +144,7 @@ const savePushSubscription = async (subscription) => {
   /** 直列化済み購読情報 */
   const serialized = subscription.toJSON();
   /** アクセストークン */
-  let accessToken = await getValidAccessToken();
+  let accessToken = await getEdgeFunctionAccessToken();
 
   if (!accessToken) {
     throw new Error('ログインセッションが見つかりません。再ログインしてください。');
@@ -205,8 +169,13 @@ const savePushSubscription = async (subscription) => {
   let { error } = await invokeSubscription(accessToken);
 
   if (error && isUnauthorizedFunctionError(error)) {
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    accessToken = await getValidAccessToken();
+    /** セッション再発行結果 */
+    const recoveryResult = await recoverEdgeFunctionAccessToken();
+    if (recoveryResult.error) {
+      throw recoveryResult.error;
+    }
+
+    accessToken = recoveryResult.accessToken;
     if (accessToken) {
       ({ error } = await invokeSubscription(accessToken));
     }
