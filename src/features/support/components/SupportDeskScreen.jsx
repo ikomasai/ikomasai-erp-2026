@@ -655,6 +655,48 @@ const SupportDeskScreen = ({
     Alert.alert(title, message);
   };
 
+  /**
+   * Push送信結果の表示文言を作る
+   * @param {Object|null|undefined} push - Push送信結果
+   * @returns {string} 表示文言
+   */
+  const formatPushStatsMessage = (push) => {
+    if (!push) {
+      return 'Push送信結果を取得できませんでした';
+    }
+
+    return `Push: ${push.succeeded || 0}/${push.attempted || 0}件成功（失敗${push.failed || 0}件）`;
+  };
+
+  /**
+   * 通知結果の表示行を作る
+   * @param {string} label - 表示ラベル
+   * @param {Object|null|undefined} notificationResult - 通知送信結果
+   * @param {Error|null|undefined} notificationError - 通知送信エラー
+   * @returns {Array<string>} 表示行
+   */
+  const buildNotificationOutcomeLines = (label, notificationResult, notificationError) => {
+    if (notificationError) {
+      return [`${label}: 通知送信に失敗しました（${notificationError.message || '不明なエラー'}）`];
+    }
+
+    if (!notificationResult) {
+      return [];
+    }
+
+    /** 受信者表示 */
+    const recipientsText =
+      typeof notificationResult.recipientsCount === 'number'
+        ? `受信者${notificationResult.recipientsCount}人`
+        : '受信者数不明';
+
+    if (notificationResult.push) {
+      return [`${label}: ${recipientsText} / ${formatPushStatsMessage(notificationResult.push)}`];
+    }
+
+    return [`${label}: ${recipientsText}`];
+  };
+
   const isHQRole = roleType === SUPPORT_DESK_ROLE_TYPES.HQ;
   const isAccountingRole = roleType === SUPPORT_DESK_ROLE_TYPES.ACCOUNTING;
   const isDepartmentRole =
@@ -1210,6 +1252,8 @@ const SupportDeskScreen = ({
       return;
     }
 
+    /** 返信後の自動ステータス更新結果 */
+    let autoStatusUpdateResult = null;
     /** 自動ステータス更新エラー */
     let autoStatusUpdateError = null;
 
@@ -1217,26 +1261,46 @@ const SupportDeskScreen = ({
       selectedTicket.ticket_status === SUPPORT_TICKET_STATUSES.NEW ||
       selectedTicket.ticket_status === SUPPORT_TICKET_STATUSES.ACKNOWLEDGED
     ) {
-      const statusResult = await updateTicketStatus({
+      autoStatusUpdateResult = await updateTicketStatus({
         ticketId: selectedTicket.id,
         status: SUPPORT_TICKET_STATUSES.IN_PROGRESS,
         notifyActorUserId: user.id,
       });
-      autoStatusUpdateError = statusResult.error || null;
+      autoStatusUpdateError = autoStatusUpdateResult.error || null;
     }
 
     setReplyBody('');
     await Promise.all([loadMessages(selectedTicket.id), loadTickets(selectedTicket.id)]);
 
+    /** 通知結果表示行 */
+    const notificationLines = [
+      ...buildNotificationOutcomeLines('返信通知', result.notificationResult, result.notificationError),
+      ...buildNotificationOutcomeLines(
+        '自動状態更新通知',
+        autoStatusUpdateResult?.notificationResult,
+        autoStatusUpdateResult?.notificationError
+      ),
+    ];
+
     if (autoStatusUpdateError) {
       showMessage(
         '一部完了',
-        autoStatusUpdateError.message || '回答は送信しましたが、ステータス更新に失敗しました'
+        [
+          autoStatusUpdateError.message || '回答は送信しましたが、ステータス更新に失敗しました',
+          ...notificationLines,
+        ]
+          .filter(Boolean)
+          .join('\n')
       );
       return;
     }
 
-    showMessage('送信完了', '回答を送信しました');
+    showMessage(
+      '送信完了',
+      ['回答を送信しました', ...notificationLines]
+        .filter(Boolean)
+        .join('\n')
+    );
   };
 
   /**
@@ -1263,6 +1327,20 @@ const SupportDeskScreen = ({
     }
 
     await loadTickets(selectedTicket.id);
+
+    /** 通知結果表示行 */
+    const notificationLines = buildNotificationOutcomeLines(
+      '状態更新通知',
+      result.notificationResult,
+      result.notificationError
+    );
+
+    showMessage(
+      '更新完了',
+      ['ステータスを更新しました', ...notificationLines]
+        .filter(Boolean)
+        .join('\n')
+    );
   };
 
   /**

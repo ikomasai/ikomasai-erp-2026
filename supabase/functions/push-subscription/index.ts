@@ -90,6 +90,32 @@ const validateSubscription = (subscription: unknown) => {
   return { endpoint, p256dh, auth };
 };
 
+/**
+ * 同一ユーザーの古いPush購読を削除する
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
+ * @param {string} userId - ユーザーID
+ * @param {string} currentEndpoint - 現在保持したいendpoint
+ * @returns {Promise<number>} 削除件数
+ */
+const deleteStaleSubscriptions = async (
+  supabase: ReturnType<typeof createServiceClient>,
+  userId: string,
+  currentEndpoint: string
+) => {
+  const { error, count } = await supabase
+    .from('push_subscriptions')
+    .delete({ count: 'exact' })
+    .eq('user_id', userId)
+    .neq('endpoint', currentEndpoint);
+
+  if (error) {
+    console.error('stale push subscription delete error:', error);
+    throw new Error('Failed to delete stale subscriptions');
+  }
+
+  return count ?? 0;
+};
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -123,6 +149,8 @@ Deno.serve(async (request) => {
         return createJsonResponse({ error: 'Invalid subscription payload' }, 400);
       }
 
+      /** 現在時刻 */
+      const now = new Date().toISOString();
       const { error } = await supabase
         .from('push_subscriptions')
         .upsert(
@@ -132,7 +160,7 @@ Deno.serve(async (request) => {
               endpoint: validated.endpoint,
               p256dh: validated.p256dh,
               auth: validated.auth,
-              updated_at: new Date().toISOString(),
+              updated_at: now,
             },
           ],
           { onConflict: 'endpoint' }
@@ -143,7 +171,10 @@ Deno.serve(async (request) => {
         return createJsonResponse({ error: 'Failed to save subscription' }, 500);
       }
 
-      return createJsonResponse({ success: true });
+      /** 古い購読の削除件数 */
+      const removedCount = await deleteStaleSubscriptions(supabase, user.id, validated.endpoint);
+
+      return createJsonResponse({ success: true, removedCount });
     }
 
     const endpoint = payload?.endpoint;
