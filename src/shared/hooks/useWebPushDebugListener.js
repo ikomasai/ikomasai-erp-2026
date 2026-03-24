@@ -6,9 +6,11 @@ const SW_PUSH_DEBUG_MESSAGE_TYPE = 'SW_PUSH_DEBUG';
 
 /**
  * Service Worker から届く Push デバッグログをブラウザコンソールへ出す
+ * @param {Object} [options={}] - オプション
+ * @param {(payload: Object) => void} [options.onPushDebug] - 受信ログの購読コールバック
  * @returns {void}
  */
-export const useWebPushDebugListener = () => {
+export const useWebPushDebugListener = ({ onPushDebug } = {}) => {
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
       return undefined;
@@ -31,6 +33,7 @@ export const useWebPushDebugListener = () => {
       }
 
       console.info('[web-push][browser]', data.payload);
+      onPushDebug?.(data.payload);
     };
 
     navigator.serviceWorker.addEventListener('message', handleMessage);
@@ -38,6 +41,5 @@ export const useWebPushDebugListener = () => {
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleMessage);
     };
-  }, []);
+  }, [onPushDebug]);
 };
-
