@@ -38,6 +38,12 @@ const DEFAULT_NOTIFICATION_ACTIONS = [
 const DEFAULT_NOTIFICATION_VIBRATE = [160, 80, 160];
 // Pushデバッグメッセージ種別
 const PUSH_DEBUG_MESSAGE_TYPE = 'SW_PUSH_DEBUG';
+// 閉じている間の Push トースト保持用キャッシュ
+const PUSH_NOTICE_CACHE_NAME = 'ikoma-erp-push-notice-v1';
+// 閉じている間の Push トースト保持キー
+const PUSH_NOTICE_CACHE_KEY = '/__push__/pending-notices';
+// 保持する Push トースト最大件数
+const MAX_PENDING_PUSH_NOTICES = 10;
 
 /**
  * プリキャッシュを実行する
@@ -292,6 +298,62 @@ const broadcastPushDebug = async (detail) => {
       payload: detail,
     });
   });
+
+  return clientList.length;
+};
+
+/**
+ * 保持中の Push トースト一覧を取得する
+ * @returns {Promise<Object[]>} Push トースト一覧
+ */
+const readPendingPushNotices = async () => {
+  const cache = await caches.open(PUSH_NOTICE_CACHE_NAME);
+  const response = await cache.match(PUSH_NOTICE_CACHE_KEY);
+
+  if (!response) {
+    return [];
+  }
+
+  try {
+    const payload = await response.json();
+    return Array.isArray(payload?.notices) ? payload.notices : [];
+  } catch (error) {
+    await cache.delete(PUSH_NOTICE_CACHE_KEY);
+    return [];
+  }
+};
+
+/**
+ * Push トースト一覧を保存する
+ * @param {Object[]} notices - Push トースト一覧
+ * @returns {Promise<void>} 保存結果
+ */
+const writePendingPushNotices = async (notices) => {
+  const cache = await caches.open(PUSH_NOTICE_CACHE_NAME);
+  await cache.put(
+    PUSH_NOTICE_CACHE_KEY,
+    new Response(JSON.stringify({ notices }), {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+  );
+};
+
+/**
+ * 開いている画面がないときだけ次回起動用の Push トーストを保持する
+ * @param {Object} detail - Push ログ詳細
+ * @param {number} clientCount - 配信済みブラウザ数
+ * @returns {Promise<void>} 保存結果
+ */
+const persistPendingPushNotice = async (detail, clientCount) => {
+  if (clientCount > 0) {
+    return;
+  }
+
+  const notices = await readPendingPushNotices();
+  const nextNotices = [...notices, detail].slice(-MAX_PENDING_PUSH_NOTICES);
+  await writePendingPushNotices(nextNotices);
 };
 
 /**
@@ -449,7 +511,8 @@ self.addEventListener('push', (event) => {
 
         await self.registration.showNotification(notificationData.title, notificationOptions);
         const shownDetail = logPushDebug('notification_shown', notificationData);
-        await broadcastPushDebug(shownDetail);
+        const shownClientCount = await broadcastPushDebug(shownDetail);
+        await persistPendingPushNotice(shownDetail, shownClientCount);
         await reportPushReceipt('notification_shown', notificationData);
       } catch (error) {
         const normalizedMessage =
@@ -457,7 +520,8 @@ self.addEventListener('push', (event) => {
         const errorDetail = logPushDebug('notification_show_error', notificationData, {
           message: normalizedMessage,
         });
-        await broadcastPushDebug(errorDetail);
+        const errorClientCount = await broadcastPushDebug(errorDetail);
+        await persistPendingPushNotice(errorDetail, errorClientCount);
         await reportPushReceipt('notification_show_error', notificationData, {
           message: normalizedMessage,
         });

@@ -3,6 +3,36 @@ import { Platform } from 'react-native';
 
 /** Pushデバッグ用のメッセージ種別 */
 const SW_PUSH_DEBUG_MESSAGE_TYPE = 'SW_PUSH_DEBUG';
+/** 閉じている間の Push トースト保持用キャッシュ */
+const PUSH_NOTICE_CACHE_NAME = 'ikoma-erp-push-notice-v1';
+/** 閉じている間の Push トースト保持キー */
+const PUSH_NOTICE_CACHE_KEY = '/__push__/pending-notices';
+
+/**
+ * Service Worker が保持した Push ログを取り出して削除する
+ * @returns {Promise<Object[]>} 保持中の Push ログ一覧
+ */
+const consumePendingPushDebugLogs = async () => {
+  if (typeof window === 'undefined' || !('caches' in window)) {
+    return [];
+  }
+
+  const cache = await window.caches.open(PUSH_NOTICE_CACHE_NAME);
+  const response = await cache.match(PUSH_NOTICE_CACHE_KEY);
+
+  if (!response) {
+    return [];
+  }
+
+  try {
+    const payload = await response.json();
+    await cache.delete(PUSH_NOTICE_CACHE_KEY);
+    return Array.isArray(payload?.notices) ? payload.notices : [];
+  } catch (error) {
+    await cache.delete(PUSH_NOTICE_CACHE_KEY);
+    return [];
+  }
+};
 
 /**
  * Service Worker から届く Push デバッグログをブラウザコンソールへ出す
@@ -38,7 +68,24 @@ export const useWebPushDebugListener = ({ onPushDebug } = {}) => {
 
     navigator.serviceWorker.addEventListener('message', handleMessage);
 
+    /** フック有効中フラグ */
+    let isActive = true;
+
+    consumePendingPushDebugLogs()
+      .then((pendingLogs) => {
+        if (!isActive || !Array.isArray(pendingLogs) || pendingLogs.length === 0) {
+          return;
+        }
+
+        pendingLogs.forEach((payload) => {
+          console.info('[web-push][browser][pending]', payload);
+          onPushDebug?.(payload);
+        });
+      })
+      .catch(() => {});
+
     return () => {
+      isActive = false;
       navigator.serviceWorker.removeEventListener('message', handleMessage);
     };
   }, [onPushDebug]);
