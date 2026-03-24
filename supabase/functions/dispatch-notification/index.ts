@@ -378,6 +378,33 @@ const createServiceClient = () => {
 };
 
 /**
+ * リクエストヘッダー付きの認証用 Supabase クライアントを作成する
+ * service role client と分離し、Edge Functions 推奨の user-auth 検証経路を使う。
+ * @param {Request} request - リクエスト
+ * @returns {import('@supabase/supabase-js').SupabaseClient} 認証用クライアント
+ */
+const createRequestAuthClient = (request: Request) => {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('SUPABASE_URL または SUPABASE_ANON_KEY が未設定です');
+  }
+
+  return createClient(supabaseUrl, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: request.headers.get('authorization') ?? '',
+      },
+    },
+  });
+};
+
+/**
  * AuthorizationヘッダーからBearerトークンを取得する
  * @param {Request} request - リクエスト
  * @returns {string | null} Bearerトークン
@@ -585,10 +612,12 @@ const authenticateRequester = async (
     throw new Error('Authorization header or internal token is required');
   }
 
+  /** リクエスト認証用クライアント */
+  const authClient = createRequestAuthClient(request);
   const {
     data: { user },
     error: userError,
-  } = await supabase.auth.getUser(bearerToken);
+  } = await authClient.auth.getUser();
 
   if (userError || !user) {
     console.error('user token validation error:', userError);

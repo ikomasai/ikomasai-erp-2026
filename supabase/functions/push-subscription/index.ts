@@ -45,6 +45,32 @@ const createServiceClient = () => {
 };
 
 /**
+ * リクエストヘッダー付きの認証用 Supabase クライアントを作成する
+ * @param {Request} request - リクエスト
+ * @returns {import('@supabase/supabase-js').SupabaseClient} 認証用クライアント
+ */
+const createRequestAuthClient = (request: Request) => {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('SUPABASE_URL または SUPABASE_ANON_KEY が未設定です');
+  }
+
+  return createClient(supabaseUrl, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: request.headers.get('authorization') ?? '',
+      },
+    },
+  });
+};
+
+/**
  * AuthorizationヘッダーからBearerトークンを取得する
  * @param {Request} request - リクエスト
  * @returns {string | null} トークン
@@ -132,10 +158,12 @@ Deno.serve(async (request) => {
       return createJsonResponse({ error: 'Authorization header is required' }, 401);
     }
 
+    /** 認証用クライアント */
+    const authClient = createRequestAuthClient(request);
     const {
       data: { user },
       error: userError,
-    } = await supabase.auth.getUser(token);
+    } = await authClient.auth.getUser();
 
     if (userError || !user) {
       return createJsonResponse({ error: 'Invalid user token' }, 401);
