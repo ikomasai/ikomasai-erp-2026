@@ -15,11 +15,38 @@ import PasswordChangeForm from '../features/auth/components/PasswordChangeForm';
 import PasswordSuccessModal from '../features/auth/components/PasswordSuccessModal';
 import { usePasswordChange } from '../features/auth/hooks/usePasswordChange';
 import { usePushNavigationListener } from '../shared/hooks/usePushNavigationListener';
+import GlobalWebPushPrompt from '../features/notifications/components/GlobalWebPushPrompt';
 
 /**
  * スタックナビゲーター
  */
 const Stack = createNativeStackNavigator();
+
+/** 画面内バナーを持つ Push 対象画面 */
+const INLINE_PUSH_NOTICE_SCREENS = ['Item12', 'Item13', 'Item14', 'Item15', 'Item16'];
+
+/**
+ * ネストしたナビゲーション状態から最深部の画面名を取得する
+ * @param {Object|null|undefined} state - ナビゲーション状態
+ * @returns {string|null} 最深部の画面名
+ */
+const getDeepestRouteName = (state) => {
+  if (!state || !Array.isArray(state.routes) || state.routes.length === 0) {
+    return null;
+  }
+
+  /** 現在選択中のルート */
+  const currentRoute = state.routes[state.index ?? 0];
+  if (!currentRoute) {
+    return null;
+  }
+
+  if (currentRoute.state) {
+    return getDeepestRouteName(currentRoute.state) ?? currentRoute.name ?? null;
+  }
+
+  return currentRoute.name ?? null;
+};
 
 /**
  * アプリケーションナビゲーター
@@ -49,6 +76,8 @@ const AppNavigator = () => {
 
   // パスワード変更成功モーダル表示状態
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  // 現在表示中の画面名
+  const [currentRouteName, setCurrentRouteName] = useState(null);
 
   /**
    * 「今すぐ変更」ボタン押下時の処理
@@ -101,6 +130,26 @@ const AppNavigator = () => {
     }
   };
 
+  /**
+   * 現在表示中の画面名を更新する
+   */
+  const updateCurrentRouteName = () => {
+    /** ルート全体の状態 */
+    const rootState = navigationRef.current?.getRootState?.();
+    /** 現在ルート */
+    const routeName = getDeepestRouteName(rootState);
+    setCurrentRouteName(routeName);
+  };
+
+  /** グローバル Push 導線を非表示にする画面かどうか */
+  const hasInlinePushNotice = INLINE_PUSH_NOTICE_SCREENS.includes(currentRouteName);
+  /** グローバル Push 導線を出すかどうか */
+  const shouldShowGlobalPushPrompt =
+    isAuthenticated &&
+    !showSuccessModal &&
+    !(isFirstLogin && !showPasswordForm) &&
+    !hasInlinePushNotice;
+
   // ローディング中の表示
   if (isLoading) {
     return (
@@ -130,7 +179,11 @@ const AppNavigator = () => {
   }
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={updateCurrentRouteName}
+      onStateChange={updateCurrentRouteName}
+    >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           // ログイン済み: メイン画面を表示
@@ -140,6 +193,8 @@ const AppNavigator = () => {
           <Stack.Screen name="Login" component={LoginScreen} />
         )}
       </Stack.Navigator>
+
+      <GlobalWebPushPrompt visible={shouldShowGlobalPushPrompt} />
 
       {/* 初回ログイン時のパスワード変更推奨モーダル */}
       <PasswordChangeModal

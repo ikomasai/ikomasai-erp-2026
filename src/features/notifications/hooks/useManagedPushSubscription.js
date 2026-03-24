@@ -74,6 +74,26 @@ export const useManagedPushSubscription = ({ navigation, userId, enabled = true 
     return unsubscribe;
   }, [enabled, navigation, refreshPushSubscription]);
 
+  useEffect(() => {
+    if (!enabled || Platform.OS !== 'web' || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    /**
+     * ブラウザ復帰時に Push 購読状態を再確認する
+     * 権限変更後の戻りや別タブでの購読更新を取り込む
+     */
+    const handleWindowFocus = () => {
+      refreshPushSubscription(false);
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [enabled, refreshPushSubscription]);
+
   /**
    * 画面表示用の通知文言と操作を構築する
    */
