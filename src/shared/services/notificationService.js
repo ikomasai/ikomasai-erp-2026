@@ -22,6 +22,16 @@ export const emitNotificationUpdate = () => {
 };
 
 /**
+ * ブラウザコンソールへ通知送信ログを出す
+ * @param {string} phase - ログ段階
+ * @param {Object} detail - ログ詳細
+ * @returns {void}
+ */
+const logBrowserNotificationDispatch = (phase, detail) => {
+  console.info(`[notification][browser][${phase}]`, detail);
+};
+
+/**
  * Edge Functionエラーを読みやすいエラーへ整形
  * @param {unknown} error
  * @param {string} fallbackMessage
@@ -151,6 +161,18 @@ export const getUserProfilesByIds = async (userIds) => {
  */
 const dispatchNotification = async (payload) => {
   try {
+    logBrowserNotificationDispatch('request', {
+      targetType: payload?.targetType ?? null,
+      senderUserId: payload?.senderUserId ?? null,
+      userId: payload?.userId ?? null,
+      roleIds: payload?.roleIds ?? [],
+      roleNames: payload?.roleNames ?? [],
+      organizationIds: payload?.organizationIds ?? [],
+      organizationNames: payload?.organizationNames ?? [],
+      title: payload?.title ?? '',
+      metadata: payload?.metadata ?? {},
+    });
+
     const accessToken = await getEdgeFunctionAccessToken();
 
     if (!accessToken) {
@@ -180,6 +202,16 @@ const dispatchNotification = async (payload) => {
     }
 
     if (error) {
+      logBrowserNotificationDispatch('error', {
+        targetType: payload?.targetType ?? null,
+        senderUserId: payload?.senderUserId ?? null,
+        userId: payload?.userId ?? null,
+        roleIds: payload?.roleIds ?? [],
+        roleNames: payload?.roleNames ?? [],
+        organizationIds: payload?.organizationIds ?? [],
+        organizationNames: payload?.organizationNames ?? [],
+        message: recoveryError?.message ?? error.message ?? '通知送信に失敗しました',
+      });
       if (recoveryError) {
         return {
           data: null,
@@ -195,6 +227,15 @@ const dispatchNotification = async (payload) => {
     if (data?.error) {
       return { data: null, error: new Error(data.error) };
     }
+
+    logBrowserNotificationDispatch('response', {
+      traceId: data?.traceId ?? null,
+      notificationId: data?.notificationId ?? null,
+      sender: data?.sender ?? null,
+      recipients: data?.recipients ?? [],
+      recipientsCount: data?.recipientsCount ?? 0,
+      push: data?.push ?? null,
+    });
 
     return { data: data ?? null, error: null };
   } catch (error) {

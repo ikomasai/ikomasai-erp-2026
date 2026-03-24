@@ -36,6 +36,8 @@ const DEFAULT_NOTIFICATION_ACTIONS = [
 ];
 // 通知バイブレーション
 const DEFAULT_NOTIFICATION_VIBRATE = [160, 80, 160];
+// Pushデバッグメッセージ種別
+const PUSH_DEBUG_MESSAGE_TYPE = 'SW_PUSH_DEBUG';
 
 /**
  * プリキャッシュを実行する
@@ -120,6 +122,12 @@ const getNotificationData = (event) => {
       title: DEFAULT_NOTIFICATION_TITLE,
       body: DEFAULT_NOTIFICATION_BODY,
       url: DEFAULT_NOTIFICATION_URL,
+      traceId: null,
+      sender: null,
+      recipients: [],
+      recipientCount: 0,
+      receiptUrl: null,
+      receiptToken: null,
       navigateTo: null,
       notificationId: null,
       icon: DEFAULT_NOTIFICATION_ICON,
@@ -138,6 +146,17 @@ const getNotificationData = (event) => {
       title: parsedData.title || DEFAULT_NOTIFICATION_TITLE,
       body: parsedData.body || DEFAULT_NOTIFICATION_BODY,
       url: parsedData.url || DEFAULT_NOTIFICATION_URL,
+      traceId: parsedData.traceId || null,
+      sender: parsedData.sender || null,
+      recipients: Array.isArray(parsedData.recipients) ? parsedData.recipients : [],
+      recipientCount:
+        typeof parsedData.recipientCount === 'number' && Number.isFinite(parsedData.recipientCount)
+          ? parsedData.recipientCount
+          : Array.isArray(parsedData.recipients)
+            ? parsedData.recipients.length
+            : 0,
+      receiptUrl: parsedData.receiptUrl || null,
+      receiptToken: parsedData.receiptToken || null,
       /** 遷移先情報（{ screen: string, tab: string } または null） */
       navigateTo: parsedData.navigateTo || null,
       /** 通知ID（重複排除タグとして使用） */
@@ -165,6 +184,12 @@ const getNotificationData = (event) => {
       title: DEFAULT_NOTIFICATION_TITLE,
       body: event.data.text(),
       url: DEFAULT_NOTIFICATION_URL,
+      traceId: null,
+      sender: null,
+      recipients: [],
+      recipientCount: 0,
+      receiptUrl: null,
+      receiptToken: null,
       navigateTo: null,
       notificationId: null,
       icon: DEFAULT_NOTIFICATION_ICON,
@@ -207,6 +232,113 @@ const buildNotificationOptions = (data) => {
       notificationId: data.notificationId,
     },
   };
+};
+
+/**
+ * Pushデバッグ詳細を組み立てる
+ * @param {string} phase - ログ段階
+ * @param {Object} data - 通知データ
+ * @param {Object} extra - 追加情報
+ * @returns {Object} ログ詳細
+ */
+const buildPushDebugDetail = (phase, data, extra = {}) => {
+  return {
+    phase,
+    traceId: data.traceId || null,
+    notificationId: data.notificationId || null,
+    title: data.title || DEFAULT_NOTIFICATION_TITLE,
+    body: data.body || DEFAULT_NOTIFICATION_BODY,
+    url: data.url || DEFAULT_NOTIFICATION_URL,
+    sender: data.sender || null,
+    recipients: Array.isArray(data.recipients) ? data.recipients : [],
+    recipientCount:
+      typeof data.recipientCount === 'number' && Number.isFinite(data.recipientCount)
+        ? data.recipientCount
+        : Array.isArray(data.recipients)
+          ? data.recipients.length
+          : 0,
+    observedAt: new Date().toISOString(),
+    ...extra,
+  };
+};
+
+/**
+ * Service WorkerコンソールへPushデバッグログを出す
+ * @param {string} phase - ログ段階
+ * @param {Object} data - 通知データ
+ * @param {Object} extra - 追加情報
+ * @returns {Object} ログ詳細
+ */
+const logPushDebug = (phase, data, extra = {}) => {
+  const detail = buildPushDebugDetail(phase, data, extra);
+  console.info('[web-push][service-worker]', detail);
+  return detail;
+};
+
+/**
+ * 開いているブラウザ画面へPushデバッグログを配信する
+ * @param {Object} detail - ログ詳細
+ * @returns {Promise<void>} 配信結果
+ */
+const broadcastPushDebug = async (detail) => {
+  const clientList = await clients.matchAll({
+    type: 'window',
+    includeUncontrolled: true,
+  });
+
+  clientList.forEach((client) => {
+    client.postMessage({
+      type: PUSH_DEBUG_MESSAGE_TYPE,
+      payload: detail,
+    });
+  });
+};
+
+/**
+ * Push表示結果をSupabase Edge Functionへ送信する
+ * @param {string} eventName - 受信イベント名
+ * @param {Object} data - 通知データ
+ * @param {Object} extra - 追加情報
+ * @returns {Promise<void>} 送信結果
+ */
+const reportPushReceipt = async (eventName, data, extra = {}) => {
+  if (!data.receiptUrl || !data.notificationId || !data.receiptToken) {
+    return;
+  }
+
+  try {
+    await fetch(data.receiptUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        notificationId: data.notificationId,
+        receiptToken: data.receiptToken,
+        traceId: data.traceId || null,
+        event: eventName,
+        sender: data.sender || null,
+        recipients: Array.isArray(data.recipients) ? data.recipients : [],
+        recipientCount:
+          typeof data.recipientCount === 'number' && Number.isFinite(data.recipientCount)
+            ? data.recipientCount
+            : Array.isArray(data.recipients)
+              ? data.recipients.length
+              : 0,
+        url: data.url || DEFAULT_NOTIFICATION_URL,
+        userAgent: self.navigator?.userAgent || null,
+        detail: extra,
+        observedAt: new Date().toISOString(),
+      }),
+    });
+  } catch (error) {
+    console.error('[web-push][service-worker][receipt-error]', {
+      event: eventName,
+      notificationId: data.notificationId || null,
+      traceId: data.traceId || null,
+      error,
+    });
+  }
 };
 
 /**
@@ -298,15 +430,39 @@ self.addEventListener('push', (event) => {
     (async () => {
       const notificationData = getNotificationData(event);
       const notificationOptions = buildNotificationOptions(notificationData);
+      const receivedDetail = logPushDebug('push_received', notificationData, {
+        hasEventData: Boolean(event.data),
+      });
 
-      if (notificationOptions.tag) {
-        const existingNotifications = await self.registration.getNotifications({
-          tag: notificationOptions.tag,
+      await broadcastPushDebug(receivedDetail);
+      await reportPushReceipt('push_received', notificationData, {
+        hasEventData: Boolean(event.data),
+      });
+
+      try {
+        if (notificationOptions.tag) {
+          const existingNotifications = await self.registration.getNotifications({
+            tag: notificationOptions.tag,
+          });
+          existingNotifications.forEach((notification) => notification.close());
+        }
+
+        await self.registration.showNotification(notificationData.title, notificationOptions);
+        const shownDetail = logPushDebug('notification_shown', notificationData);
+        await broadcastPushDebug(shownDetail);
+        await reportPushReceipt('notification_shown', notificationData);
+      } catch (error) {
+        const normalizedMessage =
+          typeof error?.message === 'string' && error.message ? error.message : 'showNotification failed';
+        const errorDetail = logPushDebug('notification_show_error', notificationData, {
+          message: normalizedMessage,
         });
-        existingNotifications.forEach((notification) => notification.close());
+        await broadcastPushDebug(errorDetail);
+        await reportPushReceipt('notification_show_error', notificationData, {
+          message: normalizedMessage,
+        });
+        throw error;
       }
-
-      await self.registration.showNotification(notificationData.title, notificationOptions);
     })()
   );
 });

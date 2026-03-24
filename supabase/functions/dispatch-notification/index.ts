@@ -40,6 +40,12 @@ interface PushMessage {
   body: string;
   url: string;
   notificationId: string;
+  traceId: string;
+  sender: UserLogEntry | null;
+  recipients: UserLogEntry[];
+  recipientCount: number;
+  receiptUrl: string | null;
+  receiptToken: string | null;
   navigateTo: { screen: string; tab: string } | null;
   icon: string;
   badge: string;
@@ -70,6 +76,10 @@ const VAPID_PUBLIC_KEY = Deno.env.get('WEB_PUSH_VAPID_PUBLIC_KEY');
 const VAPID_PRIVATE_KEY = Deno.env.get('WEB_PUSH_VAPID_PRIVATE_KEY');
 const VAPID_SUBJECT = Deno.env.get('WEB_PUSH_VAPID_SUBJECT');
 const INTERNAL_NOTIFY_TOKEN = Deno.env.get('INTERNAL_NOTIFY_TOKEN');
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const PUSH_DELIVERY_RECEIPT_URL = SUPABASE_URL
+  ? `${SUPABASE_URL}/functions/v1/push-delivery-receipt`
+  : null;
 const PUSH_NOTIFICATION_ICON = '/icons/icon-192.png';
 const PUSH_NOTIFICATION_BADGE = '/icons/icon-192.png';
 const PUSH_TTL_SECONDS = 60 * 60 * 24;
@@ -268,6 +278,39 @@ const getEndpointProviderHost = (endpoint: string) => {
   } catch {
     return 'unknown';
   }
+};
+
+/**
+ * 通知保存用メタデータを組み立てる
+ * @param {Record<string, unknown> | undefined} metadata - 元メタデータ
+ * @param {Object} params - 補助情報
+ * @param {string} params.traceId - 送信追跡ID
+ * @param {string} params.receiptToken - 受信確認トークン
+ * @param {string | null} params.senderUserId - 送信者ユーザーID
+ * @param {string[]} params.recipientUserIds - 受信者ユーザーID一覧
+ * @returns {Record<string, unknown>} 保存用メタデータ
+ */
+const buildStoredNotificationMetadata = (
+  metadata: Record<string, unknown> | undefined,
+  {
+    traceId,
+    receiptToken,
+    senderUserId,
+    recipientUserIds,
+  }: {
+    traceId: string;
+    receiptToken: string;
+    senderUserId: string | null;
+    recipientUserIds: string[];
+  }
+) => {
+  return {
+    ...(metadata ?? {}),
+    _push_trace_id: traceId,
+    _push_receipt_token: receiptToken,
+    _push_sender_user_id: senderUserId,
+    _push_recipient_user_ids: recipientUserIds,
+  };
 };
 
 /**
@@ -705,17 +748,39 @@ const getPushUrgency = (metadata?: Record<string, unknown>): PushUrgency => {
  * @param {string} notificationId - 通知ID
  * @returns {PushMessage} Push通知メッセージ
  */
-const buildPushMessage = (payload: DispatchPayload, notificationId: string): PushMessage => {
+const buildPushMessage = (
+  payload: DispatchPayload,
+  notificationId: string,
+  {
+    traceId,
+    sender,
+    recipients,
+    receiptToken,
+  }: {
+    traceId: string;
+    sender: UserLogEntry | null;
+    recipients: UserLogEntry[];
+    receiptToken: string;
+  }
+): PushMessage => {
   const metadata = payload.metadata ?? {};
   const type = typeof metadata.type === 'string' ? metadata.type : '';
   const isEmergencyLike =
     type === 'emergency' || type === 'damage_report' || type === 'start_report' || type === 'end_report';
+  /** Push payload に載せる受信者要約 */
+  const summarizedRecipients = recipients.slice(0, 10);
 
   return {
     title: payload.title.trim(),
     body: payload.body.trim(),
     url: payload.url || '/notifications',
     notificationId,
+    traceId,
+    sender,
+    recipients: summarizedRecipients,
+    recipientCount: recipients.length,
+    receiptUrl: PUSH_DELIVERY_RECEIPT_URL,
+    receiptToken,
     navigateTo: getNavigateTo(metadata),
     icon: PUSH_NOTIFICATION_ICON,
     badge: PUSH_NOTIFICATION_BADGE,
@@ -1003,6 +1068,16 @@ Deno.serve(async (request) => {
       url: payload.url || '/notifications',
     });
 
+    /** 受信確認トークン */
+    const receiptToken = crypto.randomUUID();
+    /** 保存用通知メタデータ */
+    const storedMetadata = buildStoredNotificationMetadata(payload.metadata, {
+      traceId,
+      receiptToken,
+      senderUserId: authContext.senderUserId,
+      recipientUserIds,
+    });
+
     const { data: notification, error: notificationError } = await supabase
       .from('notifications')
       .insert([
@@ -1010,7 +1085,7 @@ Deno.serve(async (request) => {
           sender_user_id: authContext.senderUserId,
           title: payload.title.trim(),
           body: payload.body.trim(),
-          metadata: payload.metadata ?? {},
+          metadata: storedMetadata,
         },
       ])
       .select('id')
@@ -1056,13 +1131,23 @@ Deno.serve(async (request) => {
     };
 
     try {
-      push = await sendWebPush(supabase, recipientUserIds, buildPushMessage(payload, notification.id), {
-        traceId,
-        notificationId: notification.id,
-        sender: senderEntry,
-        recipients: recipientEntries,
-        metadata: metadataSummary,
-      });
+      push = await sendWebPush(
+        supabase,
+        recipientUserIds,
+        buildPushMessage(payload, notification.id, {
+          traceId,
+          sender: senderEntry,
+          recipients: recipientEntries,
+          receiptToken,
+        }),
+        {
+          traceId,
+          notificationId: notification.id,
+          sender: senderEntry,
+          recipients: recipientEntries,
+          metadata: metadataSummary,
+        }
+      );
     } catch (pushError) {
       console.error('web push dispatch error:', {
         traceId,
@@ -1084,6 +1169,9 @@ Deno.serve(async (request) => {
 
     return createJsonResponse({
       notificationId: notification.id,
+      traceId,
+      sender: senderEntry,
+      recipients: recipientEntries,
       recipientsCount: recipientUserIds.length,
       push,
     });

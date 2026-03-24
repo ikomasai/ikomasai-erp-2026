@@ -15,6 +15,7 @@ import PasswordChangeForm from '../features/auth/components/PasswordChangeForm';
 import PasswordSuccessModal from '../features/auth/components/PasswordSuccessModal';
 import { usePasswordChange } from '../features/auth/hooks/usePasswordChange';
 import { usePushNavigationListener } from '../shared/hooks/usePushNavigationListener';
+import { useWebPushDebugListener } from '../shared/hooks/useWebPushDebugListener';
 import GlobalWebPushPrompt from '../features/notifications/components/GlobalWebPushPrompt';
 
 /**
@@ -70,6 +71,8 @@ const AppNavigator = () => {
 
   // push通知タップ時の画面遷移リスナー（Service Worker postMessage + URLパラメータ）
   usePushNavigationListener({ navigationRef, isAuthenticated });
+  // push通知の受信デバッグログをブラウザコンソールへ出す
+  useWebPushDebugListener();
 
   // パスワード変更フォーム表示状態
   const [showPasswordForm, setShowPasswordForm] = useState(false);

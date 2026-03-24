@@ -412,6 +412,7 @@ const mergeNotificationResults = (results) => {
  * @param {Object} params - 通知パラメータ
  * @param {Object} params.ticket - 連絡案件
  * @param {string|null} [params.recipientUserId=null] - 個人通知先ユーザーID
+ * @param {boolean} [params.allowOrganizationFallback=true] - 組織通知へフォールバックするか
  * @param {string} params.title - タイトル
  * @param {string} params.body - 本文
  * @param {Object} [params.metadata={}] - メタデータ
@@ -422,6 +423,7 @@ const mergeNotificationResults = (results) => {
 const notifyUserOrOrganization = async ({
   ticket,
   recipientUserId = null,
+  allowOrganizationFallback = true,
   title,
   body,
   metadata = {},
@@ -459,6 +461,13 @@ const notifyUserOrOrganization = async ({
         data: mergeNotificationResults(notificationResults),
       };
     }
+  }
+
+  if (!allowOrganizationFallback) {
+    return {
+      error: notificationError,
+      data: mergeNotificationResults(notificationResults),
+    };
   }
 
   if (!organizationTarget.organizationId && !organizationTarget.organizationName) {
@@ -534,9 +543,13 @@ export const notifySupportTicketMessageCreated = async ({ ticket, authorId, body
     });
   }
 
+  /** 個人通知先ユーザーID */
+  const requesterRecipientUserId = ticketCreatorId || null;
+
   return notifyUserOrOrganization({
     ticket,
-    recipientUserId: ticketCreatorId || null,
+    recipientUserId: requesterRecipientUserId,
+    allowOrganizationFallback: false,
     title: `${buildDepartmentLabel(ticket)}から回答: ${buildTicketContextHeadline(context)}`,
     body: buildNotificationBody([
       ...buildTicketContextLines(context, '対応者'),
@@ -545,6 +558,7 @@ export const notifySupportTicketMessageCreated = async ({ ticket, authorId, body
     metadata: buildTicketMetadata(ticket, {
       type: 'support_contact_update',
       event: 'message_created',
+      recipient_user_id: requesterRecipientUserId,
     }, context),
     senderUserId: normalizedAuthorId,
     context,
@@ -582,9 +596,12 @@ export const notifySupportTicketStatusChanged = async ({
 
   /** 通知文脈 */
   const context = await resolveTicketContext(ticket, normalizedActorUserId);
+  /** 個人通知先ユーザーID */
+  const requesterRecipientUserId = ticketCreatorId || null;
   return notifyUserOrOrganization({
     ticket,
-    recipientUserId: ticketCreatorId || null,
+    recipientUserId: requesterRecipientUserId,
+    allowOrganizationFallback: false,
     title: `${buildDepartmentLabel(ticket)}が状況更新: ${buildTicketContextHeadline(context)}`,
     body: buildNotificationBody([
       ...buildTicketContextLines(context, '更新者'),
@@ -594,6 +611,7 @@ export const notifySupportTicketStatusChanged = async ({
       type: 'support_contact_update',
       event: 'status_changed',
       status: normalizeText(nextStatus) || null,
+      recipient_user_id: requesterRecipientUserId,
     }, context),
     senderUserId: normalizedActorUserId,
     context,
