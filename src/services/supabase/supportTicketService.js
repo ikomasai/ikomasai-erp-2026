@@ -329,6 +329,7 @@ export const createTicketMessage = async (input) => {
  * @param {Object} input - 更新データ
  * @param {string} input.ticketId - 連絡案件ID
  * @param {string} input.status - 更新後ステータス
+ * @param {string} [input.prevStatus] - 変更前ステータス（通知タイトルの「前→後」表示に使用）
  * @param {string} [input.notifyActorUserId] - 通知上の更新者ユーザーID
  * @returns {Promise<{data: Object|null, notificationResult: Object|null, notificationError: Error|null, error: Error|null}>} 更新結果
  */
@@ -336,6 +337,8 @@ export const updateTicketStatus = async (input) => {
   try {
     const ticketId = normalizeText(input.ticketId);
     const status = normalizeText(input.status);
+    /** 変更前ステータス（通知タイトル用） */
+    const prevStatus = normalizeText(input.prevStatus) || null;
     const notifyActorUserId = normalizeText(input.notifyActorUserId);
 
     if (!ticketId) {
@@ -365,6 +368,7 @@ export const updateTicketStatus = async (input) => {
       /** 状態更新通知結果 */
       const notifyResult = await notifySupportTicketStatusChanged({
         ticket: data,
+        prevStatus,
         nextStatus: status,
         actorUserId: notifyActorUserId,
       });

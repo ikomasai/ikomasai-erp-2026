@@ -1365,6 +1365,8 @@ const SupportDeskScreen = ({
     setIsUpdatingStatus(true);
     const result = await updateTicketStatus({
       ticketId: selectedTicket.id,
+      /** 変更前ステータス: 通知タイトルの「前→後」表示に使用 */
+      prevStatus: selectedTicket.ticket_status,
       status: resolveNextTicketStatus(roleType, nextStatus),
       notifyActorUserId: user?.id || '',
     });

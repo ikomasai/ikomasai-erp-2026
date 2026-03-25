@@ -61,6 +61,13 @@ const TICKET_STATUS_LABELS = {
   closed: '完了',
 };
 
+/**
+ * ステータス値からラベルを返す
+ * @param {string} status - ステータス値
+ * @returns {string} ラベル
+ */
+const resolveStatusLabel = (status) => TICKET_STATUS_LABELS[normalizeText(status)] || normalizeText(status) || '不明';
+
 /** 巡回タスク種別表示名 */
 const PATROL_TASK_TYPE_LABELS = {
   confirm_start: '企画開始確認',
@@ -582,6 +589,7 @@ export const notifySupportTicketMessageCreated = async ({ ticket, authorId, body
  */
 export const notifySupportTicketStatusChanged = async ({
   ticket,
+  prevStatus = null,
   nextStatus,
   actorUserId = null,
 }) => {
@@ -589,8 +597,12 @@ export const notifySupportTicketStatusChanged = async ({
   const ticketCreatorId = normalizeText(ticket?.created_by);
   /** 更新者ユーザーID */
   const normalizedActorUserId = normalizeText(actorUserId);
-  /** 状態ラベル */
-  const statusLabel = TICKET_STATUS_LABELS[normalizeText(nextStatus)] || normalizeText(nextStatus) || '更新';
+  /** 変更前ステータスラベル */
+  const prevStatusLabel = prevStatus ? resolveStatusLabel(prevStatus) : null;
+  /** 変更後ステータスラベル */
+  const nextStatusLabel = resolveStatusLabel(nextStatus);
+  /** 通知タイトル用ステータス変化テキスト（変更前が分かる場合は「前→後」形式） */
+  const statusChangeText = prevStatusLabel ? `${prevStatusLabel}→${nextStatusLabel}` : nextStatusLabel;
 
   if (!ticket?.id || !normalizedActorUserId) {
     return { error: null };
@@ -608,15 +620,16 @@ export const notifySupportTicketStatusChanged = async ({
     ticket,
     recipientUserId: requesterRecipientUserId,
     allowOrganizationFallback: false,
-    title: `${buildDepartmentLabel(ticket)}が状況更新: ${buildTicketContextHeadline(context)}`,
+    title: `${buildDepartmentLabel(ticket)}がステータス更新 [${statusChangeText}]: ${buildTicketContextHeadline(context)}`,
     body: buildNotificationBody([
       ...buildTicketContextLines(context, '更新者'),
-      `状況: ${statusLabel}`,
+      `変更: ${statusChangeText}`,
     ]),
     metadata: buildTicketMetadata(ticket, {
       type: 'support_contact_update',
       event: 'status_changed',
       status: normalizeText(nextStatus) || null,
+      prev_status: normalizeText(prevStatus) || null,
       recipient_user_id: requesterRecipientUserId,
     }, context),
     senderUserId: normalizedActorUserId,
