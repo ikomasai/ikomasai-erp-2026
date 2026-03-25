@@ -11,6 +11,7 @@ import {
   uploadTicketAttachmentFile,
 } from '../../../services/supabase/ticketAttachmentService.js';
 import { notifySupportTicketCreated } from '../../../shared/services/supportWorkflowNotificationService.js';
+import { createEmergencyPatrolTask } from '../../../services/supabase/patrolTaskService.js';
 
 /** 連絡案件テーブル名 */
 const SUPPORT_TICKETS_TABLE = 'support_tickets';
@@ -445,6 +446,18 @@ const createEmergencyContact = async (input) => {
     };
 
     const result = await createSupportTicket(payload);
+
+    // emergency チケット作成成功時に emergency_support 巡回タスクを自動生成する
+    if (result?.data?.id) {
+      const { error: patrolTaskError } = await createEmergencyPatrolTask({
+        ticket: result.data,
+        creatorUserId: normalizeText(input.createdBy) || null,
+      });
+      if (patrolTaskError) {
+        console.warn('emergency_support タスク自動生成に失敗:', patrolTaskError);
+      }
+    }
+
     return applyAttachmentAndNotify(result, input);
   } catch (error) {
     return { data: null, error };

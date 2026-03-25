@@ -6,6 +6,7 @@
 import {
   getUserProfilesByIds,
   sendNotificationToRoleNames as dispatchNotificationToRoleNames,
+  sendNotificationToUser as dispatchNotificationToUser,
 } from './notificationService.js';
 
 /** DB roles テーブルの実在ロール名のみ使用する */
@@ -58,6 +59,30 @@ const sendNotificationToRoleNames = async ({
     return { error: result.error };
   }
 
+  return { error: null, data: result };
+};
+
+/**
+ * 個人ユーザーへ通知を送る内部ヘルパー
+ * @param {Object} params
+ * @param {string} params.userId - 送信先ユーザーID
+ * @param {string} params.title - 通知タイトル
+ * @param {string} params.body - 通知本文
+ * @param {Object} [params.metadata={}] - メタデータ
+ * @param {string|null} [params.senderUserId=null] - 送信者ユーザーID
+ * @returns {Promise<{error: Error|null, data?: Object}>}
+ */
+const sendNotificationToUser = async ({
+  userId,
+  title,
+  body,
+  metadata = {},
+  senderUserId = null,
+}) => {
+  const result = await dispatchNotificationToUser(userId, title, body, metadata, senderUserId);
+  if (result.error) {
+    return { error: result.error };
+  }
   return { error: null, data: result };
 };
 
@@ -237,11 +262,15 @@ export const notifyPatrolTaskAccepted = async ({ task, senderUserId = null }) =>
   const taskLabel = TASK_TYPE_LABELS[taskType] || '巡回タスク';
   const eventName = normalizeText(task.event_name) || '企画名未設定';
   const eventLocation = normalizeText(task.event_location || task.location_text) || '場所未設定';
+  /** 担当者名を取得してタイトルに含める */
+  const assigneeId = normalizeText(task.assigned_to || senderUserId);
+  const profileMap = assigneeId ? await loadProfileMap([assigneeId]) : {};
+  const assigneeName = profileMap[assigneeId]?.name || '担当者';
 
   /** 管理部全員（警備部 + 企画管理部 + 管理者）へ通知 */
   return sendNotificationToRoleNames({
     roleNames: DEPARTMENT_ROLE_NAME_TARGETS.patrol,
-    title: `巡回受諾: ${taskLabel}`,
+    title: `${assigneeName} が巡回タスクを受諾 [${taskLabel}]`,
     body: `${eventName} / ${eventLocation}`,
     metadata: {
       source: 'patrol_task',
@@ -253,6 +282,17 @@ export const notifyPatrolTaskAccepted = async ({ task, senderUserId = null }) =>
     },
     senderUserId,
   });
+};
+
+/** 結果コードの表示ラベル */
+const RESULT_CODE_LABELS = {
+  OK: '問題なし',
+  NOT_STARTED: '開始していない',
+  NOT_ENDED: '終了していない',
+  NEED_SUPPORT: '別対応必要',
+  LOCKED: '施錠済',
+  UNLOCKED: '未施錠',
+  CANNOT_CONFIRM: '確認不可',
 };
 
 /**
@@ -272,11 +312,18 @@ export const notifyPatrolTaskCompleted = async ({ task, resultCode, senderUserId
   const taskLabel = TASK_TYPE_LABELS[taskType] || '巡回タスク';
   const eventName = normalizeText(task.event_name) || '企画名未設定';
   const eventLocation = normalizeText(task.event_location || task.location_text) || '場所未設定';
+  /** 結果ラベルを解決 */
+  const normalizedCode = normalizeText(resultCode).toUpperCase();
+  const resultLabel = RESULT_CODE_LABELS[normalizedCode] || normalizedCode || '未設定';
+  /** 担当者名を取得してタイトルに含める */
+  const assigneeId = normalizeText(task.assigned_to || senderUserId);
+  const profileMap = assigneeId ? await loadProfileMap([assigneeId]) : {};
+  const assigneeName = profileMap[assigneeId]?.name || '担当者';
 
   return sendNotificationToRoleNames({
     roleNames: DEPARTMENT_ROLE_NAME_TARGETS.hq,
-    title: `巡回完了: ${taskLabel}`,
-    body: `${eventName} / ${eventLocation}\n結果: ${normalizeText(resultCode) || '未設定'}`,
+    title: `${assigneeName} が巡回タスクを完了 [${taskLabel}]`,
+    body: `${eventName} / ${eventLocation}\n結果: ${resultLabel}`,
     metadata: {
       source: 'patrol_task',
       event: 'completed',
@@ -304,14 +351,16 @@ export const notifyLockCheckTaskCreated = async ({ task, loan = null, senderUser
     return { error: null };
   }
 
-  const keyLabel = normalizeText(task?.event_location || task?.location_text || loan?.key_label) || '鍵不明';
+  /** 鍵ラベルは loan.key_label を優先し、なければタスクの location_text を使用 */
+  const keyLabel = normalizeText(loan?.key_label || task?.location_text) || '鍵不明';
   const eventName = normalizeText(task?.event_name || loan?.event_name) || '企画名未設定';
+  const eventLocation = normalizeText(task?.event_location || loan?.event_location) || eventName;
 
   return sendNotificationToRoleNames({
     /** 施錠確認タスクは企画管理部＋管理者へ通知 */
     roleNames: DEPARTMENT_ROLE_NAME_TARGETS.hq,
-    title: '施錠確認タスクが作成されました',
-    body: `${eventName} / ${keyLabel}`,
+    title: `[${eventName}] 鍵「${keyLabel}」の施錠確認タスクが作成されました`,
+    body: `場所: ${eventLocation}`,
     metadata: {
       source: 'key_loan',
       event: 'lock_task_created',
@@ -323,3 +372,67 @@ export const notifyLockCheckTaskCreated = async ({ task, loan = null, senderUser
   });
 };
 
+/**
+ * 企画開始/終了報告の確認完了通知（企画者個人へ）
+ * 巡回担当者が confirm_start / confirm_end タスクを「問題なし」で完了したとき、
+ * 報告を送った企画者本人に結果を通知する
+ * @param {Object} input
+ * @param {Object} input.ticket - 元の連絡案件（start_report / end_report）
+ * @param {string|null} [input.patrolUserId] - 完了した巡回担当者のユーザーID
+ * @returns {Promise<{error: Error|null, data?: Object}>}
+ */
+export const notifyStartEndReportConfirmed = async ({ ticket, patrolUserId = null }) => {
+  /** 報告者IDが取得できない場合は通知しない */
+  const reporterUserId = normalizeText(ticket?.created_by);
+  if (!reporterUserId) {
+    return { error: null };
+  }
+
+  const ticketType = normalizeText(ticket?.ticket_type);
+  /** 種別ラベル（start_report / end_report） */
+  const typeLabel = ticketType === 'start_report' ? '企画開始報告' : '企画終了報告';
+  const eventName = normalizeText(ticket?.event_name) || '企画名未設定';
+
+  return sendNotificationToUser({
+    userId: reporterUserId,
+    title: `${typeLabel}が確認されました`,
+    body: `${eventName} の${typeLabel}を確認しました`,
+    metadata: {
+      type: 'support_contact_update',
+      notify_target: 'hq',
+      ticket_id: ticket.id || null,
+      ticket_type: ticketType || null,
+    },
+    senderUserId: patrolUserId,
+  });
+};
+
+/**
+ * 鍵の事前申請が用意済みになったことを予約者に通知する
+ * @param {Object} input
+ * @param {Object} input.reservation - 鍵予約レコード
+ * @param {string|null} [input.staffUserId] - 操作した担当者のユーザーID
+ * @returns {Promise<{error: Error|null, data?: Object}>}
+ */
+export const notifyKeyReservationReady = async ({ reservation, staffUserId = null }) => {
+  /** 予約者IDが取得できない場合は通知しない */
+  const reserverUserId = normalizeText(reservation?.created_by || reservation?.user_id);
+  if (!reserverUserId) {
+    return { error: null };
+  }
+
+  /** 鍵名（key_label または key_code） */
+  const keyLabel = normalizeText(reservation?.key_label || reservation?.key_code) || '鍵';
+  const eventName = normalizeText(reservation?.event_name) || '企画名未設定';
+
+  return sendNotificationToUser({
+    userId: reserverUserId,
+    title: '鍵が用意できました',
+    body: `鍵「${keyLabel}」の準備が完了しました\n企画: ${eventName}`,
+    metadata: {
+      type: 'key_reservation_ready',
+      reservation_id: reservation.id || null,
+    },
+    senderUserId: staffUserId,
+  });
+};

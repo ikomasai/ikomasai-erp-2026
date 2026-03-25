@@ -223,3 +223,46 @@ export const returnKeyAndCreateLockTask = async (input) => {
     return { data: null, error };
   }
 };
+
+/**
+ * 借受人が同じ複数の鍵貸出を一括で返却する
+ * 各貸出を returnKeyAndCreateLockTask で処理し、全件の返却を試みる
+ * @param {Object} input - 入力
+ * @param {string[]} input.loanIds - 返却する貸出IDの配列
+ * @param {string} input.returnUserId - 返却操作者ユーザーID
+ * @returns {Promise<{results: Array, error: Error|null}>} 処理結果
+ */
+export const returnKeyLoansByBorrower = async ({ loanIds, returnUserId }) => {
+  try {
+    const normalizedReturnUserId = normalizeText(returnUserId);
+    const normalizedLoanIds = (loanIds || [])
+      .map((id) => normalizeText(id))
+      .filter(Boolean);
+
+    if (normalizedLoanIds.length === 0) {
+      throw new Error('返却対象の貸出IDが未指定です');
+    }
+    if (!normalizedReturnUserId) {
+      throw new Error('returnUserId が未指定です');
+    }
+
+    /** 各貸出を並列で返却処理する（施錠確認タスクはデフォルトで作成しない） */
+    const results = await Promise.all(
+      normalizedLoanIds.map((loanId) =>
+        returnKeyAndCreateLockTask({
+          loanId,
+          createLockTask: false,
+          returnUserId: normalizedReturnUserId,
+          optionalAssignee: null,
+        })
+      )
+    );
+
+    /** エラーがあれば最初のものを返す（全件は results で確認可能） */
+    const firstError = results.find((r) => r.error)?.error || null;
+
+    return { results, error: firstError };
+  } catch (error) {
+    return { results: [], error };
+  }
+};

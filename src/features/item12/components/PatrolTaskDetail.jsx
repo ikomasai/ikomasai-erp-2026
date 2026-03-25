@@ -174,6 +174,14 @@ const PatrolTaskDetail = ({
         <Text style={[styles.helpText, { color: theme.textSecondary }]}>
           現地へ向かうときは先に受諾し、対応後は結果とメモを添えて完了登録してください。
         </Text>
+        {/* 向かいます不可バナー: 別タスク対応中で受諾できない場合に表示 */}
+        {!canAccept && selectedTask.task_status === PATROL_TASK_STATUSES.OPEN && (
+          <View style={styles.cannotAcceptBanner}>
+            <Text style={styles.cannotAcceptBannerText}>
+              現在別のタスクを対応中のため受諾できません
+            </Text>
+          </View>
+        )}
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={[
@@ -218,9 +226,36 @@ const PatrolTaskDetail = ({
         ]}
       >
         <Text style={[styles.label, { color: theme.text }]}>指示メモ</Text>
-        <Text style={[styles.requestBody, { color: theme.text }]}>
-          {selectedTask.notes || '指示メモはありません'}
-        </Text>
+        {/* 施錠確認タスクの場合は鍵名を目立つように強調表示する */}
+        {selectedTask.task_type === PATROL_TASK_TYPES.LOCK_CHECK && selectedTask.notes ? (
+          (() => {
+            /** notes が "鍵返却後の施錠確認: [鍵ラベル]" 形式かチェック */
+            const colonIndex = selectedTask.notes.indexOf(':');
+            const hasKeyLabel = colonIndex !== -1;
+            /** コロン前のプレフィックス（"鍵返却後の施錠確認" など） */
+            const prefix = hasKeyLabel ? selectedTask.notes.substring(0, colonIndex).trim() : null;
+            /** コロン後の鍵名部分 */
+            const keyLabel = hasKeyLabel
+              ? selectedTask.notes.substring(colonIndex + 1).trim()
+              : selectedTask.notes;
+            return (
+              <View>
+                {prefix ? (
+                  <Text style={[styles.requestBody, { color: theme.textSecondary }]}>
+                    {prefix}:
+                  </Text>
+                ) : null}
+                <Text style={[styles.keyLabelHighlight, { color: theme.text }]}>
+                  🔑 {keyLabel}
+                </Text>
+              </View>
+            );
+          })()
+        ) : (
+          <Text style={[styles.requestBody, { color: theme.text }]}>
+            {selectedTask.notes || '指示メモはありません'}
+          </Text>
+        )}
       </View>
 
       <Text style={[styles.label, { color: theme.text }]}>完了結果</Text>
@@ -553,6 +588,24 @@ const styles = StyleSheet.create({
   messageDate: {
     fontSize: 11,
     marginTop: 4,
+  },
+  cannotAcceptBanner: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#FF4D4F',
+    alignItems: 'center',
+  },
+  cannotAcceptBannerText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  keyLabelHighlight: {
+    fontSize: 18,
+    fontWeight: '800',
+    marginTop: 4,
+    lineHeight: 26,
   },
 });
 

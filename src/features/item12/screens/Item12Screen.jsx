@@ -5,6 +5,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -38,6 +39,7 @@ import {
   listUnvisitedLocations,
 } from '../../../services/supabase/patrolCheckService';
 import { selectOrganizationEvents } from '../../../services/supabase/organizationEventService';
+import { listKeyLoans } from '../../../services/supabase/keyLoanService';
 import {
   ALL_ORGANIZATION_EVENT_FILTER,
   buildOrganizationEventOptions,
@@ -113,6 +115,9 @@ const TASK_TYPE_LABELS = {
 
 /** 未巡回アラートのデフォルト閾値（分） */
 const DEFAULT_UNVISITED_ALERT_MINUTES = 90;
+
+/** AsyncStorage: 巡回サポートに施錠確認サマリーを表示するかのキー */
+const ASYNC_KEY_SHOW_LOCK_CHECK_IN_PATROL = 'showLockCheckInPatrol';
 
 /** タブごとの案内文 */
 const PATROL_TAB_DESCRIPTIONS = {
@@ -233,6 +238,12 @@ const Item12Screen = ({ navigation, route }) => {
   const [selectedOrganizationEvent, setSelectedOrganizationEvent] = useState(ALL_ORGANIZATION_EVENT_FILTER);
   /** 団体候補表示フラグ */
   const [isOrganizationEventDropdownOpen, setIsOrganizationEventDropdownOpen] = useState(false);
+
+  /* ---- 施錠確認サマリー関連 ---- */
+  /** 巡回サポートに施錠確認サマリーを表示するか（AsyncStorage 設定） */
+  const [showLockCheckInPatrol, setShowLockCheckInPatrol] = useState(false);
+  /** 本日貸出中の鍵一覧（施錠確認進捗計算用） */
+  const [todayKeyLoans, setTodayKeyLoans] = useState([]);
 
   /* ---- トースト通知 ---- */
   /** トースト表示フラグ・メッセージ・種別 */
@@ -863,26 +874,25 @@ const Item12Screen = ({ navigation, route }) => {
   );
 
   /**
-   * 自分が現在受諾中/移動中の同種別タスクが存在するか
+   * 自分が現在受諾中/移動中のタスクが種別問わず存在するか
    * 未割当タスクへの「行きます」可否判定に使用する
    */
-  const hasSameTypeActiveTask = useMemo(() => {
-    if (!selectedTask || !user?.id) {
+  const hasAnyActiveTask = useMemo(() => {
+    if (!user?.id) {
       return false;
     }
     return tasks.some(
       (task) =>
-        task.id !== selectedTask.id &&
-        task.task_type === selectedTask.task_type &&
+        task.id !== selectedTask?.id &&
         task.assigned_to === user.id &&
         [PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(task.task_status)
     );
-  }, [tasks, selectedTask, user?.id]);
+  }, [tasks, selectedTask?.id, user?.id]);
 
   /**
    * 受諾可能かどうか
    * - 自分に割り当て済み: ステータスが open/accepted/en_route であれば受諾可
-   * - 未割当: 同種別のアクティブタスクを持っていなければ受諾可
+   * - 未割当: 種別問わずアクティブタスクを1つでも持っていなければ受諾可
    * - 他者に割り当て済み: 受諾不可
    */
   const canAccept = useMemo(() => {
@@ -901,13 +911,13 @@ const Item12Screen = ({ navigation, route }) => {
     if (selectedTask.assigned_to === user?.id) {
       return true;
     }
-    /** 未割当の場合は同種別アクティブタスクがなければ受諾可 */
+    /** 未割当の場合は種別問わずアクティブタスクがなければ受諾可 */
     if (!selectedTask.assigned_to) {
-      return !hasSameTypeActiveTask;
+      return !hasAnyActiveTask;
     }
     /** 他者が担当者の場合は受諾不可 */
     return false;
-  }, [selectedTask, user?.id, hasSameTypeActiveTask]);
+  }, [selectedTask, user?.id, hasAnyActiveTask]);
 
   /** 完了可能かどうか（自分担当または未割当のアクティブタスクのみ） */
   const canComplete = useMemo(
@@ -990,6 +1000,60 @@ const Item12Screen = ({ navigation, route }) => {
       setActiveTab(initialTab);
     }
   }, [initialTab]);
+
+  /**
+   * AsyncStorage から施錠確認サマリー表示設定を読み込む
+   * HQKeyManagementPanel でONにした場合に巡回サポートにもサマリーを表示する
+   */
+  useEffect(() => {
+    const loadLockCheckSetting = async () => {
+      try {
+        const value = await AsyncStorage.getItem(ASYNC_KEY_SHOW_LOCK_CHECK_IN_PATROL);
+        setShowLockCheckInPatrol(value === '1');
+      } catch (e) {
+        console.warn('施錠確認設定の読み込みに失敗:', e);
+      }
+    };
+    loadLockCheckSetting();
+  }, []);
+
+  /**
+   * showLockCheckInPatrol が ON の場合に本日貸出中の鍵一覧を取得する
+   */
+  useEffect(() => {
+    if (!showLockCheckInPatrol) {
+      return;
+    }
+    const loadTodayKeyLoans = async () => {
+      const { data } = await listKeyLoans({ status: 'loaned', limit: 200 });
+      if (data) {
+        /** 本日（当日）の貸出のみを抽出 */
+        const todayStr = new Date().toDateString();
+        setTodayKeyLoans(
+          data.filter(
+            (loan) => new Date(loan.loaned_at || loan.created_at).toDateString() === todayStr
+          )
+        );
+      }
+    };
+    loadTodayKeyLoans();
+  }, [showLockCheckInPatrol]);
+
+  /**
+   * 本日貸出分の施錠確認進捗（完了本数・合計本数・%）
+   */
+  const todayLockCheckProgress = useMemo(() => {
+    /** 完了済み（locked / confirmed）の件数 */
+    const completed = todayKeyLoans.filter((loan) =>
+      ['locked', 'confirmed'].includes(loan.lock_check_status)
+    );
+    const total = todayKeyLoans.length;
+    return {
+      total,
+      completed: completed.length,
+      percent: total > 0 ? Math.round((completed.length / total) * 100) : 0,
+    };
+  }, [todayKeyLoans]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -1143,6 +1207,25 @@ const Item12Screen = ({ navigation, route }) => {
           {/* タスクタブ */}
           {activeTab === PATROL_TAB_TYPES.TASKS && (
             <>
+              {/* 施錠確認サマリーカード（AsyncStorage 設定 ON のときのみ表示） */}
+              {showLockCheckInPatrol && todayLockCheckProgress.total > 0 && (
+                <View
+                  style={[
+                    lockCheckSummaryStyles.card,
+                    { backgroundColor: theme.surface, borderColor: theme.border },
+                  ]}
+                >
+                  <Text style={[lockCheckSummaryStyles.title, { color: theme.textSecondary }]}>
+                    本日の施錠確認
+                  </Text>
+                  <Text style={[lockCheckSummaryStyles.percent, { color: theme.text }]}>
+                    {todayLockCheckProgress.percent}%
+                  </Text>
+                  <Text style={[lockCheckSummaryStyles.detail, { color: theme.textSecondary }]}>
+                    {todayLockCheckProgress.completed}/{todayLockCheckProgress.total}本 完了
+                  </Text>
+                </View>
+              )}
               <PatrolTaskList
                 theme={theme}
                 user={user}
@@ -1408,6 +1491,29 @@ const Item12Screen = ({ navigation, route }) => {
     </SafeAreaView>
   );
 };
+
+/** 施錠確認サマリーカードスタイル */
+const lockCheckSummaryStyles = StyleSheet.create({
+  card: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  percent: {
+    fontSize: 36,
+    fontWeight: 'bold',
+  },
+  detail: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+});
 
 /** ダッシュボードタブ専用スタイル */
 const dashboardStyles = StyleSheet.create({

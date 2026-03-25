@@ -8,6 +8,7 @@ import { createTicketMessage, SUPPORT_TICKET_STATUSES, updateTicketStatus } from
 import {
   notifyPatrolTaskAccepted,
   notifyPatrolTaskCompleted,
+  notifyStartEndReportConfirmed,
 } from '../../shared/services/supportWorkflowNotificationService.js';
 import { notifyPatrolTaskAssigned } from './supportNotificationService.js';
 
@@ -394,6 +395,29 @@ export const completePatrolTask = async (input) => {
         .eq('id', input.sourceKeyLoanId);
     }
 
+    // 開始・終了報告確認タスクが OK 系で完了した場合、企画者へ個人通知を送る
+    const isStartEndConfirmType =
+      normalizeText(input.taskType) === PATROL_TASK_TYPES.CONFIRM_START ||
+      normalizeText(input.taskType) === PATROL_TASK_TYPES.CONFIRM_END;
+    const isOkResult =
+      normalizedResultCode === PATROL_RESULT_CODES.OK ||
+      normalizedResultCode === PATROL_RESULT_CODES.LOCKED;
+    if (isStartEndConfirmType && isOkResult && normalizeText(input.sourceTicketId)) {
+      /** 元連絡案件を取得して企画者へ通知 */
+      const { data: sourceTicket } = await getSupabaseClient()
+        .from('support_tickets')
+        .select('id, ticket_type, title, event_name, event_location, created_by')
+        .eq('id', input.sourceTicketId)
+        .single();
+      if (sourceTicket) {
+        const { error: startEndNotifyError } = await notifyStartEndReportConfirmed({
+          ticket: sourceTicket,
+          patrolUserId: normalizedUserId,
+        });
+        logNotificationError('開始終了報告確認', startEndNotifyError);
+      }
+    }
+
     const { error: notifyError } = await notifyPatrolTaskCompleted({
       task: taskData,
       resultCode: normalizedResultCode,
@@ -409,6 +433,48 @@ export const completePatrolTask = async (input) => {
       error: null,
     };
   } catch (error) {
+    return { data: null, error };
+  }
+};
+
+/**
+ * emergency 連絡案件から emergency_support 巡回タスクを自動生成する
+ * @param {Object} input - 入力
+ * @param {Object} input.ticket - 元となる emergency 連絡案件オブジェクト
+ * @param {string} [input.creatorUserId] - タスク生成者ユーザーID
+ * @returns {Promise<{data: Object|null, error: Error|null}>} 生成結果
+ */
+export const createEmergencyPatrolTask = async ({ ticket, creatorUserId = null }) => {
+  try {
+    const normalizedCreatorUserId = normalizeText(creatorUserId) || null;
+
+    if (!ticket?.id) {
+      throw new Error('ticket.id が未指定です');
+    }
+
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .insert({
+        task_type: PATROL_TASK_TYPES.EMERGENCY_SUPPORT,
+        task_status: PATROL_TASK_STATUSES.OPEN,
+        event_name: ticket.event_name || null,
+        event_location: ticket.event_location || null,
+        location_text: ticket.event_location || null,
+        notes: ticket.title || null,
+        source_ticket_id: ticket.id,
+        created_by: normalizedCreatorUserId,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('emergency_support タスク生成エラー:', error);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('emergency_support タスク生成処理でエラー:', error);
     return { data: null, error };
   }
 };

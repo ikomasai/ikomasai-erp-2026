@@ -4,6 +4,7 @@
  */
 
 import { getSupabaseClient } from './client.js';
+import { notifyKeyReservationReady } from '../../shared/services/supportWorkflowNotificationService.js';
 
 const KEY_RESERVATIONS_TABLE = 'key_reservations';
 const KEYS_TABLE = 'keys';
@@ -16,6 +17,7 @@ const normalizeText = (value) => (value || '').trim();
 /** 予約状態 */
 export const KEY_RESERVATION_STATUSES = {
   PENDING: 'pending',
+  READY_TO_LOAN: 'ready_to_loan',
   APPROVED: 'approved',
   REJECTED: 'rejected',
   CANCELED: 'canceled',
@@ -199,7 +201,11 @@ export const updateKeyReservationStatus = async (input) => {
     if (!reservationId) {
       throw new Error('reservationId が未指定です');
     }
-    if (!VALID_STATUSES.has(status) || status === KEY_RESERVATION_STATUSES.PENDING) {
+    if (
+      !VALID_STATUSES.has(status) ||
+      status === KEY_RESERVATION_STATUSES.PENDING ||
+      status === KEY_RESERVATION_STATUSES.READY_TO_LOAN
+    ) {
       throw new Error('更新対象の status が不正です');
     }
 
@@ -220,6 +226,63 @@ export const updateKeyReservationStatus = async (input) => {
     if (error) {
       console.error('鍵予約更新エラー:', error);
       return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
+};
+
+/**
+ * 鍵予約を「用意済み（ready_to_loan）」状態に更新し、予約者へ通知を送る
+ * PENDING → READY_TO_LOAN の遷移に使用する
+ * @param {Object} input - 入力
+ * @param {string} input.reservationId - 予約ID
+ * @param {string} [input.staffUserId] - 操作スタッフのユーザーID
+ * @returns {Promise<{data: Object|null, error: Error|null}>} 更新結果
+ */
+export const markReservationReady = async ({ reservationId, staffUserId = null }) => {
+  try {
+    const normalizedReservationId = normalizeText(reservationId);
+    const normalizedStaffUserId = normalizeText(staffUserId) || null;
+
+    if (!normalizedReservationId) {
+      throw new Error('reservationId が未指定です');
+    }
+
+    /** 予約レコードを取得して通知に必要な情報を揃える */
+    const { data: reservation, error: fetchError } = await getSupabaseClient()
+      .from(KEY_RESERVATIONS_TABLE)
+      .select(`${KEY_RESERVATION_COLUMNS},keys(key_code,display_name,location_text)`)
+      .eq('id', normalizedReservationId)
+      .single();
+
+    if (fetchError) {
+      console.error('鍵予約取得エラー（用意済み更新前）:', fetchError);
+      return { data: null, error: fetchError };
+    }
+
+    const { data, error } = await getSupabaseClient()
+      .from(KEY_RESERVATIONS_TABLE)
+      .update({ status: KEY_RESERVATION_STATUSES.READY_TO_LOAN })
+      .eq('id', normalizedReservationId)
+      .eq('status', KEY_RESERVATION_STATUSES.PENDING)
+      .select(KEY_RESERVATION_COLUMNS)
+      .single();
+
+    if (error) {
+      console.error('鍵予約用意済み更新エラー:', error);
+      return { data: null, error };
+    }
+
+    /** 予約者へ用意完了の個人通知を送る */
+    const { error: notifyError } = await notifyKeyReservationReady({
+      reservation,
+      staffUserId: normalizedStaffUserId,
+    });
+    if (notifyError) {
+      console.warn('鍵予約用意済み通知に失敗:', notifyError);
     }
 
     return { data, error: null };

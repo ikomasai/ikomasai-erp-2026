@@ -384,6 +384,7 @@ const ELAPSED_DANGER_MINUTES = 30;
 
 /** HQロール向けタブ定義 */
 const HQ_TABS = [
+  { key: 'dashboard', label: '🏠 ダッシュボード' },
   { key: 'overview', label: '📊 概況確認' },
   { key: 'tickets', label: '📋 連絡案件' },
   { key: 'keys', label: '🔑 鍵管理' },
@@ -394,7 +395,7 @@ const HQ_TABS = [
 ];
 
 /** HQタブのデフォルト */
-const HQ_TAB_DEFAULT = 'keys';
+const HQ_TAB_DEFAULT = 'dashboard';
 
 /** 経過時間アラート色 */
 const ELAPSED_COLORS = {
@@ -2414,6 +2415,90 @@ const SupportDeskScreen = ({
           </View>
         ) : null}
 
+        {/* ─── ダッシュボードタブ ─── */}
+        {isHQRole && activeTab === 'dashboard' ? (
+          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>本部ダッシュボード</Text>
+              <TouchableOpacity
+                style={[styles.refreshButton, { borderColor: theme.border }]}
+                onPress={() => {
+                  loadTickets(selectedTicketId);
+                  loadHqPatrolTasks();
+                  loadRadioLogs();
+                }}
+              >
+                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* 警告カード: 遅延案件 */}
+            {dashboardSummary.delayedTickets > 0 ? (
+              <View style={[styles.dashboardAlertBanner, { backgroundColor: '#FFF0F0', borderColor: '#D1242F' }]}>
+                <Text style={[styles.dashboardAlertText, { color: '#D1242F' }]}>
+                  ⚠️ 対応遅延: {dashboardSummary.delayedTickets}件（60分以上未解決）
+                </Text>
+              </View>
+            ) : null}
+
+            {/* 概要カードグリッド */}
+            <View style={styles.dashboardGrid}>
+              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>📬 新着連絡</Text>
+                <Text style={[styles.dashboardValue, { color: theme.text }]}>{dashboardSummary.newTickets}</Text>
+                <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
+              </View>
+              <View style={[styles.dashboardCard, { borderColor: '#D1242F', backgroundColor: dashboardSummary.delayedTickets > 0 ? '#FFF0F0' : theme.background }]}>
+                <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>⏰ 遅延案件(60分+)</Text>
+                <Text style={[styles.dashboardValue, { color: '#D1242F' }]}>{dashboardSummary.delayedTickets}</Text>
+                <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
+              </View>
+              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>🚶 巡回対応中</Text>
+                <Text style={[styles.dashboardValue, { color: theme.primary }]}>{dashboardSummary.activePatrolTasks}</Text>
+                <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
+              </View>
+              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>📡 無線ログ(1h)</Text>
+                <Text style={[styles.dashboardValue, { color: theme.text }]}>{dashboardSummary.recentRadioLogs}</Text>
+                <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
+              </View>
+            </View>
+
+            {/* 最新の未解決連絡案件プレビュー */}
+            {tickets.filter((t) => t.ticket_status === SUPPORT_TICKET_STATUSES.NEW).length > 0 ? (
+              <View style={[styles.dashboardSection, { borderColor: theme.border }]}>
+                <Text style={[styles.dashboardSectionTitle, { color: theme.text }]}>新着連絡案件</Text>
+                {tickets
+                  .filter((t) => t.ticket_status === SUPPORT_TICKET_STATUSES.NEW)
+                  .slice(0, 5)
+                  .map((t) => (
+                    <View key={t.id} style={[styles.dashboardTicketRow, { borderColor: theme.border }]}>
+                      <View style={[styles.dashboardTicketTypeBadge, { backgroundColor: `${theme.primary}18` }]}>
+                        <Text style={[styles.dashboardTicketTypeText, { color: theme.primary }]}>
+                          {TICKET_TYPE_LABELS[t.ticket_type] || t.ticket_type}
+                        </Text>
+                      </View>
+                      <View style={styles.dashboardTicketBody}>
+                        <Text style={[styles.dashboardTicketTitle, { color: theme.text }]} numberOfLines={1}>
+                          {t.title || t.event_name || '（タイトルなし）'}
+                        </Text>
+                        <Text style={[styles.dashboardTicketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+                          {t.event_name || '-'} / {new Date(t.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+              </View>
+            ) : (
+              <View style={[styles.dashboardSection, { borderColor: theme.border }]}>
+                <Text style={[styles.dashboardSectionTitle, { color: theme.text }]}>新着連絡案件</Text>
+                <Text style={[styles.helpText, { color: theme.textSecondary }]}>新着の連絡案件はありません</Text>
+              </View>
+            )}
+          </View>
+        ) : null}
+
         {/* ─── 概況確認タブ: 企画報告確認 + 施錠確認 ─── */}
         {isHQRole && activeTab === 'overview' ? (
           <>
@@ -2684,6 +2769,12 @@ const SupportDeskScreen = ({
                           <Text style={[styles.overviewTaskLocation, { color: theme.text }]} numberOfLines={1}>
                             {task.event_name || task.location_text || '-'} / {task.event_location || '-'}
                           </Text>
+                          {/* 施錠確認タスクの notes（"鍵返却後の施錠確認: [鍵名]" 形式）を鍵名として表示 */}
+                          {task.notes ? (
+                            <Text style={[styles.overviewTaskLocation, { color: theme.primary }]} numberOfLines={1}>
+                              🔑 {task.notes.includes(':') ? task.notes.split(':').slice(1).join(':').trim() : task.notes}
+                            </Text>
+                          ) : null}
                           <Text style={[styles.messageDate, { color: theme.textSecondary }]}>
                             担当: {assigneeName} / {timeStr}
                           </Text>
@@ -2858,42 +2949,7 @@ const SupportDeskScreen = ({
           </View>
         ) : null}
 
-        {/* ─── 無線タブ: ダッシュボード + 無線ログ ─── */}
-        {isHQRole && activeTab === 'radio' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>本部ダッシュボード</Text>
-              <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
-                onPress={() => {
-                  loadTickets(selectedTicketId);
-                  loadHqPatrolTasks();
-                  loadRadioLogs();
-                }}
-              >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.dashboardGrid}>
-              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>新着連絡</Text>
-                <Text style={[styles.dashboardValue, { color: theme.text }]}>{dashboardSummary.newTickets}</Text>
-              </View>
-              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>遅延案件(60分+)</Text>
-                <Text style={[styles.dashboardValue, { color: '#D1242F' }]}>{dashboardSummary.delayedTickets}</Text>
-              </View>
-              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>巡回対応中</Text>
-                <Text style={[styles.dashboardValue, { color: theme.text }]}>{dashboardSummary.activePatrolTasks}</Text>
-              </View>
-              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
-                <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>無線ログ(1h)</Text>
-                <Text style={[styles.dashboardValue, { color: theme.text }]}>{dashboardSummary.recentRadioLogs}</Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
+        {/* ─── 無線タブ: 無線ログ ─── */}
 
         {/* ─── 巡回・評価タブ ─── */}
         {isHQRole && activeTab === 'patrol' ? (
@@ -4485,22 +4541,79 @@ const styles = StyleSheet.create({
   dashboardGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
+    marginBottom: 14,
   },
   dashboardCard: {
     width: '48%',
+    flexGrow: 1,
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   dashboardLabel: {
     fontSize: 12,
-    marginBottom: 2,
+    fontWeight: '600',
+    marginBottom: 6,
   },
   dashboardValue: {
-    fontSize: 18,
+    fontSize: 36,
+    fontWeight: '800',
+    lineHeight: 40,
+  },
+  dashboardUnit: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  dashboardAlertBanner: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  dashboardAlertText: {
+    fontSize: 13,
     fontWeight: '700',
+  },
+  dashboardSection: {
+    borderTopWidth: 1,
+    paddingTop: 12,
+    marginTop: 4,
+    gap: 8,
+  },
+  dashboardSectionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  dashboardTicketRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderBottomWidth: 1,
+    paddingBottom: 8,
+  },
+  dashboardTicketTypeBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  dashboardTicketTypeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  dashboardTicketBody: {
+    flex: 1,
+  },
+  dashboardTicketTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  dashboardTicketMeta: {
+    fontSize: 11,
+    marginTop: 2,
   },
   filterRow: {
     flexDirection: 'row',

@@ -304,6 +304,12 @@ const PatrolTaskList = ({
                         <Text style={[styles.ticketLocation, { color: theme.text }]} numberOfLines={1}>
                           📍 {task.event_location || task.location_text || '場所未設定'}
                         </Text>
+                        {task.task_type === PATROL_TASK_TYPES.LOCK_CHECK && task.notes ? (
+                          /** 施錠確認タスクは notes から鍵名を抽出してインライン表示 */
+                          <Text style={[styles.keyLabel, { color: theme.primary }]} numberOfLines={1}>
+                            🔑 {task.notes.includes(':') ? task.notes.split(':').slice(1).join(':').trim() : task.notes}
+                          </Text>
+                        ) : null}
                         <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={2}>
                           受付: {new Date(task.created_at).toLocaleString('ja-JP')}
                         </Text>
@@ -485,6 +491,11 @@ const styles = StyleSheet.create({
   ticketMeta: {
     fontSize: 12,
     lineHeight: 18,
+  },
+  /** 施錠確認タスクの鍵名インライン表示 */
+  keyLabel: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
 
