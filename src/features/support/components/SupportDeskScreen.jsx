@@ -37,6 +37,7 @@ import {
 import HQKeyManagementPanel from './HQKeyManagementPanel';
 import KeyMasterEditPanel from './KeyMasterEditPanel';
 import SkeletonLoader from '../../../shared/components/SkeletonLoader';
+import ToastMessage from '../../../shared/components/ToastMessage';
 import EmptyState from '../../../shared/components/EmptyState';
 import OfflineBanner from '../../../shared/components/OfflineBanner';
 import { createRadioLog, listRadioLogs } from '../../../services/supabase/radioLogService';
@@ -648,6 +649,9 @@ const SupportDeskScreen = ({
     }
   }, [initialTab]);
 
+  /** トースト表示状態（部署ロール向けステータス更新後の通知） */
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+
   /** HQロール向けチケット種別フィルター（'all' | ticket_type） */
   const [hqTicketTypeFilter, setHqTicketTypeFilter] = useState('all');
   /** HQロール向け団体フィルター（'all' | org_id） */
@@ -659,6 +663,24 @@ const SupportDeskScreen = ({
    * @param {string} message - 本文
    * @returns {void}
    */
+  /**
+   * トースト通知を表示する（部署ロール向け）
+   * @param {string} message - 表示メッセージ
+   * @param {'success'|'error'|'info'} [type='success'] - トーストの種類
+   * @returns {void}
+   */
+  const showToast = (message, type = 'success') => {
+    setToast({ visible: true, message, type });
+  };
+
+  /**
+   * トースト通知を非表示にする
+   * @returns {void}
+   */
+  const hideToast = () => {
+    setToast((prev) => ({ ...prev, visible: false }));
+  };
+
   const showMessage = (title, message) => {
     if (Platform.OS === 'web') {
       window.alert(`${title}\n${message}`);
@@ -1354,6 +1376,17 @@ const SupportDeskScreen = ({
     }
 
     await loadTickets(selectedTicket.id);
+
+    if (isDepartmentRole) {
+      /** 部署ロール: ステータスラベルを解決してトーストで表示 */
+      const labelMap = isAccountingRole ? ACCOUNTING_STATUS_LABELS : PROPERTY_STATUS_LABELS;
+      const statusLabel = labelMap[nextStatus] || nextStatus;
+      showToast(`ステータスを「${statusLabel}」に更新しました`);
+      if (result.notificationError) {
+        showToast(`通知送信に失敗しました: ${result.notificationError.message || ''}`, 'error');
+      }
+      return;
+    }
 
     /** 通知結果表示行 */
     const notificationLines = buildNotificationOutcomeLines(
@@ -4016,6 +4049,14 @@ const SupportDeskScreen = ({
         ) : null}
 
       </ScrollView>
+
+      {/* 部署ロール向けステータス更新トースト */}
+      <ToastMessage
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onHide={hideToast}
+      />
     </SafeAreaView>
   );
 };

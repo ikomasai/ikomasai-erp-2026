@@ -8,28 +8,17 @@ import {
   sendNotificationToRoleNames as dispatchNotificationToRoleNames,
 } from './notificationService.js';
 
+/** DB roles テーブルの実在ロール名のみ使用する */
 const DEPARTMENT_ROLE_NAME_TARGETS = {
-  hq: ['管理者', 'Admin', 'Administrator'],
-  accounting: ['会計部', '会計', 'Accounting', '管理者', 'Admin', 'Administrator'],
-  property: ['物品部', '物品', 'Property', '管理者', 'Admin', 'Administrator'],
-  patrol: [
-    '警備部',
-    '巡回',
-    'Patrol',
-    '企画管理部',
-    '本部',
-    'HQ',
-    'Headquarters',
-    '管理者',
-    'Admin',
-    'Administrator',
-  ],
-};
-
-const ROLE_NAME_TARGETS = {
+  /** 管理者のみ（鍵事前申請など管理者限定通知向け） */
+  admin: ['管理者'],
+  /** 企画管理部＋管理者（通常の本部宛て通知） */
   hq: ['企画管理部', '管理者'],
+  /** 会計部＋管理者 */
   accounting: ['会計部', '管理者'],
+  /** 物品部＋管理者 */
   property: ['物品部', '管理者'],
+  /** 警備部＋企画管理部＋管理者 */
   patrol: ['警備部', '企画管理部', '管理者'],
 };
 
@@ -76,12 +65,14 @@ const getRoleNamesForTicket = (ticket) => {
   const ticketType = normalizeText(ticket?.ticket_type);
   const notifyTarget = normalizeText(ticket?.notify_target);
 
-  if (ticketType === 'start_report' || ticketType === 'end_report') {
-    return unique([...DEPARTMENT_ROLE_NAME_TARGETS.hq, ...DEPARTMENT_ROLE_NAME_TARGETS.patrol]);
+  /** 企画開始/終了報告・緊急呼び出しは企画管理部＋管理者へ */
+  if (ticketType === 'start_report' || ticketType === 'end_report' || ticketType === 'emergency') {
+    return DEPARTMENT_ROLE_NAME_TARGETS.hq;
   }
 
-  if (ticketType === 'emergency') {
-    return unique([...DEPARTMENT_ROLE_NAME_TARGETS.hq, ...DEPARTMENT_ROLE_NAME_TARGETS.patrol]);
+  /** 鍵事前申請は管理者のみ */
+  if (ticketType === 'key_preapply') {
+    return DEPARTMENT_ROLE_NAME_TARGETS.admin;
   }
 
   if (notifyTarget === 'accounting') {
@@ -91,6 +82,7 @@ const getRoleNamesForTicket = (ticket) => {
     return DEPARTMENT_ROLE_NAME_TARGETS.property;
   }
 
+  /** デフォルト: 企画管理部＋管理者（rule_question, layout_change 等） */
   return DEPARTMENT_ROLE_NAME_TARGETS.hq;
 };
 
@@ -316,7 +308,8 @@ export const notifyLockCheckTaskCreated = async ({ task, loan = null, senderUser
   const eventName = normalizeText(task?.event_name || loan?.event_name) || '企画名未設定';
 
   return sendNotificationToRoleNames({
-    roleNames: DEPARTMENT_ROLE_NAME_TARGETS.patrol,
+    /** 施錠確認タスクは企画管理部＋管理者へ通知 */
+    roleNames: DEPARTMENT_ROLE_NAME_TARGETS.hq,
     title: '施錠確認タスクが作成されました',
     body: `${eventName} / ${keyLabel}`,
     metadata: {
