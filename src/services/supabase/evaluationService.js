@@ -9,7 +9,7 @@ const EVALUATION_CHECKS_TABLE = 'evaluation_checks';
 const EVALUATION_COLUMNS =
   'id,event_id,ticket_id,task_id,evaluator_id,evaluation_status,score,comment,reviewed_by,reviewed_at,created_at,updated_at';
 
-const normalizeText = (value) => (value || '').trim();
+const normalizeText = (value) => (typeof value === 'string' ? value : '').trim();
 
 /** 評価状態 */
 export const EVALUATION_STATUSES = {
@@ -167,5 +167,32 @@ export const reviewEvaluationCheck = async (input) => {
     return { data, error: null };
   } catch (error) {
     return { data: null, error };
+  }
+};
+
+/**
+ * 本部向け: 全評価一覧を取得（Excel出力用）
+ * evaluation_checks の全レコードを作成日降順で返す
+ * @param {Object} params - 取得条件
+ * @param {number} [params.limit=500] - 最大件数
+ * @returns {Promise<{data: Array, error: Error|null}>} 取得結果
+ */
+export const listAllEvaluationChecks = async ({ limit = 500 } = {}) => {
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from(EVALUATION_CHECKS_TABLE)
+      .select(EVALUATION_COLUMNS)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('全評価一覧取得エラー:', error);
+      return { data: [], error };
+    }
+
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('全評価一覧取得処理でエラー:', error);
+    return { data: [], error };
   }
 };

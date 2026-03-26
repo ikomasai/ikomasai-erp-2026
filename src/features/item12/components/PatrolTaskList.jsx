@@ -39,6 +39,31 @@ const TASK_TYPE_ICONS = {
 };
 
 /**
+ * タスク種別ごとの左アクセントボーダー色
+ * Material 3 風のカラーリング
+ */
+const TASK_TYPE_ACCENT_COLORS = {
+  [PATROL_TASK_TYPES.EMERGENCY_SUPPORT]: '#D1242F',
+  [PATROL_TASK_TYPES.CONFIRM_START]: '#0969DA',
+  [PATROL_TASK_TYPES.CONFIRM_END]: '#0969DA',
+  [PATROL_TASK_TYPES.LOCK_CHECK]: '#BF6A02',
+  [PATROL_TASK_TYPES.ROUTINE_PATROL]: '#57606A',
+  [PATROL_TASK_TYPES.OTHER]: '#57606A',
+};
+
+/**
+ * タスク種別ごとのセクションヘッダー背景色（薄色）
+ */
+const TASK_TYPE_BG_COLORS = {
+  [PATROL_TASK_TYPES.EMERGENCY_SUPPORT]: '#FEF2F2',
+  [PATROL_TASK_TYPES.CONFIRM_START]: '#EFF6FF',
+  [PATROL_TASK_TYPES.CONFIRM_END]: '#EFF6FF',
+  [PATROL_TASK_TYPES.LOCK_CHECK]: '#FFFBEA',
+  [PATROL_TASK_TYPES.ROUTINE_PATROL]: '#F6F8FA',
+  [PATROL_TASK_TYPES.OTHER]: '#F6F8FA',
+};
+
+/**
  * 種別の表示優先順（上にあるほど優先度高）
  * 緊急対応を最上位にし、定常巡回・その他を末尾に配置
  */
@@ -132,10 +157,10 @@ const PatrolTaskList = ({
           </Text>
         </View>
         <TouchableOpacity
-          style={[styles.refreshButton, { borderColor: theme.border }]}
+          style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
           onPress={onRefresh}
         >
-          <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+          <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
         </TouchableOpacity>
       </View>
 
@@ -200,10 +225,7 @@ const PatrolTaskList = ({
                   style={[
                     styles.typeHeader,
                     {
-                      backgroundColor: isEmergency
-                        ? `${theme.error}18`
-                        : theme.primary + '10',
-                      borderColor: isEmergency ? `${theme.error}50` : theme.border,
+                      backgroundColor: TASK_TYPE_BG_COLORS[type] || '#F6F8FA',
                     },
                   ]}
                 >
@@ -252,6 +274,7 @@ const PatrolTaskList = ({
                           isMobile && styles.ticketItemMobile,
                           {
                             borderColor: isActive ? theme.primary : theme.border,
+                            borderLeftColor: TASK_TYPE_ACCENT_COLORS[type] || '#57606A',
                             backgroundColor: isActive ? `${theme.primary}14` : theme.background,
                           },
                         ]}
@@ -336,15 +359,20 @@ const PatrolTaskList = ({
 };
 
 const styles = StyleSheet.create({
+  /** 外枠カード: shadow で浮かせる */
   card: {
-    borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   /** スマホ向けカード: 余白を小さく */
   cardMobile: {
     padding: 10,
-    borderRadius: 10,
+    borderRadius: 14,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -359,17 +387,19 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   sectionSubTitle: {
     fontSize: 12,
     lineHeight: 18,
   },
+  /** 更新ボタン: primary薄め背景 */
   refreshButton: {
-    borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 7,
+    overflow: 'hidden',
   },
   refreshButtonText: {
     fontSize: 12,
@@ -381,11 +411,12 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 14,
   },
+  /** サマリーチップ: より丸みを増す */
   summaryChip: {
     minWidth: '31%',
     flexGrow: 1,
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -395,7 +426,7 @@ const styles = StyleSheet.create({
   },
   summaryChipLabel: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
     marginTop: 2,
   },
   /** グループ全体を縦に並べるコンテナ */
@@ -404,15 +435,14 @@ const styles = StyleSheet.create({
   },
   /** 種別グループ */
   typeGroup: {
-    gap: 8,
+    gap: 6,
   },
-  /** 種別セクションヘッダー */
+  /** 種別セクションヘッダー: タスク種別色の薄い背景 */
   typeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 10,
@@ -431,7 +461,7 @@ const styles = StyleSheet.create({
   },
   typeHeaderLabel: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   typeHeaderSubLabel: {
     fontSize: 11,
@@ -440,7 +470,7 @@ const styles = StyleSheet.create({
   /** 件数バッジ */
   countBadge: {
     borderRadius: 999,
-    minWidth: 52,
+    minWidth: 44,
     paddingHorizontal: 10,
     paddingVertical: 4,
     alignItems: 'center',
@@ -452,18 +482,25 @@ const styles = StyleSheet.create({
   },
   ticketList: {
     gap: 8,
-    paddingLeft: 4,
+    paddingLeft: 2,
   },
+  /** タスク行: 左アクセントボーダー + shadow */
   ticketItem: {
     borderWidth: 1,
-    borderRadius: 16,
+    borderLeftWidth: 4,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    gap: 8,
+    gap: 7,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   /** スマホ向けタスク行: 余白・角丸を小さく */
   ticketItemMobile: {
-    borderRadius: 12,
+    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 10,
     gap: 6,
@@ -476,14 +513,15 @@ const styles = StyleSheet.create({
   },
   ticketTitle: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
     flex: 1,
   },
+  /** 選択中バッジ */
   selectedBadge: {
-    borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    overflow: 'hidden',
   },
   selectedBadgeText: {
     color: '#FFFFFF',
@@ -496,18 +534,18 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   metaBadge: {
-    borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 8,
+    paddingHorizontal: 9,
     paddingVertical: 4,
+    overflow: 'hidden',
   },
   metaBadgeText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   ticketLocation: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   ticketMeta: {
     fontSize: 12,

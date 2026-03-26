@@ -112,7 +112,7 @@ const PatrolTaskDetail = ({
   const isAssignedToMe = selectedTask.assigned_to && selectedTask.assigned_to === user?.id;
 
   return (
-    <View style={[styles.card, isMobile && styles.cardMobile, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.card, isMobile && styles.cardMobile, { backgroundColor: theme.surface }]}>
       <View style={styles.headerRow}>
         <View style={styles.headerTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>タスク詳細</Text>
@@ -123,7 +123,7 @@ const PatrolTaskDetail = ({
         <View
           style={[
             styles.statusBadge,
-            { borderColor: theme.border, backgroundColor: `${theme.primary}12` },
+            { backgroundColor: `${theme.primary}15` },
           ]}
         >
           <Text style={[styles.statusBadgeText, { color: theme.primary }]}>
@@ -135,14 +135,14 @@ const PatrolTaskDetail = ({
       <View
         style={[
           styles.focusCard,
-          { borderColor: theme.border, backgroundColor: theme.background },
+          { borderLeftColor: theme.primary, backgroundColor: `${theme.primary}08` },
         ]}
       >
         <View style={styles.focusBadgeRow}>
           <View
             style={[
               styles.focusBadge,
-              { borderColor: theme.border, backgroundColor: `${theme.primary}12` },
+              { backgroundColor: `${theme.primary}15` },
             ]}
           >
             <Text style={[styles.focusBadgeText, { color: theme.primary }]}>
@@ -153,7 +153,7 @@ const PatrolTaskDetail = ({
             <View
               style={[
                 styles.focusBadge,
-                { borderColor: theme.border, backgroundColor: theme.surface },
+                { backgroundColor: theme.border },
               ]}
             >
               <Text style={[styles.focusBadgeText, { color: theme.textSecondary }]}>
@@ -183,7 +183,7 @@ const PatrolTaskDetail = ({
       <View
         style={[
           styles.actionPanel,
-          { borderColor: theme.border, backgroundColor: theme.background },
+          { backgroundColor: theme.background },
         ]}
       >
         <Text style={[styles.label, { color: theme.text }]}>次の操作</Text>
@@ -236,21 +236,20 @@ const PatrolTaskDetail = ({
           style={[
             styles.memoButton,
             {
-              borderColor: theme.border,
-              backgroundColor: selectedTask.source_ticket_id ? theme.surface : theme.border,
+              backgroundColor: selectedTask.source_ticket_id ? `${theme.primary}15` : theme.border,
             },
           ]}
           onPress={onSendMemoOnly}
           disabled={!selectedTask.source_ticket_id || isSubmitting}
         >
-          <Text style={[styles.memoButtonText, { color: theme.textSecondary }]}>メモのみ共有</Text>
+          <Text style={[styles.memoButtonText, { color: selectedTask.source_ticket_id ? theme.primary : theme.textSecondary }]}>メモのみ共有</Text>
         </TouchableOpacity>
       </View>
 
       <View
         style={[
           styles.requestCard,
-          { borderColor: theme.border, backgroundColor: theme.background },
+          { backgroundColor: theme.background },
         ]}
       >
         <Text style={[styles.label, { color: theme.text }]}>指示メモ</Text>
@@ -298,7 +297,7 @@ const PatrolTaskDetail = ({
                 styles.optionButton,
                 {
                   borderColor: isActive ? theme.primary : theme.border,
-                  backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                  backgroundColor: isActive ? theme.primary : theme.background,
                 },
               ]}
               onPress={() => onChangeResultCode(option.key)}
@@ -306,7 +305,7 @@ const PatrolTaskDetail = ({
               <Text
                 style={[
                   styles.optionButtonText,
-                  { color: isActive ? theme.primary : theme.textSecondary },
+                  { color: isActive ? '#FFFFFF' : theme.textSecondary },
                 ]}
               >
                 {option.label}
@@ -336,10 +335,10 @@ const PatrolTaskDetail = ({
       <View style={styles.sectionHeader}>
         <Text style={[styles.label, { color: theme.text }]}>タスク結果履歴</Text>
         <TouchableOpacity
-          style={[styles.refreshButton, { borderColor: theme.border }]}
+          style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
           onPress={onRefreshTaskResults}
         >
-          <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+          <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
         </TouchableOpacity>
       </View>
 
@@ -381,10 +380,10 @@ const PatrolTaskDetail = ({
           <View style={styles.sectionHeader}>
             <Text style={[styles.label, { color: theme.text }]}>元連絡案件メッセージ</Text>
             <TouchableOpacity
-              style={[styles.refreshButton, { borderColor: theme.border }]}
+              style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
               onPress={onRefreshSourceMessages}
             >
-              <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+              <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
             </TouchableOpacity>
           </View>
 
@@ -433,11 +432,16 @@ const PatrolTaskDetail = ({
 };
 
 const styles = StyleSheet.create({
+  /** 外枠カード: shadow で浮かせる / borderWidth削除 */
   card: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   /** スマホ向けカード: 余白を詰める */
   cardMobile: {
@@ -469,33 +473,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  /** ステータスバッジ: pill型 */
   statusBadge: {
-    borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
     paddingVertical: 6,
+    overflow: 'hidden',
   },
   statusBadgeText: {
     fontSize: 11,
     fontWeight: '700',
   },
+  /** タスク情報フォーカスカード: 左アクセントボーダー + shadow */
   focusCard: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderLeftWidth: 4,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   focusBadgeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
   },
+  /** 種別バッジ: pill型 / borderWidth削除 */
   focusBadge: {
-    borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 9,
     paddingVertical: 5,
+    overflow: 'hidden',
   },
   focusBadgeText: {
     fontSize: 11,
@@ -514,19 +526,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  /** アクションパネル: borderWidth削除 + shadow */
   actionPanel: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
+  /** 指示メモカード: borderWidth削除 + shadow */
   requestCard: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   requestBody: {
     fontSize: 14,
@@ -543,10 +565,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
+  /** 結果選択ボタン: pill型 / アクティブ時fill */
   optionButton: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderRadius: 999,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 8,
   },
   optionButtonText: {
@@ -557,19 +580,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
   },
+  /** 更新ボタン: primary薄め背景 / borderWidth削除 */
   refreshButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    overflow: 'hidden',
   },
   refreshButtonText: {
     fontSize: 12,
     fontWeight: '600',
   },
+  /** メモ入力: borderRadius 14→12 */
   memoInput: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     minHeight: 112,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -585,17 +610,18 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
+  /** アクションボタン: pill型 (borderRadius 14→24) */
   actionButton: {
     flex: 1,
-    borderRadius: 14,
-    paddingVertical: 13,
+    borderRadius: 24,
+    paddingVertical: 14,
     alignItems: 'center',
   },
   /** スマホ向けボタン: 最小幅を設定して折り返し時も押しやすく */
   actionButtonMobile: {
     minWidth: '45%',
     paddingVertical: 16,
-    borderRadius: 16,
+    borderRadius: 24,
   },
   actionButtonText: {
     color: '#FFFFFF',
@@ -604,13 +630,14 @@ const styles = StyleSheet.create({
   },
   /** スマホ向けボタンテキスト: 少し大きく */
   actionButtonTextMobile: {
-    fontSize: 15,
+    fontSize: 16,
   },
+  /** メモのみ共有ボタン: pill型 */
   memoButton: {
-    borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 24,
     paddingVertical: 11,
     alignItems: 'center',
+    overflow: 'hidden',
   },
   memoButtonText: {
     fontSize: 13,
@@ -622,7 +649,7 @@ const styles = StyleSheet.create({
   },
   messageItem: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -640,7 +667,7 @@ const styles = StyleSheet.create({
   },
   /** 自分に割り当てられたタスクであることを知らせるバナー（青系） */
   assignedToMeBanner: {
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     backgroundColor: '#1565C0',
@@ -653,8 +680,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+  /** 別タスク対応中で受諾不可バナー */
   cannotAcceptBanner: {
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     backgroundColor: '#FF4D4F',
@@ -665,6 +693,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  /** 施錠確認タスクの鍵名強調表示 */
   keyLabelHighlight: {
     fontSize: 18,
     fontWeight: '800',

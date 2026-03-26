@@ -12,10 +12,11 @@ const LOCATIONS_TABLE = 'organizations_events';
 
 /**
  * 文字列を前後空白除去して正規化する
+ * 非文字列（数値・オブジェクト・配列等）が渡された場合も安全に空文字を返す
  * @param {string|null|undefined} value - 対象文字列
  * @returns {string} 正規化後文字列
  */
-const normalizeText = (value) => (value || '').trim();
+const normalizeText = (value) => (typeof value === 'string' ? value : '').trim();
 
 /** 巡回対象候補に使うカラム */
 const LOCATION_COLUMNS = 'id,organization_name,event_name';
@@ -300,5 +301,46 @@ export const listUnvisitedLocations = async ({ alertMinutes = 90, limit = 200 } 
   } catch (error) {
     console.error('未巡回一覧作成処理でエラー:', error);
     return { data: [], error };
+  }
+};
+
+/**
+ * 本部向け: 企画ID別の定常巡回チェック履歴を取得
+ * 企画一覧タブで各企画の直近巡回チェックを表示するために使用する
+ * @param {Object} params - 取得条件
+ * @param {number} [params.limit=300] - 最大件数
+ * @returns {Promise<{data: Array, error: Error|null}>} locationId → チェック配列のマップを data に返す
+ */
+export const listPatrolChecksByLocation = async ({ limit = 300 } = {}) => {
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_CHECKS_TABLE)
+      .select(PATROL_CHECK_COLUMNS)
+      .not('location_id', 'is', null)
+      .order('checked_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('企画別巡回チェック取得エラー:', error);
+      return { data: {}, error };
+    }
+
+    /** locationId をキーにしたチェック配列マップ */
+    const locationMap = {};
+    (data || []).forEach((check) => {
+      const key = normalizeText(check.location_id);
+      if (!key) {
+        return;
+      }
+      if (!locationMap[key]) {
+        locationMap[key] = [];
+      }
+      locationMap[key].push(check);
+    });
+
+    return { data: locationMap, error: null };
+  } catch (error) {
+    console.error('企画別巡回チェック取得処理でエラー:', error);
+    return { data: {}, error };
   }
 };

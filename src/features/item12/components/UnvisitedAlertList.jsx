@@ -34,7 +34,7 @@ const UnvisitedAlertList = ({
   const alertCount = unvisitedLocations.filter((location) => location.is_alert).length;
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.card, { backgroundColor: theme.surface }]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>未巡回アラート</Text>
@@ -43,10 +43,10 @@ const UnvisitedAlertList = ({
           </Text>
         </View>
         <TouchableOpacity
-          style={[styles.refreshButton, { borderColor: theme.border }]}
+          style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
           onPress={onRefresh}
         >
-          <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+          <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
         </TouchableOpacity>
       </View>
 
@@ -54,8 +54,8 @@ const UnvisitedAlertList = ({
         style={[
           styles.alertSummaryCard,
           {
-            borderColor: alertCount > 0 ? theme.error : theme.border,
-            backgroundColor: alertCount > 0 ? `${theme.error}12` : theme.background,
+            borderLeftColor: alertCount > 0 ? theme.error : theme.primary,
+            backgroundColor: alertCount > 0 ? `${theme.error}10` : theme.background,
           },
         ]}
       >
@@ -82,7 +82,7 @@ const UnvisitedAlertList = ({
                     styles.optionButton,
                     {
                       borderColor: isActive ? theme.primary : theme.border,
-                      backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                      backgroundColor: isActive ? theme.primary : theme.background,
                     },
                   ]}
                   onPress={() => onChangeAlertMinutes(minutes)}
@@ -90,7 +90,7 @@ const UnvisitedAlertList = ({
                   <Text
                     style={[
                       styles.optionButtonText,
-                      { color: isActive ? theme.primary : theme.textSecondary },
+                      { color: isActive ? '#FFFFFF' : theme.textSecondary },
                     ]}
                   >
                     {minutes}分
@@ -137,7 +137,8 @@ const UnvisitedAlertList = ({
                   styles.ticketItem,
                   {
                     borderColor: row.is_alert ? theme.error : theme.border,
-                    backgroundColor: row.is_alert ? `${theme.error}12` : theme.background,
+                    borderLeftColor: row.is_alert ? theme.error : theme.border,
+                    backgroundColor: row.is_alert ? `${theme.error}0A` : theme.background,
                   },
                 ]}
               >
@@ -149,7 +150,6 @@ const UnvisitedAlertList = ({
                     style={[
                       styles.alertBadge,
                       {
-                        borderColor: row.is_alert ? theme.error : theme.border,
                         backgroundColor: row.is_alert ? theme.error : theme.surface,
                       },
                     ]}
@@ -180,11 +180,16 @@ const UnvisitedAlertList = ({
 };
 
 const styles = StyleSheet.create({
+  /** 外枠カード: shadow で浮かせる / borderWidth削除 */
   card: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -209,25 +214,33 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 2,
   },
+  /** 更新ボタン: primary薄め背景 / borderWidth削除 */
   refreshButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    overflow: 'hidden',
   },
   refreshButtonText: {
     fontSize: 12,
     fontWeight: '600',
   },
+  /** アラートサマリーカード: 左アクセントボーダー + shadow */
   alertSummaryCard: {
-    borderWidth: 1,
-    borderRadius: 16,
+    borderLeftWidth: 4,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
+  /** アラート件数: fontSize 24→32 */
   alertSummaryValue: {
-    fontSize: 24,
+    fontSize: 32,
     fontWeight: '800',
   },
   alertSummaryLabel: {
@@ -240,10 +253,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 4,
   },
+  /** 閾値ボタン: pill型 / アクティブ時fill */
   optionButton: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 8,
   },
   optionButtonText: {
@@ -271,12 +285,19 @@ const styles = StyleSheet.create({
   ticketList: {
     gap: 8,
   },
+  /** タスク行: 左アクセントボーダー + shadow */
   ticketItem: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderLeftWidth: 4,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   ticketHeaderRow: {
     flexDirection: 'row',
@@ -289,11 +310,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
+  /** アラートバッジ: pill型 / borderWidth削除 */
   alertBadge: {
-    borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    overflow: 'hidden',
   },
   alertBadgeText: {
     fontSize: 11,

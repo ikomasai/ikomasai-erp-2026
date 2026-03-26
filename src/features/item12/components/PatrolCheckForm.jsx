@@ -177,7 +177,7 @@ const PatrolCheckForm = ({
     '企画を選択してください';
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.card, { backgroundColor: theme.surface }]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>定常巡回チェック</Text>
@@ -187,10 +187,10 @@ const PatrolCheckForm = ({
         </View>
         <View style={styles.sectionHeaderActions}>
           <TouchableOpacity
-            style={[styles.refreshButton, { borderColor: theme.border }]}
+            style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
             onPress={onRefresh}
           >
-            <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+            <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
           </TouchableOpacity>
           {selectedLocation && !isReselecting ? (
             <>
@@ -226,7 +226,7 @@ const PatrolCheckForm = ({
       <View
         style={[
           styles.locationSummaryCard,
-          { borderColor: theme.border, backgroundColor: theme.background },
+          { borderLeftColor: theme.primary, backgroundColor: `${theme.primary}08` },
         ]}
       >
         <Text style={[styles.locationSummaryLabel, { color: theme.textSecondary }]}>
@@ -350,7 +350,7 @@ const PatrolCheckForm = ({
                         styles.answerButton,
                         {
                           borderColor: isActive ? theme.primary : theme.border,
-                          backgroundColor: isActive ? `${theme.primary}18` : theme.surface,
+                          backgroundColor: isActive ? theme.primary : theme.surface,
                         },
                       ]}
                       onPress={() => onChangeCheckAnswer(item.key, option.key, option.label)}
@@ -358,7 +358,7 @@ const PatrolCheckForm = ({
                       <Text
                         style={[
                           styles.answerButtonText,
-                          { color: isActive ? theme.primary : theme.textSecondary },
+                          { color: isActive ? '#FFFFFF' : theme.textSecondary },
                         ]}
                       >
                         {option.label}
@@ -481,11 +481,16 @@ const PatrolCheckForm = ({
 };
 
 const styles = StyleSheet.create({
+  /** 外枠カード: shadow で浮かせる / borderWidth削除 */
   card: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -519,16 +524,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  /** 更新ボタン: primary薄め背景 / borderWidth削除 */
   refreshButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    overflow: 'hidden',
   },
   refreshButtonText: {
     fontSize: 12,
     fontWeight: '600',
   },
+  /** キャンセル/戻るボタン */
   cancelButton: {
     borderWidth: 1,
     borderRadius: 999,
@@ -539,23 +546,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  /** 選び直すボタン（選択済み状態で別企画に切り替えるとき） */
+  /** 選び直すボタン: pill型 */
   reselectButton: {
-    borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 5,
+    overflow: 'hidden',
   },
   reselectButtonText: {
     fontSize: 12,
     fontWeight: '700',
   },
+  /** 選択中企画サマリーカード: 左アクセントボーダー */
   locationSummaryCard: {
-    borderWidth: 1,
-    borderRadius: 16,
+    borderLeftWidth: 4,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   locationSummaryLabel: {
     fontSize: 11,
@@ -566,9 +579,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 24,
   },
+  /** 検索入力: borderRadius 14→12 */
   searchInput: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     minHeight: 52,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -583,7 +597,7 @@ const styles = StyleSheet.create({
   },
   locationOption: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 3,
@@ -599,12 +613,18 @@ const styles = StyleSheet.create({
   checkItemList: {
     gap: 10,
   },
+  /** チェックカード: borderWidth 1.5 + shadow */
   checkCard: {
-    borderWidth: 1,
-    borderRadius: 16,
+    borderWidth: 1.5,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 12,
     gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   checkCardTitle: {
     fontSize: 14,
@@ -615,10 +635,11 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  /** 回答ボタン: pill型 (borderRadius 12→999) / アクティブ時fill */
   answerButton: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
+    borderWidth: 1.5,
+    borderRadius: 999,
+    paddingHorizontal: 16,
     paddingVertical: 9,
     alignItems: 'center',
   },
@@ -635,18 +656,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlignVertical: 'top',
   },
+  /** 全体メモ入力: borderRadius 14→12 */
   summaryMemoInput: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     minHeight: 88,
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 14,
     textAlignVertical: 'top',
   },
+  /** 登録ボタン: pill型 (borderRadius 14→24) */
   actionButton: {
-    borderRadius: 14,
-    paddingVertical: 13,
+    borderRadius: 24,
+    paddingVertical: 14,
     alignItems: 'center',
   },
   actionButtonText: {
@@ -669,7 +692,7 @@ const styles = StyleSheet.create({
   },
   historyItem: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,

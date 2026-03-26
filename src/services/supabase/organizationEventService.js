@@ -13,10 +13,11 @@ const ORGANIZATION_EVENT_COLUMNS = 'id,organization_name,event_name,sheet_name,c
 
 /**
  * 文字列を前後空白除去して正規化する
+ * 非文字列（数値・オブジェクト・配列等）が渡された場合も安全に空文字を返す
  * @param {string|null|undefined} value - 対象文字列
  * @returns {string} 正規化後文字列
  */
-const normalizeText = (value) => (value || '').trim();
+const normalizeText = (value) => (typeof value === 'string' ? value : '').trim();
 
 /**
  * 団体別企画一覧の並び順を比較する

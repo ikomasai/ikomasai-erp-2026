@@ -1298,14 +1298,15 @@ const Item12Screen = ({ navigation, route }) => {
 
           {/* ダッシュボードタブ */}
           {activeTab === PATROL_TAB_TYPES.DASHBOARD && (
-            <View style={[dashboardStyles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={[dashboardStyles.card, { backgroundColor: theme.surface }]}>
               {/* 巡回中トグル */}
               <Pressable
                 style={[
                   dashboardStyles.patrolToggle,
                   {
-                    borderColor: isOnPatrol ? theme.success || '#22c55e' : theme.border,
-                    backgroundColor: isOnPatrol ? `${theme.success || '#22c55e'}18` : theme.background,
+                    backgroundColor: isOnPatrol
+                      ? `${theme.success || '#22c55e'}18`
+                      : theme.background,
                   },
                 ]}
                 onPress={handleTogglePatrolStatus}
@@ -1337,10 +1338,9 @@ const Item12Screen = ({ navigation, route }) => {
                 <Text
                   style={[
                     dashboardStyles.patrolToggleButton,
-                    {
-                      color: isOnPatrol ? theme.success || '#22c55e' : theme.textSecondary,
-                      borderColor: isOnPatrol ? theme.success || '#22c55e' : theme.border,
-                    },
+                    isOnPatrol
+                      ? { backgroundColor: theme.success || '#22c55e', color: '#FFFFFF' }
+                      : { backgroundColor: theme.border, color: theme.text },
                   ]}
                 >
                   {isUpdatingPatrolStatus ? '...' : isOnPatrol ? 'OFF' : 'ON'}
@@ -1355,7 +1355,7 @@ const Item12Screen = ({ navigation, route }) => {
                   </Text>
                 </View>
                 <Pressable
-                  style={[dashboardStyles.refreshButton, { borderColor: theme.border }]}
+                  style={[dashboardStyles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                   onPress={async () => {
                     await Promise.all([
                       loadTasks(selectedTaskId),
@@ -1364,36 +1364,54 @@ const Item12Screen = ({ navigation, route }) => {
                     ]);
                   }}
                 >
-                  <Text style={[dashboardStyles.refreshButtonText, { color: theme.textSecondary }]}>
+                  <Text style={[dashboardStyles.refreshButtonText, { color: theme.primary }]}>
                     更新
                   </Text>
                 </Pressable>
               </View>
 
               <View style={dashboardStyles.metricGrid}>
-                {dashboardMetrics.map((metric) => (
-                  <View
-                    key={metric.key}
-                    style={[
-                      dashboardStyles.metricCard,
-                      { borderColor: theme.border, backgroundColor: theme.background },
-                    ]}
-                  >
-                    <Text style={[dashboardStyles.metricValue, { color: theme.text }]}>{metric.value}</Text>
-                    <Text style={[dashboardStyles.metricLabel, { color: theme.textSecondary }]}>
-                      {metric.label}
-                    </Text>
-                    <Text style={[dashboardStyles.metricHelper, { color: theme.textSecondary }]}>
-                      {metric.helper}
-                    </Text>
-                  </View>
-                ))}
+                {dashboardMetrics.map((metric) => {
+                  /** メトリックカードの背景色（キー別） */
+                  const metricBgColors = {
+                    open: `${theme.primary}12`,
+                    mine: `${theme.primary}1A`,
+                    emergency: '#FEF2F2',
+                    alert: '#FFFBEA',
+                  };
+                  /** メトリックカードの値カラー（キー別） */
+                  const metricValueColors = {
+                    open: theme.primary,
+                    mine: theme.primary,
+                    emergency: '#D1242F',
+                    alert: '#BF6A02',
+                  };
+                  return (
+                    <View
+                      key={metric.key}
+                      style={[
+                        dashboardStyles.metricCard,
+                        { backgroundColor: metricBgColors[metric.key] || theme.background },
+                      ]}
+                    >
+                      <Text style={[dashboardStyles.metricValue, { color: metricValueColors[metric.key] || theme.text }]}>
+                        {metric.value}
+                      </Text>
+                      <Text style={[dashboardStyles.metricLabel, { color: theme.text }]}>
+                        {metric.label}
+                      </Text>
+                      <Text style={[dashboardStyles.metricHelper, { color: theme.textSecondary }]}>
+                        {metric.helper}
+                      </Text>
+                    </View>
+                  );
+                })}
               </View>
 
               <View
                 style={[
                   dashboardStyles.focusCard,
-                  { borderColor: theme.border, backgroundColor: theme.background },
+                  { borderLeftColor: theme.primary, backgroundColor: `${theme.primary}0D` },
                 ]}
               >
                 <Text style={[dashboardStyles.sectionLabel, { color: theme.textSecondary }]}>
@@ -1415,7 +1433,7 @@ const Item12Screen = ({ navigation, route }) => {
                 <View
                   style={[
                     dashboardStyles.sectionCard,
-                    { borderColor: theme.border, backgroundColor: theme.background },
+                    { borderColor: theme.border, backgroundColor: theme.surface },
                   ]}
                 >
                   <Text style={[dashboardStyles.sectionTitle, { color: theme.text }]}>未巡回の上位</Text>
@@ -1442,7 +1460,7 @@ const Item12Screen = ({ navigation, route }) => {
                 <View
                   style={[
                     dashboardStyles.sectionCard,
-                    { borderColor: theme.border, backgroundColor: theme.background },
+                    { borderColor: theme.border, backgroundColor: theme.surface },
                   ]}
                 >
                   <Text style={[dashboardStyles.sectionTitle, { color: theme.text }]}>最近の対応</Text>
@@ -1535,6 +1553,54 @@ const Item12Screen = ({ navigation, route }) => {
           {/* チェックタブ */}
           {activeTab === PATROL_TAB_TYPES.CHECK && (
             <>
+              {/* チェックタブ内 巡回中トグル（コンパクト版） */}
+              <Pressable
+                style={[
+                  dashboardStyles.patrolToggle,
+                  {
+                    backgroundColor: isOnPatrol
+                      ? `${theme.success || '#22c55e'}18`
+                      : theme.surface,
+                  },
+                ]}
+                onPress={handleTogglePatrolStatus}
+                disabled={isUpdatingPatrolStatus}
+              >
+                <View style={dashboardStyles.patrolToggleLeft}>
+                  <View
+                    style={[
+                      dashboardStyles.patrolToggleDot,
+                      {
+                        backgroundColor: isOnPatrol ? theme.success || '#22c55e' : theme.border,
+                      },
+                    ]}
+                  />
+                  <View>
+                    <Text
+                      style={[
+                        dashboardStyles.patrolToggleLabel,
+                        { color: isOnPatrol ? theme.success || '#22c55e' : theme.text },
+                      ]}
+                    >
+                      {isOnPatrol ? '巡回中' : '巡回していない'}
+                    </Text>
+                    <Text style={[dashboardStyles.patrolToggleHint, { color: theme.textSecondary }]}>
+                      {isOnPatrol ? '本部ダッシュボードに表示中' : 'タップして巡回開始を通知'}
+                    </Text>
+                  </View>
+                </View>
+                <Text
+                  style={[
+                    dashboardStyles.patrolToggleButton,
+                    isOnPatrol
+                      ? { backgroundColor: theme.success || '#22c55e', color: '#FFFFFF' }
+                      : { backgroundColor: theme.border, color: theme.text },
+                  ]}
+                >
+                  {isUpdatingPatrolStatus ? '...' : isOnPatrol ? 'OFF' : 'ON'}
+                </Text>
+              </Pressable>
+
               <PatrolCheckForm
                 theme={theme}
                 patrolLocations={patrolLocations}
@@ -1575,9 +1641,9 @@ const Item12Screen = ({ navigation, route }) => {
           onHide={hideToast}
         />
 
-        {/* ── 下部 iOS タブバー ── */}
-        <View style={[styles.bottomArea, isMobile && styles.bottomAreaMobile, { borderTopColor: theme.border, backgroundColor: theme.background }]}>
-          <View style={[styles.iosTabBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        {/* ── 下部タブバー（Segmented Control 風） ── */}
+        <View style={[styles.bottomArea, isMobile && styles.bottomAreaMobile, { backgroundColor: theme.background }]}>
+          <View style={[styles.tabSegment, { backgroundColor: `${theme.border}60` }]}>
             {PATROL_TABS.map((tab) => {
               /** アクティブタブかどうか */
               const isActive = activeTab === tab.key;
@@ -1585,21 +1651,21 @@ const Item12Screen = ({ navigation, route }) => {
                 <Pressable
                   key={tab.key}
                   style={[
-                    styles.tabButton,
-                    isMobile && styles.tabButtonMobile,
+                    styles.tabSegmentItem,
+                    isMobile && styles.tabSegmentItemMobile,
                     isActive && [
-                      styles.tabButtonActive,
-                      { backgroundColor: theme.background, borderColor: theme.border },
+                      styles.tabSegmentItemActive,
+                      { backgroundColor: theme.surface },
                     ],
                   ]}
                   onPress={() => setActiveTab(tab.key)}
                 >
-                  <Text style={[styles.tabButtonIcon, isMobile && styles.tabButtonIconMobile]}>{tab.icon}</Text>
+                  <Text style={[styles.tabSegmentIcon, isMobile && styles.tabSegmentIconMobile]}>{tab.icon}</Text>
                   <Text
                     style={[
-                      styles.tabButtonText,
-                      isMobile && styles.tabButtonTextMobile,
-                      { color: isActive ? theme.text : theme.textSecondary },
+                      styles.tabSegmentLabel,
+                      isMobile && styles.tabSegmentLabelMobile,
+                      { color: isActive ? theme.text : theme.textSecondary, fontWeight: isActive ? '700' : '500' },
                     ]}
                   >
                     {tab.label}
@@ -1617,44 +1683,59 @@ const Item12Screen = ({ navigation, route }) => {
 /** 施錠確認サマリーカードスタイル */
 const lockCheckSummaryStyles = StyleSheet.create({
   card: {
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 14,
+    borderRadius: 16,
+    padding: 16,
     marginBottom: 10,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   title: {
     fontSize: 12,
+    fontWeight: '500',
     marginBottom: 4,
   },
   percent: {
-    fontSize: 36,
-    fontWeight: 'bold',
+    fontSize: 40,
+    fontWeight: '800',
   },
   detail: {
     fontSize: 13,
+    fontWeight: '500',
     marginTop: 2,
   },
 });
 
 /** ダッシュボードタブ専用スタイル */
 const dashboardStyles = StyleSheet.create({
+  /** ダッシュボード外枠カード */
   card: {
-    borderRadius: 18,
-    borderWidth: 1,
-    padding: 16,
-    gap: 12,
-  },
-  /** 巡回中トグルカード */
-  patrolToggle: {
-    borderWidth: 2,
     borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    padding: 16,
+    gap: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  /** 巡回中トグルカード: shadow で浮かせる */
+  patrolToggle: {
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   patrolToggleLeft: {
     flexDirection: 'row',
@@ -1670,19 +1751,21 @@ const dashboardStyles = StyleSheet.create({
   },
   patrolToggleLabel: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   patrolToggleHint: {
-    fontSize: 11,
+    fontSize: 12,
     marginTop: 2,
+    lineHeight: 17,
   },
+  /** ON/OFF トグルボタン pill 形 */
   patrolToggleButton: {
     fontSize: 13,
-    fontWeight: '800',
-    borderWidth: 2,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    fontWeight: '700',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
@@ -1696,17 +1779,19 @@ const dashboardStyles = StyleSheet.create({
   },
   title: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   helpText: {
     fontSize: 12,
     lineHeight: 18,
   },
+  /** 更新ボタン */
   refreshButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    overflow: 'hidden',
   },
   refreshButtonText: {
     fontSize: 12,
@@ -1717,40 +1802,54 @@ const dashboardStyles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
+  /** メトリックカード: Material FilledCard 風 */
   metricCard: {
     minWidth: '47%',
     flexGrow: 1,
-    borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 14,
+    borderRadius: 14,
+    paddingHorizontal: 16,
     paddingVertical: 14,
-    gap: 3,
+    gap: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   metricValue: {
-    fontSize: 22,
+    fontSize: 28,
     fontWeight: '800',
   },
   metricLabel: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   metricHelper: {
     fontSize: 11,
+    marginTop: 1,
   },
+  /** フォーカスカード: 左アクセントボーダー付き */
   focusCard: {
-    borderWidth: 1,
-    borderRadius: 16,
+    borderLeftWidth: 4,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    gap: 4,
+    gap: 5,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   sectionLabel: {
     fontSize: 11,
     fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   focusTitle: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 17,
+    fontWeight: '700',
     lineHeight: 24,
   },
   focusBody: {
@@ -1760,16 +1859,18 @@ const dashboardStyles = StyleSheet.create({
   columnGroup: {
     gap: 10,
   },
+  /** セクションカード: OutlinedCard 風 */
   sectionCard: {
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 14,
+    paddingVertical: 12,
     gap: 8,
   },
   sectionTitle: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
+    letterSpacing: 0.1,
   },
   emptyText: {
     fontSize: 13,
@@ -1777,14 +1878,16 @@ const dashboardStyles = StyleSheet.create({
   },
   compactItem: {
     gap: 2,
-    paddingTop: 2,
+    paddingVertical: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   compactTitle: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   compactMeta: {
     fontSize: 12,
+    lineHeight: 17,
   },
 });
 
@@ -1936,8 +2039,7 @@ const styles = StyleSheet.create({
   },
   /** 下部タブバーエリア */
   bottomArea: {
-    borderTopWidth: 1,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingTop: 10,
     paddingBottom: 14,
   },
@@ -1947,51 +2049,52 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingBottom: 10,
   },
-  /** iOS スタイルのタブバー pill */
-  iosTabBar: {
-    borderWidth: 1,
-    borderRadius: 20,
+  /** Segmented Control 外枠 */
+  tabSegment: {
+    borderRadius: 12,
     flexDirection: 'row',
     padding: 4,
-    gap: 4,
+    gap: 3,
   },
-  tabButton: {
+  /** 各タブアイテム */
+  tabSegmentItem: {
     flex: 1,
-    borderRadius: 16,
-    minHeight: 58,
+    borderRadius: 10,
+    minHeight: 56,
     paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 3,
   },
-  /** スマホ向けタブボタン: 高さを小さく */
-  tabButtonMobile: {
-    minHeight: 50,
+  /** スマホ向けタブアイテム */
+  tabSegmentItemMobile: {
+    minHeight: 46,
     paddingVertical: 6,
     gap: 2,
   },
-  tabButtonActive: {
-    borderWidth: 1,
+  /** アクティブタブ: 白カード + 影 */
+  tabSegmentItemActive: {
     shadowColor: '#000000',
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
+    shadowOpacity: 0.10,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    elevation: 3,
   },
-  tabButtonIcon: {
+  /** タブアイコン */
+  tabSegmentIcon: {
     fontSize: 17,
   },
-  /** スマホ向けアイコン: 少し小さく */
-  tabButtonIconMobile: {
+  /** スマホ向けアイコン */
+  tabSegmentIconMobile: {
     fontSize: 15,
   },
-  tabButtonText: {
+  /** タブラベル */
+  tabSegmentLabel: {
     fontSize: 11,
-    fontWeight: '700',
     textAlign: 'center',
   },
-  /** スマホ向けタブテキスト: さらに小さく */
-  tabButtonTextMobile: {
+  /** スマホ向けラベル */
+  tabSegmentLabelMobile: {
     fontSize: 10,
   },
 });

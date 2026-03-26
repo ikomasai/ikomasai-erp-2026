@@ -692,7 +692,7 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
   ).length;
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.card, { backgroundColor: theme.surface }]}>
       {/* ── ヘッダー ── */}
       <View style={styles.headerRow}>
         <Text style={[styles.sectionTitle, { color: theme.text }]}>鍵貸出/返却（本部）</Text>
@@ -757,7 +757,7 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
         <View
           style={[
             styles.lockProgressBanner,
-            { backgroundColor: theme.surface, borderColor: theme.border },
+            { backgroundColor: theme.surface },
           ]}
         >
           <Text style={[styles.lockProgressTitle, { color: theme.textSecondary }]}>
@@ -1296,10 +1296,15 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
 
 const styles = StyleSheet.create({
   /** カード外枠 */
+  /** 外枠カード: borderWidth削除 + shadow */
   card: {
-    borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   /** ヘッダー行：タイトル + ボタン群 */
   headerRow: {
@@ -1328,9 +1333,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  /** 端末を開くボタン（目立つ大きめデザイン） */
+  /** 端末を開くボタン: pill型 (borderRadius 12→24) */
   terminalButton: {
-    borderRadius: 12,
+    borderRadius: 24,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 4,
@@ -1401,18 +1406,23 @@ const styles = StyleSheet.create({
   list: {
     gap: 8,
   },
-  /** 団体グループ外枠 */
+  /** 団体グループ外枠: borderRadius 10→12 + shadow */
   orgGroup: {
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
-  /** 団体グループヘッダー行（borderBottomColor は動的設定） */
+  /** 団体グループヘッダー行: paddingVertical 8→12 */
   orgHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 12,
     borderBottomWidth: 1,
   },
   orgName: {
@@ -1471,11 +1481,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
-  /** 返却・承認などの小さいアクションボタン */
+  /** 返却・承認などの小さいアクションボタン: paddingHorizontal 10→14 */
   subActionButton: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
     paddingVertical: 5,
   },
   subActionText: {
@@ -1609,22 +1619,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  /** 本日の施錠確認進捗バナー */
+  /** 本日の施錠確認進捗バナー: borderWidth削除 + shadow / borderRadius 12→16 */
   lockProgressBanner: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 16,
+    padding: 16,
     alignItems: 'center',
     marginBottom: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   lockProgressTitle: {
     fontSize: 12,
     marginBottom: 4,
   },
+  /** 進捗パーセント: fontSize 40→44 / fontWeight 'bold'→'800' */
   lockProgressPercent: {
-    fontSize: 40,
-    fontWeight: 'bold',
-    lineHeight: 48,
+    fontSize: 44,
+    fontWeight: '800',
+    lineHeight: 52,
   },
   lockProgressDetail: {
     fontSize: 14,

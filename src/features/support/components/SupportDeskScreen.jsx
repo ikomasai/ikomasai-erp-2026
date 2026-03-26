@@ -53,6 +53,7 @@ import {
 import {
   EVALUATION_STATUSES,
   createEvaluationCheck,
+  listAllEvaluationChecks,
   listEvaluationChecks,
   reviewEvaluationCheck,
 } from '../../../services/supabase/evaluationService';
@@ -68,6 +69,7 @@ import {
   listTicketAttachments,
 } from '../../../services/supabase/ticketAttachmentService';
 import { selectOrganizationEvents } from '../../../services/supabase/organizationEventService';
+import { listPatrolChecksByLocation } from '../../../services/supabase/patrolCheckService';
 import {
   selectPrizeDistributions,
   updatePrizeDistributionCriteria,
@@ -711,6 +713,12 @@ const SupportDeskScreen = ({
   const [selectedHqOrganizationEvent, setSelectedHqOrganizationEvent] = useState(ALL_ORGANIZATION_EVENT_FILTER);
   /** HQ企画一覧の団体候補表示フラグ */
   const [isHqOrganizationEventDropdownOpen, setIsHqOrganizationEventDropdownOpen] = useState(false);
+  /** 企画ID別の定常巡回チェック履歴マップ（locationId → 配列） */
+  const [patrolChecksByLocation, setPatrolChecksByLocation] = useState({});
+  /** 企画別巡回チェック読み込み中フラグ */
+  const [isLoadingPatrolChecksByLocation, setIsLoadingPatrolChecksByLocation] = useState(false);
+  /** 企画一覧タブで展開中の企画ID（巡回チェック詳細表示用） */
+  const [expandedCheckLocationId, setExpandedCheckLocationId] = useState(null);
 
   /** 景品配布基準一覧（prize_distribution）- 会計向け */
   const [prizeDistributions, setPrizeDistributions] = useState([]);
@@ -767,6 +775,8 @@ const SupportDeskScreen = ({
   const [newEvaluationItemText, setNewEvaluationItemText] = useState('');
   /** 評価タスク生成中フラグ */
   const [isCreatingEvaluationTasks, setIsCreatingEvaluationTasks] = useState(false);
+  /** 評価一括生成で選択中の企画IDセット */
+  const [selectedEvalEventIds, setSelectedEvalEventIds] = useState(new Set());
 
   /**
    * メッセージ表示
@@ -1470,6 +1480,159 @@ const SupportDeskScreen = ({
     }
     showMessage('生成完了', `「${eventName}」の評価タスク ${evaluationItems.length}件を作成しました`);
     await loadPendingEvaluations();
+  };
+
+  /**
+   * 評価企画の選択をトグルする
+   * @param {string} eventId - 企画ID
+   * @returns {void}
+   */
+  const handleToggleEvalEventSelection = (eventId) => {
+    setSelectedEvalEventIds((prev) => {
+      /** 新しいセットを作成してイミュータブルに更新 */
+      const next = new Set(prev);
+      if (next.has(String(eventId))) {
+        next.delete(String(eventId));
+      } else {
+        next.add(String(eventId));
+      }
+      return next;
+    });
+  };
+
+  /**
+   * 選択中の全企画に対して評価タスクを一括生成する
+   * @returns {Promise<void>} 生成処理
+   */
+  const handleBulkCreateEvaluationTasks = async () => {
+    if (!user?.id) {
+      showMessage('操作エラー', 'ログイン情報が取得できません');
+      return;
+    }
+    if (evaluationItems.length === 0) {
+      showMessage('エラー', '評価項目が設定されていません');
+      return;
+    }
+    if (selectedEvalEventIds.size === 0) {
+      showMessage('エラー', '評価対象の企画を1件以上選択してください');
+      return;
+    }
+
+    setIsCreatingEvaluationTasks(true);
+
+    /** 選択企画ごとに各評価項目のレコードを作成 */
+    const allResults = await Promise.all(
+      Array.from(selectedEvalEventIds).flatMap((eventId) =>
+        evaluationItems.map((itemName) =>
+          createEvaluationCheck({
+            evaluatorId: user.id,
+            eventId,
+            score: null,
+            comment: itemName,
+          })
+        )
+      )
+    );
+
+    setIsCreatingEvaluationTasks(false);
+
+    const hasError = allResults.some((r) => r.error);
+    if (hasError) {
+      showMessage('生成エラー', '一部の評価タスクの作成に失敗しました');
+      return;
+    }
+
+    /** 生成完了後に選択をリセット */
+    setSelectedEvalEventIds(new Set());
+    showMessage(
+      '生成完了',
+      `${selectedEvalEventIds.size}件の企画に評価タスク（各${evaluationItems.length}項目）を作成しました`
+    );
+    await loadPendingEvaluations();
+  };
+
+  /**
+   * 全評価データをCSV形式でダウンロードする（Web版のみ）
+   * Blob + <a> タグで .csv ファイルとしてブラウザに保存させる
+   * @returns {Promise<void>} エクスポート処理
+   */
+  const handleExportEvaluationsToCSV = async () => {
+    if (Platform.OS !== 'web') {
+      showMessage('非対応', 'エクスポートはWeb版のみ対応しています');
+      return;
+    }
+
+    showMessage('取得中', '評価データを取得しています...');
+    const { data, error } = await listAllEvaluationChecks({ limit: 500 });
+
+    if (error) {
+      showMessage('取得エラー', '評価データの取得に失敗しました');
+      return;
+    }
+
+    if (data.length === 0) {
+      showMessage('データなし', '出力できる評価データがありません');
+      return;
+    }
+
+    /** ステータス日本語マップ */
+    const statusLabels = {
+      pending: '承認待ち',
+      approved: '承認済み',
+      rejected: '却下',
+      rework: '差戻し',
+    };
+
+    /** CSVヘッダー行 */
+    const headers = ['ID', '企画ID', '評価者ID', 'ステータス', 'スコア', 'コメント', 'レビュー担当', 'レビュー日時', '作成日時'];
+
+    /**
+     * CSV用に値をエスケープする
+     * @param {string|number|null|undefined} value - 入力値
+     * @returns {string} エスケープ済み文字列
+     */
+    const escapeCsvValue = (value) => {
+      if (value === null || value === undefined) {
+        return '';
+      }
+      const str = String(value);
+      /** ダブルクォート・カンマ・改行を含む場合はダブルクォートで囲む */
+      if (str.includes('"') || str.includes(',') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    /** データ行配列 */
+    const rows = data.map((evaluation) => [
+      escapeCsvValue(evaluation.id),
+      escapeCsvValue(evaluation.event_id || ''),
+      escapeCsvValue(evaluation.evaluator_id || ''),
+      escapeCsvValue(statusLabels[evaluation.evaluation_status] || evaluation.evaluation_status || ''),
+      escapeCsvValue(evaluation.score || ''),
+      escapeCsvValue(evaluation.comment || ''),
+      escapeCsvValue(evaluation.reviewed_by || ''),
+      escapeCsvValue(evaluation.reviewed_at ? new Date(evaluation.reviewed_at).toLocaleString('ja-JP') : ''),
+      escapeCsvValue(new Date(evaluation.created_at).toLocaleString('ja-JP')),
+    ]);
+
+    /** BOM付きCSV文字列（Excel日本語対応） */
+    const csvContent =
+      '\uFEFF' +
+      [headers.map(escapeCsvValue).join(','), ...rows.map((row) => row.join(','))].join('\n');
+
+    /** Blobを作成してダウンロードリンクを生成 */
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `evaluation_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showMessage('出力完了', `${data.length}件の評価データをCSVでダウンロードしました`);
   };
 
   /**
@@ -2275,6 +2438,26 @@ const SupportDeskScreen = ({
   };
 
   /**
+   * 企画別定常巡回チェック履歴を取得（本部：企画一覧タブ用）
+   * @returns {Promise<void>} 取得処理
+   */
+  const loadPatrolChecksByLocation = async () => {
+    if (!isHQRole) {
+      return;
+    }
+    setIsLoadingPatrolChecksByLocation(true);
+    const { data, error } = await listPatrolChecksByLocation({ limit: 400 });
+    setIsLoadingPatrolChecksByLocation(false);
+
+    if (error) {
+      console.error('企画別巡回チェック取得に失敗:', error);
+      return;
+    }
+
+    setPatrolChecksByLocation(data || {});
+  };
+
+  /**
    * 会計向け景品配布基準を取得
    * @returns {Promise<void>} 取得処理
    */
@@ -2307,6 +2490,7 @@ const SupportDeskScreen = ({
     loadPendingEvaluations();
     loadPatrolHistory();
     loadHqOrganizationEvents();
+    loadPatrolChecksByLocation();
     loadPrizeDistributions();
     loadTaskStats();
     loadPatrollingUsers();
@@ -2931,13 +3115,13 @@ const SupportDeskScreen = ({
         </View>
       ) : null}
 
-      {/* HQロール向けタブバー: ScrollView の外側上部に固定 */}
+      {/* HQロール向けタブバー: Segmented Control風 / ScrollView 内に card 型配置 */}
       {isHQRole ? (
-        <View style={[styles.iosTabBar, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+        <View style={[styles.tabSegmentBar, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.iosTabBarContent}
+            contentContainerStyle={[styles.tabSegmentBarContent, { backgroundColor: `${theme.border}55` }]}
           >
             {HQ_TABS.map((tab) => {
               /** タブがアクティブかどうか */
@@ -2946,17 +3130,15 @@ const SupportDeskScreen = ({
                 <TouchableOpacity
                   key={tab.key}
                   style={[
-                    styles.iosTabItem,
-                    {
-                      backgroundColor: isTabActive ? theme.primary : 'transparent',
-                    },
+                    styles.tabSegmentBarItem,
+                    isTabActive && [styles.tabSegmentBarItemActive, { backgroundColor: theme.background }],
                   ]}
                   onPress={() => setActiveTab(tab.key)}
                 >
                   <Text
                     style={[
-                      styles.iosTabItemText,
-                      { color: isTabActive ? '#FFFFFF' : theme.textSecondary },
+                      styles.tabSegmentBarText,
+                      { color: isTabActive ? theme.text : theme.textSecondary, fontWeight: isTabActive ? '700' : '500' },
                     ]}
                   >
                     {tab.label}
@@ -2971,18 +3153,18 @@ const SupportDeskScreen = ({
       <ScrollView ref={departmentScrollViewRef} contentContainerStyle={styles.content}>
         {/* 説明カード（HQ以外のロールのみ表示） */}
         {!isHQRole && shouldShowDepartmentDescription ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <Text style={[styles.description, { color: theme.textSecondary }]}>{screenDescription}</Text>
           </View>
         ) : null}
 
         {/* ─── ダッシュボードタブ ─── */}
         {isHQRole && activeTab === 'dashboard' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>本部ダッシュボード</Text>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={() => {
                   loadTickets(selectedTicketId);
                   loadHqPatrolTasks();
@@ -2990,7 +3172,7 @@ const SupportDeskScreen = ({
                   loadPatrollingUsers();
                 }}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
               </TouchableOpacity>
             </View>
 
@@ -3003,24 +3185,24 @@ const SupportDeskScreen = ({
               </View>
             ) : null}
 
-            {/* 概要カードグリッド */}
+            {/* 概要カードグリッド: 種別ごとに色分けした Material 3 風カード */}
             <View style={styles.dashboardGrid}>
-              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
+              <View style={[styles.dashboardCard, { backgroundColor: `${theme.primary}15` }]}>
                 <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>📬 新着連絡</Text>
-                <Text style={[styles.dashboardValue, { color: theme.text }]}>{dashboardSummary.newTickets}</Text>
+                <Text style={[styles.dashboardValue, { color: theme.primary }]}>{dashboardSummary.newTickets}</Text>
                 <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
               </View>
-              <View style={[styles.dashboardCard, { borderColor: '#D1242F', backgroundColor: dashboardSummary.delayedTickets > 0 ? '#FFF0F0' : theme.background }]}>
+              <View style={[styles.dashboardCard, { backgroundColor: dashboardSummary.delayedTickets > 0 ? '#FEF2F2' : theme.background }]}>
                 <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>⏰ 遅延案件(60分+)</Text>
                 <Text style={[styles.dashboardValue, { color: '#D1242F' }]}>{dashboardSummary.delayedTickets}</Text>
                 <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
               </View>
-              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
+              <View style={[styles.dashboardCard, { backgroundColor: '#ECFDF5' }]}>
                 <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>🚶 巡回対応中</Text>
-                <Text style={[styles.dashboardValue, { color: theme.primary }]}>{dashboardSummary.activePatrolTasks}</Text>
+                <Text style={[styles.dashboardValue, { color: '#059669' }]}>{dashboardSummary.activePatrolTasks}</Text>
                 <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
               </View>
-              <View style={[styles.dashboardCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
+              <View style={[styles.dashboardCard, { backgroundColor: theme.background }]}>
                 <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>📡 無線ログ(1h)</Text>
                 <Text style={[styles.dashboardValue, { color: theme.text }]}>{dashboardSummary.recentRadioLogs}</Text>
                 <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
@@ -3148,7 +3330,7 @@ const SupportDeskScreen = ({
         {isHQRole && activeTab === 'overview' ? (
           <>
             {/* ── 未巡回アラート閾値設定（本部のみ変更可能） ── */}
-            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={[styles.card, { backgroundColor: theme.surface }]}>
               <View style={styles.sectionHeader}>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.sectionTitle, { color: theme.text }]}>未巡回アラート閾値設定</Text>
@@ -3168,7 +3350,7 @@ const SupportDeskScreen = ({
                         styles.patrolAlertThresholdButton,
                         {
                           borderColor: isActive ? theme.primary : theme.border,
-                          backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                          backgroundColor: isActive ? theme.primary : theme.background,
                         },
                       ]}
                       onPress={() => handleChangeHqAlertMinutes(minutes)}
@@ -3176,7 +3358,7 @@ const SupportDeskScreen = ({
                       <Text
                         style={[
                           styles.patrolAlertThresholdText,
-                          { color: isActive ? theme.primary : theme.textSecondary },
+                          { color: isActive ? '#FFFFFF' : theme.textSecondary },
                         ]}
                       >
                         {minutes}分
@@ -3191,21 +3373,21 @@ const SupportDeskScreen = ({
             </View>
 
             {/* ── 企画報告確認セクション（開始確認・終了確認） ── */}
-            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={[styles.card, { backgroundColor: theme.surface }]}>
               <View style={styles.sectionHeader}>
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>企画報告確認</Text>
                 <View style={styles.sectionHeaderActions}>
                   <TouchableOpacity
-                    style={[styles.refreshButton, { borderColor: theme.border }]}
+                    style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                     onPress={loadHqPatrolTasks}
                   >
-                    <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                    <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.refreshButton, { borderColor: theme.border }]}
+                    style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                     onPress={toggleOverviewReportSection}
                   >
-                    <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>
+                    <Text style={[styles.refreshButtonText, { color: theme.primary }]}>
                       {isOverviewReportSectionExpanded ? '折りたたむ' : '開く'}
                     </Text>
                   </TouchableOpacity>
@@ -3233,13 +3415,13 @@ const SupportDeskScreen = ({
                             styles.filterChip,
                             {
                               borderColor: isActive ? theme.primary : theme.border,
-                              backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                              backgroundColor: isActive ? theme.primary : theme.background,
                             },
                           ]}
                           onPress={() => setOverviewStatusFilter(f.key)}
                         >
                           <Text
-                            style={[styles.filterChipText, { color: isActive ? theme.primary : theme.textSecondary }]}
+                            style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}
                           >
                             {f.label}
                           </Text>
@@ -3266,7 +3448,7 @@ const SupportDeskScreen = ({
                           ]}
                           onPress={() => setOverviewReportTypeFilter(f.key)}
                         >
-                          <Text style={[styles.filterChipText, { color: isActive ? '#0969DA' : theme.textSecondary }]}>
+                          <Text style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}>
                             {f.label}
                           </Text>
                         </Pressable>
@@ -3330,21 +3512,21 @@ const SupportDeskScreen = ({
             </View>
 
             {/* ── 施錠確認セクション ── */}
-            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={[styles.card, { backgroundColor: theme.surface }]}>
               <View style={styles.sectionHeader}>
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>施錠確認</Text>
                 <View style={styles.sectionHeaderActions}>
                   <TouchableOpacity
-                    style={[styles.refreshButton, { borderColor: theme.border }]}
+                    style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                     onPress={loadHqPatrolTasks}
                   >
-                    <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                    <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.refreshButton, { borderColor: theme.border }]}
+                    style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                     onPress={toggleOverviewLockSection}
                   >
-                    <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>
+                    <Text style={[styles.refreshButtonText, { color: theme.primary }]}>
                       {isOverviewLockSectionExpanded ? '折りたたむ' : '開く'}
                     </Text>
                   </TouchableOpacity>
@@ -3374,13 +3556,13 @@ const SupportDeskScreen = ({
                             styles.filterChip,
                             {
                               borderColor: isActive ? theme.primary : theme.border,
-                              backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                              backgroundColor: isActive ? theme.primary : theme.background,
                             },
                           ]}
                           onPress={() => setOverviewLockAssigneeFilter(filter.key)}
                         >
                           <Text
-                            style={[styles.filterChipText, { color: isActive ? theme.primary : theme.textSecondary }]}
+                            style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}
                           >
                             {filter.label}
                           </Text>
@@ -3407,7 +3589,7 @@ const SupportDeskScreen = ({
                           onPress={() => setOverviewLockConfirmationFilter(filter.key)}
                         >
                           <Text
-                            style={[styles.filterChipText, { color: isActive ? '#1A7F37' : theme.textSecondary }]}
+                            style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}
                           >
                             {filter.label}
                           </Text>
@@ -3488,14 +3670,14 @@ const SupportDeskScreen = ({
 
         {/* ─── 企画一覧タブ（HQ） ─── */}
         {isHQRole && activeTab === 'event_orgs' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>企画一覧</Text>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={loadHqOrganizationEvents}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
               </TouchableOpacity>
             </View>
             <Text style={[styles.helpText, { color: theme.textSecondary }]}>
@@ -3611,29 +3793,109 @@ const SupportDeskScreen = ({
               </Text>
             ) : (
               <View style={styles.ticketList}>
-                {filteredHqOrganizationEvents.map((item) => (
-                  <View
-                    key={`${item.id}-${item.organization_name}-${item.event_name}`}
-                    style={[
-                      styles.ticketItem,
-                      { borderColor: theme.border, backgroundColor: theme.background },
-                    ]}
-                  >
-                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                      {item.organization_name || '団体名未設定'}
-                    </Text>
-                    <Text style={[styles.ticketTitle, { color: theme.text }]}>
-                      {item.event_name || '企画名未設定'}
-                    </Text>
-                    {item.sheet_name ? (
+                {filteredHqOrganizationEvents.map((item) => {
+                  /** この企画に紐づく巡回チェック履歴（location_id = item.id） */
+                  const itemChecks = patrolChecksByLocation[String(item.id)] || [];
+                  /** 直近の巡回チェック */
+                  const latestCheck = itemChecks[0] || null;
+                  /** 展開中かどうか */
+                  const isExpanded = expandedCheckLocationId === String(item.id);
+
+                  return (
+                    <View
+                      key={`${item.id}-${item.organization_name}-${item.event_name}`}
+                      style={[
+                        styles.ticketItem,
+                        { borderColor: theme.border, backgroundColor: theme.background },
+                      ]}
+                    >
                       <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                        シート: {item.sheet_name}
+                        {item.organization_name || '団体名未設定'}
                       </Text>
-                    ) : null}
-                  </View>
-                ))}
+                      <Text style={[styles.ticketTitle, { color: theme.text }]}>
+                        {item.event_name || '企画名未設定'}
+                      </Text>
+                      {item.sheet_name ? (
+                        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+                          シート: {item.sheet_name}
+                        </Text>
+                      ) : null}
+
+                      {/* 直近巡回チェックサマリー */}
+                      {latestCheck ? (
+                        <TouchableOpacity
+                          style={[styles.patrolCheckSummaryRow, { borderColor: theme.border, backgroundColor: `${theme.primary}08` }]}
+                          onPress={() => setExpandedCheckLocationId(isExpanded ? null : String(item.id))}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.patrolCheckSummaryLabel, { color: theme.primary }]}>
+                              🚶 直近の巡回チェック
+                            </Text>
+                            <Text style={[styles.patrolCheckSummaryDate, { color: theme.textSecondary }]}>
+                              {new Date(latestCheck.checked_at || latestCheck.created_at).toLocaleString('ja-JP')}
+                            </Text>
+                          </View>
+                          <Text style={[styles.patrolCheckSummaryCount, { color: theme.textSecondary }]}>
+                            {itemChecks.length}回 {isExpanded ? '▲' : '▼'}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : isLoadingPatrolChecksByLocation ? null : (
+                        <Text style={[styles.patrolCheckEmpty, { color: theme.textSecondary }]}>
+                          巡回チェック記録なし
+                        </Text>
+                      )}
+
+                      {/* 展開時: チェック履歴一覧 */}
+                      {isExpanded && itemChecks.length > 0 ? (
+                        <View style={[styles.patrolCheckHistoryList, { borderColor: theme.border }]}>
+                          {itemChecks.slice(0, 8).map((check) => {
+                            /** チェック項目配列（JSON配列または空） */
+                            const checkItems = Array.isArray(check.check_items) ? check.check_items : [];
+
+                            return (
+                              <View
+                                key={check.id}
+                                style={[styles.patrolCheckHistoryItem, { borderColor: theme.border }]}
+                              >
+                                <Text style={[styles.patrolCheckHistoryDate, { color: theme.textSecondary }]}>
+                                  {new Date(check.checked_at || check.created_at).toLocaleString('ja-JP')}
+                                </Text>
+                                {checkItems.map((ci, idx) => (
+                                  <Text
+                                    key={`${check.id}-ci-${idx}`}
+                                    style={[styles.patrolCheckHistoryRow, { color: theme.text }]}
+                                    numberOfLines={1}
+                                  >
+                                    {ci.label || ci.key}: {ci.answerLabel || ci.answerKey || (ci.score ? `${ci.score}/5` : '-')}
+                                    {ci.memo ? ` （${ci.memo}）` : ''}
+                                  </Text>
+                                ))}
+                                {check.memo ? (
+                                  <Text style={[styles.patrolCheckHistoryMemo, { color: theme.textSecondary }]}>
+                                    メモ: {check.memo}
+                                  </Text>
+                                ) : null}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
               </View>
             )}
+
+            {/* 企画別巡回チェック 更新ボタン */}
+            <TouchableOpacity
+              style={[styles.refreshButton, { backgroundColor: `${theme.primary}15`, alignSelf: 'flex-start' }]}
+              onPress={() => {
+                loadHqOrganizationEvents();
+                loadPatrolChecksByLocation();
+              }}
+            >
+              <Text style={[styles.refreshButtonText, { color: theme.primary }]}>巡回チェック更新</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -3641,17 +3903,17 @@ const SupportDeskScreen = ({
 
         {/* ─── 巡回タブ ─── */}
         {isHQRole && activeTab === 'patrol' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>巡回タスク割当</Text>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={() => {
                   loadHqPatrolTasks();
                   loadPatrolAssignees();
                 }}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
               </TouchableOpacity>
             </View>
 
@@ -3840,12 +4102,12 @@ const SupportDeskScreen = ({
                             styles.filterChip,
                             {
                               borderColor: isActive ? theme.primary : theme.border,
-                              backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                              backgroundColor: isActive ? theme.primary : theme.background,
                             },
                           ]}
                           onPress={() => setSelectedPatrolAssigneeId(candidate.userId)}
                         >
-                          <Text style={[styles.filterChipText, { color: isActive ? theme.primary : theme.textSecondary }]}> 
+                          <Text style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}> 
                             {candidate.name}
                           </Text>
                         </Pressable>
@@ -3906,7 +4168,7 @@ const SupportDeskScreen = ({
 
         {/* ─── 評価タブ: 評価項目設定 + 評価タスク生成 ─── */}
         {isHQRole && activeTab === 'evaluation' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>評価項目設定</Text>
             </View>
@@ -3951,53 +4213,111 @@ const SupportDeskScreen = ({
               </TouchableOpacity>
             </View>
             {/* 企画を選んで評価タスク一括生成 */}
-            <Text style={[styles.label, { color: theme.text, marginTop: 8 }]}>評価対象企画を選んでタスク生成</Text>
+            <Text style={[styles.label, { color: theme.text, marginTop: 8 }]}>評価対象企画を選択（複数可）</Text>
             <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-              企画を選択して「評価しましょう」を押すと、上記項目ごとにタスクが生成されます。
+              チェックを入れた企画すべてに上記評価項目のタスクをまとめて生成します。
             </Text>
-            <View style={styles.evalOrgEventList}>
-              {(hqOrganizationEvents || []).slice(0, 30).map((orgEvent) => (
+
+            {/* 全選択/全解除ボタン */}
+            {(hqOrganizationEvents || []).length > 0 ? (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TouchableOpacity
-                  key={orgEvent.id}
-                  style={[
-                    styles.evalOrgEventItem,
-                    { borderColor: theme.border, backgroundColor: theme.background },
-                  ]}
-                  onPress={() => handleCreateEvaluationTasks(orgEvent.event_id || orgEvent.id, orgEvent.eventName || orgEvent.event_name || orgEvent.name)}
-                  disabled={isCreatingEvaluationTasks}
+                  style={[styles.inlineActionButton, { borderColor: theme.primary, backgroundColor: `${theme.primary}12` }]}
+                  onPress={() => setSelectedEvalEventIds(new Set((hqOrganizationEvents || []).map((e) => String(e.event_id || e.id))))}
                 >
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.evalOrgEventOrg, { color: theme.textSecondary }]} numberOfLines={1}>
-                      {orgEvent.organizationName || orgEvent.organization_name || '-'}
-                    </Text>
-                    <Text style={[styles.evalOrgEventName, { color: theme.text }]} numberOfLines={1}>
-                      {orgEvent.eventName || orgEvent.event_name || orgEvent.name || '企画名未設定'}
-                    </Text>
-                  </View>
-                  <View style={[styles.evalStartButton, { backgroundColor: isCreatingEvaluationTasks ? theme.border : '#1A7F37' }]}>
-                    <Text style={styles.evalStartButtonText}>
-                      {isCreatingEvaluationTasks ? '生成中...' : '評価しましょう'}
-                    </Text>
-                  </View>
+                  <Text style={[styles.inlineActionButtonText, { color: theme.primary }]}>全選択</Text>
                 </TouchableOpacity>
-              ))}
+                <TouchableOpacity
+                  style={[styles.inlineActionButton, { borderColor: theme.border }]}
+                  onPress={() => setSelectedEvalEventIds(new Set())}
+                >
+                  <Text style={[styles.inlineActionButtonText, { color: theme.textSecondary }]}>全解除</Text>
+                </TouchableOpacity>
+                <Text style={[styles.helpText, { color: theme.textSecondary, alignSelf: 'center' }]}>
+                  {selectedEvalEventIds.size}件選択中
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.evalOrgEventList}>
+              {(hqOrganizationEvents || []).slice(0, 60).map((orgEvent) => {
+                /** この企画のID（event_id優先） */
+                const eid = String(orgEvent.event_id || orgEvent.id);
+                /** 選択中かどうか */
+                const isChecked = selectedEvalEventIds.has(eid);
+
+                return (
+                  <TouchableOpacity
+                    key={orgEvent.id}
+                    style={[
+                      styles.evalSelectRow,
+                      {
+                        borderColor: isChecked ? theme.primary : theme.border,
+                        backgroundColor: isChecked ? `${theme.primary}0A` : theme.background,
+                      },
+                    ]}
+                    onPress={() => handleToggleEvalEventSelection(eid)}
+                    disabled={isCreatingEvaluationTasks}
+                  >
+                    <View
+                      style={[
+                        styles.evalSelectCheckbox,
+                        {
+                          borderColor: isChecked ? theme.primary : theme.border,
+                          backgroundColor: isChecked ? theme.primary : 'transparent',
+                        },
+                      ]}
+                    >
+                      {isChecked ? (
+                        <Text style={styles.evalSelectCheckboxTick}>✓</Text>
+                      ) : null}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.evalSelectOrg, { color: theme.textSecondary }]} numberOfLines={1}>
+                        {orgEvent.organizationName || orgEvent.organization_name || '-'}
+                      </Text>
+                      <Text style={[styles.evalSelectName, { color: theme.text }]} numberOfLines={1}>
+                        {orgEvent.eventName || orgEvent.event_name || orgEvent.name || '企画名未設定'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
               {(hqOrganizationEvents || []).length === 0 ? (
                 <Text style={[styles.helpText, { color: theme.textSecondary }]}>企画一覧が読み込まれていません</Text>
               ) : null}
             </View>
+
+            {/* 一括生成ボタン */}
+            <TouchableOpacity
+              style={[
+                styles.evalBulkButton,
+                { backgroundColor: selectedEvalEventIds.size === 0 || isCreatingEvaluationTasks ? theme.border : '#1A7F37' },
+              ]}
+              onPress={handleBulkCreateEvaluationTasks}
+              disabled={selectedEvalEventIds.size === 0 || isCreatingEvaluationTasks}
+            >
+              <Text style={styles.evalBulkButtonText}>
+                {isCreatingEvaluationTasks
+                  ? '生成中...'
+                  : selectedEvalEventIds.size === 0
+                  ? '企画を選択してください'
+                  : `選択した${selectedEvalEventIds.size}件に評価タスクを生成`}
+              </Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
         {/* ─── 評価タブ: 評価承認 ─── */}
         {isHQRole && activeTab === 'evaluation' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>評価承認</Text>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={loadPendingEvaluations}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
               </TouchableOpacity>
             </View>
 
@@ -4054,16 +4374,36 @@ const SupportDeskScreen = ({
           </View>
         ) : null}
 
+        {/* ─── 評価タブ: CSV出力カード ─── */}
+        {isHQRole && activeTab === 'evaluation' ? (
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>評価データ出力</Text>
+            </View>
+            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+              全評価データをCSVファイルでダウンロードします。Excel で開けます（BOM付きUTF-8）。
+            </Text>
+            <TouchableOpacity
+              style={[styles.evalExportButton, { borderColor: theme.primary }]}
+              onPress={handleExportEvaluationsToCSV}
+            >
+              <Text style={[styles.evalExportButtonText, { color: theme.primary }]}>
+                📥 評価データをCSVでダウンロード
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {/* ─── 巡回対応履歴カード（評価タブ） ─── */}
         {isHQRole && activeTab === 'evaluation' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>巡回対応履歴</Text>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={loadPatrolHistory}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
               </TouchableOpacity>
             </View>
 
@@ -4114,14 +4454,14 @@ const SupportDeskScreen = ({
 
         {/* ─── タスク実績カード（担当者別集計）（実績タブ） ─── */}
         {isHQRole && activeTab === 'stats' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>タスク実績</Text>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={loadTaskStats}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
               </TouchableOpacity>
             </View>
 
@@ -4140,12 +4480,12 @@ const SupportDeskScreen = ({
                       styles.filterChip,
                       {
                         borderColor: isActive ? theme.primary : theme.border,
-                        backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                        backgroundColor: isActive ? theme.primary : theme.background,
                       },
                     ]}
                     onPress={() => setTaskStatsSortKey(sortOption.key)}
                   >
-                    <Text style={[styles.filterChipText, { color: isActive ? theme.primary : theme.textSecondary }]}>
+                    <Text style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}>
                       {sortOption.label}
                     </Text>
                   </Pressable>
@@ -4223,14 +4563,14 @@ const SupportDeskScreen = ({
         ) : null}
 
         {isHQRole && activeTab === 'radio' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>無線ログ</Text>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={loadRadioLogs}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
               </TouchableOpacity>
             </View>
             <Text style={[styles.helpText, { color: theme.textSecondary }]}>
@@ -4255,12 +4595,12 @@ const SupportDeskScreen = ({
                       styles.filterChip,
                       {
                         borderColor: isActive ? theme.primary : theme.border,
-                        backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                        backgroundColor: isActive ? theme.primary : theme.background,
                       },
                     ]}
                     onPress={() => setRadioChannel(cat.key)}
                   >
-                    <Text style={[styles.filterChipText, { color: isActive ? theme.primary : theme.textSecondary }]}>
+                    <Text style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}>
                       {cat.label}
                     </Text>
                   </Pressable>
@@ -4357,14 +4697,14 @@ const SupportDeskScreen = ({
         {/* ─── 連絡案件タブ（HQ）: rule_question / layout_change 対応 ─── */}
         {isHQRole && activeTab === 'tickets' ? (
           <>
-            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={[styles.card, { backgroundColor: theme.surface }]}>
               <View style={styles.sectionHeader}>
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>連絡案件</Text>
                 <TouchableOpacity
-                  style={[styles.refreshButton, { borderColor: theme.border }]}
+                  style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                   onPress={() => loadTickets(selectedTicketId)}
                 >
-                  <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                  <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
                 </TouchableOpacity>
               </View>
 
@@ -4380,7 +4720,7 @@ const SupportDeskScreen = ({
                         styles.filterChip,
                         {
                           borderColor: isActive ? theme.primary : theme.border,
-                          backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                          backgroundColor: isActive ? theme.primary : theme.background,
                         },
                       ]}
                       onPress={() => setTicketStatusFilter(filter.key)}
@@ -4388,7 +4728,7 @@ const SupportDeskScreen = ({
                       <Text
                         style={[
                           styles.filterChipText,
-                          { color: isActive ? theme.primary : theme.textSecondary },
+                          { color: isActive ? '#FFFFFF' : theme.textSecondary },
                         ]}
                       >
                         {filter.label}
@@ -4461,14 +4801,14 @@ const SupportDeskScreen = ({
             </View>
 
             {selectedTicket ? (
-              <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={[styles.card, { backgroundColor: theme.surface }]}>
                 <View style={styles.sectionHeader}>
                   <Text style={[styles.sectionTitle, { color: theme.text }]}>案件詳細</Text>
                   <TouchableOpacity
-                    style={[styles.refreshButton, { borderColor: theme.border }]}
+                    style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                     onPress={toggleDepartmentTicketDetailSection}
                   >
-                    <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>
+                    <Text style={[styles.refreshButtonText, { color: theme.primary }]}>
                       {isDepartmentTicketDetailExpanded ? '折りたたむ' : '開く'}
                     </Text>
                   </TouchableOpacity>
@@ -4582,10 +4922,10 @@ const SupportDeskScreen = ({
                     <View style={styles.sectionHeader}>
                       <Text style={[styles.label, { color: theme.text }]}>対応メッセージ</Text>
                       <TouchableOpacity
-                        style={[styles.refreshButton, { borderColor: theme.border }]}
+                        style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                         onPress={() => loadMessages(selectedTicket.id)}
                       >
-                        <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                        <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
                       </TouchableOpacity>
                     </View>
 
@@ -4661,24 +5001,24 @@ const SupportDeskScreen = ({
         {/* 連絡案件: 非HQロールのみScrollView内で表示（HQはsplitLayout） */}
         {!isHQRole ? (
           <>
-        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={[styles.card, { backgroundColor: theme.surface }]}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>対象連絡案件</Text>
             <View style={styles.sectionHeaderActions}>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={async () => {
                   await saveLastViewedAt();
                   loadTickets(selectedTicketId);
                 }}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={toggleDepartmentTicketListSection}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>
                   {isDepartmentTicketListExpanded ? '折りたたむ' : '開く'}
                 </Text>
               </TouchableOpacity>
@@ -4720,12 +5060,12 @@ const SupportDeskScreen = ({
                         styles.filterChip,
                         {
                           borderColor: isActive ? theme.primary : theme.border,
-                          backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                          backgroundColor: isActive ? theme.primary : theme.background,
                         },
                       ]}
                       onPress={() => setHqTicketTypeFilter(isActive ? 'all' : key)}
                     >
-                      <Text style={[styles.filterChipText, { color: isActive ? theme.primary : theme.textSecondary }]}>
+                      <Text style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}>
                         {label}
                       </Text>
                     </Pressable>
@@ -4770,7 +5110,7 @@ const SupportDeskScreen = ({
                         ]}
                         onPress={() => setHqOrgFilter(isActive ? 'all' : org.id)}
                       >
-                        <Text style={[styles.filterChipText, { color: isActive ? '#1A7F37' : theme.textSecondary }]}>
+                        <Text style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}>
                           {org.name}
                         </Text>
                       </Pressable>
@@ -4794,7 +5134,7 @@ const SupportDeskScreen = ({
                         styles.filterChip,
                         {
                           borderColor: isActive ? theme.primary : theme.border,
-                          backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                          backgroundColor: isActive ? theme.primary : theme.background,
                         },
                       ]}
                       onPress={() => setTicketStatusFilter(filter.key)}
@@ -4802,7 +5142,7 @@ const SupportDeskScreen = ({
                       <Text
                         style={[
                           styles.filterChipText,
-                          { color: isActive ? theme.primary : theme.textSecondary },
+                          { color: isActive ? '#FFFFFF' : theme.textSecondary },
                         ]}
                       >
                         {filter.label}
@@ -4889,7 +5229,7 @@ const SupportDeskScreen = ({
 
         {selectedTicket ? (
           <View
-            style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}
+            style={[styles.card, { backgroundColor: theme.surface }]}
             onLayout={(event) => {
               setDepartmentDetailSectionY(event.nativeEvent.layout.y);
             }}
@@ -4897,10 +5237,10 @@ const SupportDeskScreen = ({
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>案件詳細</Text>
               <TouchableOpacity
-                style={[styles.refreshButton, { borderColor: theme.border }]}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                 onPress={toggleDepartmentTicketDetailSection}
               >
-                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>
                   {isDepartmentTicketDetailExpanded ? '折りたたむ' : '開く'}
                 </Text>
               </TouchableOpacity>
@@ -5043,10 +5383,10 @@ const SupportDeskScreen = ({
                     <View style={styles.sectionHeader}>
                       <Text style={[styles.label, { color: theme.text }]}>添付</Text>
                       <TouchableOpacity
-                        style={[styles.refreshButton, { borderColor: theme.border }]}
+                        style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                         onPress={() => loadTicketAttachedFiles(selectedTicket.id)}
                       >
-                        <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                        <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
                       </TouchableOpacity>
                     </View>
 
@@ -5124,10 +5464,10 @@ const SupportDeskScreen = ({
                 <View style={styles.sectionHeader}>
                   <Text style={[styles.label, { color: theme.text }]}>対応メッセージ</Text>
                   <TouchableOpacity
-                    style={[styles.refreshButton, { borderColor: theme.border }]}
+                    style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                     onPress={() => loadMessages(selectedTicket.id)}
                   >
-                    <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                    <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -5201,21 +5541,21 @@ const SupportDeskScreen = ({
 
         {/* ─── 景品配布基準カード（会計ロールのみ） ─── */}
         {roleType === SUPPORT_DESK_ROLE_TYPES.ACCOUNTING ? (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>景品配布基準</Text>
               <View style={styles.sectionHeaderActions}>
                 <TouchableOpacity
-                  style={[styles.refreshButton, { borderColor: theme.border }]}
+                  style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                   onPress={loadPrizeDistributions}
                 >
-                  <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+                  <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.refreshButton, { borderColor: theme.border }]}
+                  style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
                   onPress={togglePrizeDistributionSection}
                 >
-                  <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>
+                  <Text style={[styles.refreshButtonText, { color: theme.primary }]}>
                     {isPrizeDistributionSectionExpanded ? '折りたたむ' : '開く'}
                   </Text>
                 </TouchableOpacity>
@@ -5633,37 +5973,51 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
   },
-  /** HQロール向けタブバー: ThemedHeader 直下に固定 */
-  iosTabBar: {
+  /** HQロール向けタブバー外枠: ThemedHeader 直下に固定 */
+  tabSegmentBar: {
     borderBottomWidth: 1,
     paddingVertical: 8,
     paddingHorizontal: 12,
   },
-  /** タブバーの横スクロールコンテンツ */
-  iosTabBarContent: {
+  /** Segmented Control コンテナ: 薄いグレー背景 + 角丸 */
+  tabSegmentBarContent: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 3,
     paddingHorizontal: 4,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  /** 個々のタブアイテム */
-  iosTabItem: {
-    borderRadius: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+  /** 個々のタブアイテム: 非アクティブは透明 */
+  tabSegmentBarItem: {
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
-  /** タブアイテムのテキスト */
-  iosTabItemText: {
-    fontSize: 15,
-    fontWeight: '700',
+  /** アクティブタブ: 白カード + shadow */
+  tabSegmentBarItemActive: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.10,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  /** タブテキスト */
+  tabSegmentBarText: {
+    fontSize: 14,
   },
   content: {
     padding: 16,
     gap: 12,
   },
+  /** カード: borderWidth削除 + shadow */
   card: {
-    borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -5699,13 +6053,18 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 14,
   },
+  /** ダッシュボードカード: borderWidth削除 + shadow */
   dashboardCard: {
     width: '48%',
     flexGrow: 1,
-    borderWidth: 1,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   dashboardLabel: {
     fontSize: 12,
@@ -6201,6 +6560,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     paddingHorizontal: 4,
   },
+  /** フィルターチップ: pill型 / アクティブ時fill */
   filterChip: {
     borderWidth: 1,
     borderRadius: 999,
@@ -6249,11 +6609,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
+  /** 更新ボタン: primary薄め背景 / borderWidth削除 */
   refreshButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    overflow: 'hidden',
   },
   refreshButtonText: {
     fontSize: 12,
@@ -6434,9 +6795,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  /** 送信ボタン: pill型 (borderRadius 10→24) */
   sendButton: {
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: 24,
+    paddingVertical: 13,
     alignItems: 'center',
     marginTop: 10,
   },
@@ -6450,10 +6812,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 10,
   },
+  /** ステータスボタン: borderRadius 10→16 */
   statusButton: {
     flex: 1,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 16,
     paddingVertical: 10,
     alignItems: 'center',
   },
@@ -6619,6 +6982,114 @@ const styles = StyleSheet.create({
   /** 未巡回アラート閾値ボタンのテキスト */
   patrolAlertThresholdText: {
     fontSize: 13,
+    fontWeight: '700',
+  },
+  /** 企画一覧: 直近巡回チェックサマリー行 */
+  patrolCheckSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 6,
+    gap: 8,
+  },
+  patrolCheckSummaryLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  patrolCheckSummaryDate: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  patrolCheckSummaryCount: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  /** 巡回チェック記録なしテキスト */
+  patrolCheckEmpty: {
+    fontSize: 11,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  /** チェック履歴展開リスト */
+  patrolCheckHistoryList: {
+    borderWidth: 1,
+    borderRadius: 8,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  patrolCheckHistoryItem: {
+    borderBottomWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 3,
+  },
+  patrolCheckHistoryDate: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  patrolCheckHistoryRow: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  patrolCheckHistoryMemo: {
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
+  /** 評価一括生成: 企画選択チェックボックス行 */
+  evalSelectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  evalSelectCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  evalSelectCheckboxTick: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  evalSelectOrg: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  evalSelectName: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  /** 評価一括生成ボタン */
+  evalBulkButton: {
+    borderRadius: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  evalBulkButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  /** 評価Excel出力ボタン */
+  evalExportButton: {
+    borderRadius: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1.5,
+  },
+  evalExportButtonText: {
+    fontSize: 14,
     fontWeight: '700',
   },
 });
