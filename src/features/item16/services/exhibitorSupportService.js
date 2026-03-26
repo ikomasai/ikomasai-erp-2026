@@ -515,9 +515,23 @@ const createKeyPreapply = async (input) => {
       throw new Error('対象の鍵を選択してください');
     }
 
+    /** 借受団体名（任意） */
+    const borrowerOrgName = normalizeText(input.borrowerOrgName);
+    /** 借受人氏名（任意） */
+    const borrowerPersonName = normalizeText(input.borrowerPersonName);
+
     const keySummaryForTitle = keyTargets.length === 1 ? keyTargets[0].name : `${keyTargets.length}件`;
     const keySummaryLines = keyTargets.map((keyItem) => `- ${keyItem.location || keyItem.name}`).join('\n');
-    const description = `対象鍵\n${keySummaryLines}`;
+    /** 借受人情報の説明行（入力された場合のみ追記） */
+    const borrowerLines = [
+      borrowerOrgName ? `団体名: ${borrowerOrgName}` : null,
+      borrowerPersonName ? `借受人: ${borrowerPersonName}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const description = borrowerLines
+      ? `${borrowerLines}\n\n対象鍵\n${keySummaryLines}`
+      : `対象鍵\n${keySummaryLines}`;
 
     const payload = {
       ticket_type: 'key_preapply',
@@ -534,6 +548,8 @@ const createKeyPreapply = async (input) => {
       metadata: {
         key_target: keySummaryForTitle,
         key_targets: keyTargets,
+        borrower_org_name: borrowerOrgName || null,
+        borrower_person_name: borrowerPersonName || null,
       },
     };
 
@@ -549,7 +565,7 @@ const createKeyPreapply = async (input) => {
       eventName: normalizeText(input.eventName),
       eventLocation: normalizeText(input.eventLocation),
       requestedAtText: '',
-      reason: '',
+      reason: borrowerLines || '',
       keyTargets,
     });
 

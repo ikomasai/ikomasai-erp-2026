@@ -319,6 +319,10 @@ const Item16Screen = ({ navigation, route }) => {
   const [emergencyDetail, setEmergencyDetail] = useState('');
 
   // 鍵の事前申請
+  /** 借受団体名 */
+  const [keyBorrowerOrg, setKeyBorrowerOrg] = useState('');
+  /** 借受人氏名 */
+  const [keyBorrowerName, setKeyBorrowerName] = useState('');
   const [keyBuilding, setKeyBuilding] = useState(ALL_BUILDINGS_VALUE);
   const [keySelectedId, setKeySelectedId] = useState('');
   const [selectedKeyIds, setSelectedKeyIds] = useState([]);
@@ -1097,6 +1101,16 @@ const Item16Screen = ({ navigation, route }) => {
     if (!validateCommonFields()) {
       return;
     }
+    if (activeTab === SUPPORT_TAB_TYPES.KEY_PREAPPLY) {
+      if (!keyBorrowerOrg.trim()) {
+        showMessage('入力不足', '借受団体名を入力してください。');
+        return;
+      }
+      if (!keyBorrowerName.trim()) {
+        showMessage('入力不足', '借受人氏名を入力してください。');
+        return;
+      }
+    }
     if (isAttachmentEnabled && attachmentFile && attachmentFile.size > MAX_ATTACHMENT_FILE_BYTES) {
       showMessage(
         '容量超過',
@@ -1133,6 +1147,8 @@ const Item16Screen = ({ navigation, route }) => {
       payload = {
         type: activeTab,
         keyTargets: selectedKeyItems,
+        borrowerOrgName: keyBorrowerOrg,
+        borrowerPersonName: keyBorrowerName,
       };
     } else if (activeTab === SUPPORT_TAB_TYPES.EVENT_STATUS) {
       payload = {
@@ -1197,6 +1213,8 @@ const Item16Screen = ({ navigation, route }) => {
         result = await exhibitorSupportService.createKeyPreapply({
           ...commonPayload,
           keyTargets: selectedKeyItems,
+          borrowerOrgName: keyBorrowerOrg,
+          borrowerPersonName: keyBorrowerName,
         });
       } else if (activeTab === SUPPORT_TAB_TYPES.EVENT_STATUS) {
         result = await exhibitorSupportService.createEventStatusReport({
@@ -1224,6 +1242,8 @@ const Item16Screen = ({ navigation, route }) => {
         setSelectedKeyIds([]);
         setKeyBuilding(ALL_BUILDINGS_VALUE);
         setKeySelectedId('');
+        setKeyBorrowerOrg('');
+        setKeyBorrowerName('');
       }
       if (isAttachmentEnabled) {
         setAttachmentFile(null);
@@ -1330,6 +1350,10 @@ const Item16Screen = ({ navigation, route }) => {
       return (
         <KeyPreApplyForm
           theme={theme}
+          borrowerOrgName={keyBorrowerOrg}
+          onChangeBorrowerOrgName={setKeyBorrowerOrg}
+          borrowerPersonName={keyBorrowerName}
+          onChangeBorrowerPersonName={setKeyBorrowerName}
           keyBuilding={keyBuilding}
           onChangeKeyBuilding={setKeyBuilding}
           keySelectedId={keySelectedId}

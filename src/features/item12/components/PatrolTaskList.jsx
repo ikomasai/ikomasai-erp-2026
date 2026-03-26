@@ -4,7 +4,7 @@
  */
 
 import React, { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { PATROL_TASK_STATUSES, PATROL_TASK_TYPES } from '../../../services/supabase/patrolTaskService';
 import SkeletonLoader from '../../../shared/components/SkeletonLoader';
 import EmptyState from '../../../shared/components/EmptyState';
@@ -72,6 +72,11 @@ const PatrolTaskList = ({
   onSelectTask,
   onRefresh,
 }) => {
+  /** 画面幅（レスポンシブ対応用） */
+  const { width: windowWidth } = useWindowDimensions();
+  /** スマホ幅かどうか（768px 未満） */
+  const isMobile = windowWidth < 768;
+
   /**
    * タスクを task_type ごとにグループ化し、優先順で並べた配列を生成
    * 優先順に定義されていない種別は末尾に追加される
@@ -117,7 +122,7 @@ const PatrolTaskList = ({
   }, [tasks]);
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }, isMobile && styles.cardMobile]}>
       {/* ── ヘッダー ── */}
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
@@ -244,6 +249,7 @@ const PatrolTaskList = ({
                         key={task.id}
                         style={[
                           styles.ticketItem,
+                          isMobile && styles.ticketItemMobile,
                           {
                             borderColor: isActive ? theme.primary : theme.border,
                             backgroundColor: isActive ? `${theme.primary}14` : theme.background,
@@ -310,8 +316,11 @@ const PatrolTaskList = ({
                             🔑 {task.notes.includes(':') ? task.notes.split(':').slice(1).join(':').trim() : task.notes}
                           </Text>
                         ) : null}
-                        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={2}>
-                          受付: {new Date(task.created_at).toLocaleString('ja-JP')}
+                        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+                          受付:{' '}
+                          {isMobile
+                            ? new Date(task.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            : new Date(task.created_at).toLocaleString('ja-JP')}
                         </Text>
                       </Pressable>
                     );
@@ -331,6 +340,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     padding: 16,
+  },
+  /** スマホ向けカード: 余白を小さく */
+  cardMobile: {
+    padding: 10,
+    borderRadius: 10,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -446,6 +460,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 8,
+  },
+  /** スマホ向けタスク行: 余白・角丸を小さく */
+  ticketItemMobile: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 6,
   },
   ticketHeaderRow: {
     flexDirection: 'row',

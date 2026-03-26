@@ -6,12 +6,16 @@
 
 import React from 'react';
 import { Picker } from '@react-native-picker/picker';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 /**
  * 鍵事前申請フォームコンポーネント
  * @param {Object} props - コンポーネントプロパティ
  * @param {Object} props.theme - テーマオブジェクト
+ * @param {string} props.borrowerOrgName - 借受団体名
+ * @param {(value: string) => void} props.onChangeBorrowerOrgName - 借受団体名変更コールバック
+ * @param {string} props.borrowerPersonName - 借受人氏名
+ * @param {(value: string) => void} props.onChangeBorrowerPersonName - 借受人氏名変更コールバック
  * @param {string} props.keyBuilding - 選択中の棟
  * @param {(value: string) => void} props.onChangeKeyBuilding - 棟変更コールバック
  * @param {string} props.keySelectedId - 選択中の鍵ID
@@ -26,6 +30,10 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
  */
 const KeyPreApplyForm = ({
   theme,
+  borrowerOrgName,
+  onChangeBorrowerOrgName,
+  borrowerPersonName,
+  onChangeBorrowerPersonName,
   keyBuilding,
   onChangeKeyBuilding,
   keySelectedId,
@@ -39,6 +47,35 @@ const KeyPreApplyForm = ({
 }) => {
   return (
     <View style={styles.formSection}>
+      {/* 借受団体名 */}
+      <Text style={[styles.label, { color: theme.text }]}>
+        借受団体名 <Text style={[styles.required, { color: theme.error }]}>*</Text>
+      </Text>
+      <TextInput
+        style={[
+          styles.textInput,
+          { color: theme.text, backgroundColor: theme.background, borderColor: theme.border },
+        ]}
+        value={borrowerOrgName}
+        onChangeText={onChangeBorrowerOrgName}
+        placeholder="例: ○○実行委員会"
+        placeholderTextColor={theme.textSecondary}
+      />
+
+      {/* 借受人氏名 */}
+      <Text style={[styles.label, { color: theme.text }]}>
+        借受人氏名 <Text style={[styles.required, { color: theme.error }]}>*</Text>
+      </Text>
+      <TextInput
+        style={[
+          styles.textInput,
+          { color: theme.text, backgroundColor: theme.background, borderColor: theme.border },
+        ]}
+        value={borrowerPersonName}
+        onChangeText={onChangeBorrowerPersonName}
+        placeholder="例: 山田 太郎"
+        placeholderTextColor={theme.textSecondary}
+      />
       <Text style={[styles.label, { color: theme.text }]}>棟を選択</Text>
       <View
         style={[
@@ -152,6 +189,17 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  required: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  textInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
   },
   pickerContainer: {
     borderWidth: 1,

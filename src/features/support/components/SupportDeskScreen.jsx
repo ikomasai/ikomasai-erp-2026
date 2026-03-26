@@ -43,12 +43,16 @@ import OfflineBanner from '../../../shared/components/OfflineBanner';
 import { createRadioLog, listRadioLogs } from '../../../services/supabase/radioLogService';
 import {
   assignPatrolTask,
+  createDispatchPatrolTask,
   listPatrolTasks,
+  listPatrolTasksForStats,
+  updatePatrolTaskNotes,
   PATROL_TASK_STATUSES,
   PATROL_TASK_TYPES,
 } from '../../../services/supabase/patrolTaskService';
 import {
   EVALUATION_STATUSES,
+  createEvaluationCheck,
   listEvaluationChecks,
   reviewEvaluationCheck,
 } from '../../../services/supabase/evaluationService';
@@ -58,6 +62,7 @@ import {
   getUserProfilesByIds,
   getUsersByRoles,
 } from '../../../shared/services/notificationService';
+import { selectPatrollingUsers } from '../../../services/supabase/userService';
 import {
   createAttachmentSignedUrl,
   listTicketAttachments,
@@ -261,6 +266,21 @@ const getDefaultDepartmentStatusFilter = (roleType) => {
 /** AsyncStorageキープレフィックス: 最終閲覧時刻の保存に使用 */
 const LAST_VIEWED_KEY_PREFIX = 'supportDesk_lastViewedAt_';
 
+/** AsyncStorage: 未巡回アラート閾値（本部が設定し、巡回サポートは読み取り専用） */
+const ASYNC_KEY_UNVISITED_ALERT_MINUTES = 'unvisitedAlertMinutes';
+
+/** 未巡回アラート閾値の選択肢（分） */
+const UNVISITED_ALERT_MINUTE_OPTIONS = [30, 60, 90, 120];
+
+/** AsyncStorage: 評価項目設定（本部が設定した項目名の配列 JSON） */
+const ASYNC_KEY_EVALUATION_ITEMS = 'hqEvaluationItems';
+
+/** 評価項目のデフォルト値 */
+const DEFAULT_EVALUATION_ITEMS = ['企画書通りの進行', '安全管理', '来場者対応', '設営・片付け', '全体印象'];
+
+/** 評価スコアの選択肢（1〜5） */
+const EVALUATION_SCORE_OPTIONS = [1, 2, 3, 4, 5];
+
 /**
  * 最終閲覧時刻を保存するAsyncStorageキーを生成
  * @param {string} roleType - 役割種別
@@ -388,7 +408,9 @@ const HQ_TABS = [
   { key: 'overview', label: '📊 概況確認' },
   { key: 'tickets', label: '📋 連絡案件' },
   { key: 'keys', label: '🔑 鍵管理' },
-  { key: 'patrol', label: '🚶 巡回・評価' },
+  { key: 'patrol', label: '🚶 巡回' },
+  { key: 'evaluation', label: '📝 評価' },
+  { key: 'stats', label: '📈 実績' },
   { key: 'radio', label: '📡 無線' },
   { key: 'event_orgs', label: '🏢 企画一覧' },
   { key: 'master', label: '⚙️ 鍵マスタ' },
@@ -616,6 +638,10 @@ const SupportDeskScreen = ({
   const [isLoadingPatrolAssignees, setIsLoadingPatrolAssignees] = useState(false);
   const [selectedPatrolAssigneeId, setSelectedPatrolAssigneeId] = useState('');
   const [isAssigningPatrolTask, setIsAssigningPatrolTask] = useState(false);
+  /** 巡回タスクメモ編集中テキスト */
+  const [patrolTaskNoteDraft, setPatrolTaskNoteDraft] = useState('');
+  /** メモ保存中フラグ */
+  const [isSavingPatrolTaskNote, setIsSavingPatrolTaskNote] = useState(false);
 
   const [pendingEvaluations, setPendingEvaluations] = useState([]);
   const [isLoadingPendingEvaluations, setIsLoadingPendingEvaluations] = useState(false);
@@ -628,6 +654,31 @@ const SupportDeskScreen = ({
   const [isLoadingPatrolHistory, setIsLoadingPatrolHistory] = useState(false);
   /** 巡回履歴の担当者名マップ（user_id → name） */
   const [patrolHistoryProfileMap, setPatrolHistoryProfileMap] = useState({});
+
+  /** 振り分けタスク生成モーダル表示フラグ */
+  const [isDispatchModalVisible, setIsDispatchModalVisible] = useState(false);
+  /** 振り分けタスク生成モーダルの担当者選択（user_id） */
+  const [dispatchAssigneeId, setDispatchAssigneeId] = useState('');
+  /** 振り分けタスク生成中フラグ */
+  const [isCreatingDispatchTask, setIsCreatingDispatchTask] = useState(false);
+  /** 振り分けタスク候補（企画管理部ロール保持ユーザー） */
+  const [dispatchCandidates, setDispatchCandidates] = useState([]);
+  /** 振り分けタスク候補読み込み中フラグ */
+  const [isLoadingDispatchCandidates, setIsLoadingDispatchCandidates] = useState(false);
+
+  /** タスク実績データ（担当者別集計元） */
+  const [taskStatsData, setTaskStatsData] = useState([]);
+  /** タスク実績読み込み中フラグ */
+  const [isLoadingTaskStats, setIsLoadingTaskStats] = useState(false);
+  /** タスク実績の担当者名マップ（user_id → name） */
+  const [taskStatsProfileMap, setTaskStatsProfileMap] = useState({});
+  /** タスク実績の並べ替えキー（'total' | 'name'） */
+  const [taskStatsSortKey, setTaskStatsSortKey] = useState('total');
+
+  /** 巡回中スタッフ一覧（on_patrol = true のユーザー） */
+  const [patrollingUsers, setPatrollingUsers] = useState([]);
+  /** 巡回中スタッフ読み込み中フラグ */
+  const [isLoadingPatrollingUsers, setIsLoadingPatrollingUsers] = useState(false);
 
   /** 概況ダッシュボード: 担当者プロフィールマップ（user_id → name） */
   const [overviewProfileMap, setOverviewProfileMap] = useState({});
@@ -702,6 +753,20 @@ const SupportDeskScreen = ({
   const [hqTicketTypeFilter, setHqTicketTypeFilter] = useState('all');
   /** HQロール向け団体フィルター（'all' | org_id） */
   const [hqOrgFilter, setHqOrgFilter] = useState('all');
+  /**
+   * 未巡回アラート閾値（分）。本部のみ変更可能で AsyncStorage に保存。
+   * 巡回サポート（Item12Screen）はここで設定した値を読み取り専用で使用する。
+   */
+  const [hqUnvisitedAlertMinutes, setHqUnvisitedAlertMinutes] = useState(90);
+  /**
+   * 評価項目リスト（本部が設定、AsyncStorage に保存）
+   * 評価タスク生成時にこの項目ごとに evaluation_checks レコードを作成する
+   */
+  const [evaluationItems, setEvaluationItems] = useState(DEFAULT_EVALUATION_ITEMS);
+  /** 評価項目の追加入力欄 */
+  const [newEvaluationItemText, setNewEvaluationItemText] = useState('');
+  /** 評価タスク生成中フラグ */
+  const [isCreatingEvaluationTasks, setIsCreatingEvaluationTasks] = useState(false);
 
   /**
    * メッセージ表示
@@ -943,6 +1008,62 @@ const SupportDeskScreen = ({
       return matchesOrganization;
     });
   }, [hqOrganizationEvents, selectedHqOrganizationEvent]);
+
+  /**
+   * タスク実績: 担当者別集計データ
+   * taskStatsData を user_id ごとに集計し、種別ごとの件数と合計を返す
+   * source_ticket_id があり task_type === 'other' のものは「振り分けタスク」として分類
+   */
+  const taskStatsRows = useMemo(() => {
+    /** 担当者ID → { total, lock_check, confirm, dispatch, patrol, other } の集計マップ */
+    const statsMap = new Map();
+
+    taskStatsData.forEach((task) => {
+      /** 担当者ID */
+      const userId = task.assigned_to;
+      if (!userId) {
+        return;
+      }
+      if (!statsMap.has(userId)) {
+        statsMap.set(userId, { total: 0, lock_check: 0, confirm: 0, dispatch: 0, patrol: 0, other: 0 });
+      }
+      /** 現在の集計エントリ */
+      const entry = statsMap.get(userId);
+      entry.total += 1;
+
+      if (task.task_type === PATROL_TASK_TYPES.LOCK_CHECK) {
+        entry.lock_check += 1;
+      } else if (
+        task.task_type === PATROL_TASK_TYPES.CONFIRM_START ||
+        task.task_type === PATROL_TASK_TYPES.CONFIRM_END
+      ) {
+        entry.confirm += 1;
+      } else if (task.task_type === PATROL_TASK_TYPES.OTHER && task.source_ticket_id) {
+        /** source_ticket_id 紐付きの OTHER = 振り分けタスク */
+        entry.dispatch += 1;
+      } else if (task.task_type === PATROL_TASK_TYPES.ROUTINE_PATROL) {
+        entry.patrol += 1;
+      } else {
+        entry.other += 1;
+      }
+    });
+
+    /** 集計マップを配列に変換して担当者名を付与 */
+    const rows = Array.from(statsMap.entries()).map(([userId, counts]) => ({
+      userId,
+      name: taskStatsProfileMap[userId] || userId,
+      ...counts,
+    }));
+
+    /** 並べ替え: total 降順 or 名前順 */
+    if (taskStatsSortKey === 'total') {
+      rows.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'ja'));
+    } else {
+      rows.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    }
+
+    return rows;
+  }, [taskStatsData, taskStatsProfileMap, taskStatsSortKey]);
 
   /**
    * 景品配布基準で選択できる団体一覧
@@ -1212,6 +1333,144 @@ const SupportDeskScreen = ({
       console.error('最終閲覧時刻の保存に失敗:', error);
     }
   }, [isDepartmentRole, roleType]);
+
+  /**
+   * AsyncStorage から未巡回アラート閾値を読み込む（本部のみ）
+   * @returns {Promise<void>} 読み込み処理
+   */
+  const loadHqAlertMinutes = useCallback(async () => {
+    if (!isHQRole) {
+      return;
+    }
+    try {
+      const stored = await AsyncStorage.getItem(ASYNC_KEY_UNVISITED_ALERT_MINUTES);
+      const parsed = stored ? parseInt(stored, 10) : null;
+      if (Number.isFinite(parsed) && parsed > 0) {
+        setHqUnvisitedAlertMinutes(parsed);
+      }
+    } catch (error) {
+      console.error('未巡回アラート閾値の読み込みに失敗:', error);
+    }
+  }, [isHQRole]);
+
+  /**
+   * 未巡回アラート閾値を変更し AsyncStorage に保存する（本部のみ）
+   * @param {number} minutes - 新しい閾値（分）
+   * @returns {Promise<void>} 保存処理
+   */
+  const handleChangeHqAlertMinutes = async (minutes) => {
+    setHqUnvisitedAlertMinutes(minutes);
+    try {
+      await AsyncStorage.setItem(ASYNC_KEY_UNVISITED_ALERT_MINUTES, String(minutes));
+    } catch (error) {
+      console.error('未巡回アラート閾値の保存に失敗:', error);
+    }
+  };
+
+  /**
+   * AsyncStorage から評価項目を読み込む（本部のみ）
+   * @returns {Promise<void>} 読み込み処理
+   */
+  const loadEvaluationItems = useCallback(async () => {
+    if (!isHQRole) {
+      return;
+    }
+    try {
+      const stored = await AsyncStorage.getItem(ASYNC_KEY_EVALUATION_ITEMS);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setEvaluationItems(parsed);
+        }
+      }
+    } catch (error) {
+      console.error('評価項目の読み込みに失敗:', error);
+    }
+  }, [isHQRole]);
+
+  /**
+   * 評価項目を更新し AsyncStorage に保存する
+   * @param {string[]} items - 新しい評価項目リスト
+   * @returns {Promise<void>} 保存処理
+   */
+  const saveEvaluationItems = async (items) => {
+    setEvaluationItems(items);
+    try {
+      await AsyncStorage.setItem(ASYNC_KEY_EVALUATION_ITEMS, JSON.stringify(items));
+    } catch (error) {
+      console.error('評価項目の保存に失敗:', error);
+    }
+  };
+
+  /**
+   * 評価項目を1件追加する
+   * @returns {void}
+   */
+  const handleAddEvaluationItem = () => {
+    const text = newEvaluationItemText.trim();
+    if (!text) {
+      return;
+    }
+    /** すでに同名の項目がある場合は追加しない */
+    if (evaluationItems.includes(text)) {
+      return;
+    }
+    saveEvaluationItems([...evaluationItems, text]);
+    setNewEvaluationItemText('');
+  };
+
+  /**
+   * 評価項目を1件削除する
+   * @param {number} index - 削除対象のインデックス
+   * @returns {void}
+   */
+  const handleRemoveEvaluationItem = (index) => {
+    saveEvaluationItems(evaluationItems.filter((_, i) => i !== index));
+  };
+
+  /**
+   * 現在選択中の企画に対して評価タスクを生成する
+   * 評価項目ごとに 1 件の evaluation_checks レコードを作成する
+   * @param {string} eventId - 対象企画ID
+   * @param {string} eventName - 対象企画名（ログ・表示用）
+   * @returns {Promise<void>} 生成処理
+   */
+  const handleCreateEvaluationTasks = async (eventId, eventName) => {
+    if (!user?.id) {
+      showMessage('操作エラー', 'ログイン情報が取得できません');
+      return;
+    }
+    if (evaluationItems.length === 0) {
+      showMessage('エラー', '評価項目が設定されていません');
+      return;
+    }
+    if (!eventId) {
+      showMessage('エラー', '評価対象の企画を選択してください');
+      return;
+    }
+
+    setIsCreatingEvaluationTasks(true);
+    /** 評価項目ごとに evaluation_checks レコードを作成する */
+    const results = await Promise.all(
+      evaluationItems.map((itemName) =>
+        createEvaluationCheck({
+          evaluatorId: user.id,
+          eventId,
+          score: null,
+          comment: itemName,
+        })
+      )
+    );
+    setIsCreatingEvaluationTasks(false);
+
+    const hasError = results.some((r) => r.error);
+    if (hasError) {
+      showMessage('生成エラー', '一部の評価タスクの作成に失敗しました');
+      return;
+    }
+    showMessage('生成完了', `「${eventName}」の評価タスク ${evaluationItems.length}件を作成しました`);
+    await loadPendingEvaluations();
+  };
 
   /**
    * 案件一覧を取得
@@ -1590,6 +1849,27 @@ const SupportDeskScreen = ({
   };
 
   /**
+   * 巡回中スタッフ一覧を取得（on_patrol = true のユーザー）
+   * @returns {Promise<void>} 取得処理
+   */
+  const loadPatrollingUsers = async () => {
+    if (!isHQRole) {
+      return;
+    }
+
+    setIsLoadingPatrollingUsers(true);
+    const { data, error } = await selectPatrollingUsers();
+    setIsLoadingPatrollingUsers(false);
+
+    if (error) {
+      console.error('巡回中スタッフ取得に失敗:', error);
+      return;
+    }
+
+    setPatrollingUsers(data || []);
+  };
+
+  /**
    * 巡回割当候補ユーザーを取得
    * @returns {Promise<void>} 取得処理
    */
@@ -1671,6 +1951,163 @@ const SupportDeskScreen = ({
 
     await loadHqPatrolTasks();
     showMessage('更新完了', selectedPatrolAssigneeId ? '巡回担当を更新しました' : '未割当に戻しました');
+  };
+
+  /**
+   * 巡回タスクのメモを保存する
+   * ドラフトの内容を patrol_tasks.notes に書き込む
+   * @returns {Promise<void>} 保存処理
+   */
+  const handleSavePatrolTaskNote = async () => {
+    if (!selectedPatrolTask) {
+      showMessage('エラー', 'タスクを選択してください');
+      return;
+    }
+
+    setIsSavingPatrolTaskNote(true);
+    const { error } = await updatePatrolTaskNotes({
+      taskId: selectedPatrolTask.id,
+      notes: patrolTaskNoteDraft.trim() || null,
+    });
+    setIsSavingPatrolTaskNote(false);
+
+    if (error) {
+      showMessage('保存エラー', error.message || 'メモの保存に失敗しました');
+      return;
+    }
+
+    await loadHqPatrolTasks();
+    showMessage('保存完了', 'タスクメモを保存しました');
+  };
+
+  /**
+   * 振り分けタスク候補（企画管理部ロール保持ユーザー）を取得する
+   * モーダルを開くたびに最新状態を取得する
+   * @returns {Promise<void>} 取得処理
+   */
+  const loadDispatchCandidates = async () => {
+    setIsLoadingDispatchCandidates(true);
+    setDispatchCandidates([]);
+
+    const { roles, error: rolesError } = await getRoles();
+    if (rolesError) {
+      setIsLoadingDispatchCandidates(false);
+      console.error('ロール一覧取得に失敗:', rolesError);
+      return;
+    }
+
+    /** 企画管理部ロールのIDを取得 */
+    const hqRoleIds = (roles || [])
+      .filter((role) => {
+        const name = normalizeText(role.name);
+        const displayName = normalizeText(role.display_name);
+        return name === '企画管理部' || displayName === '企画管理部';
+      })
+      .map((role) => role.id);
+
+    if (hqRoleIds.length === 0) {
+      setIsLoadingDispatchCandidates(false);
+      setDispatchCandidates([]);
+      return;
+    }
+
+    const { users, error: usersError } = await getUsersByRoles(hqRoleIds);
+    if (usersError) {
+      setIsLoadingDispatchCandidates(false);
+      console.error('ロールユーザー取得に失敗:', usersError);
+      return;
+    }
+
+    const { profiles, error: profileError } = await getUserProfilesByIds(users || []);
+    setIsLoadingDispatchCandidates(false);
+
+    if (profileError) {
+      console.error('ユーザープロフィール取得に失敗:', profileError);
+      return;
+    }
+
+    const candidates = (profiles || [])
+      .map((profile) => ({
+        userId: profile.user_id,
+        name: profile.name || profile.user_id,
+        organization: profile.organization || '',
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+
+    setDispatchCandidates(candidates);
+  };
+
+  /**
+   * 振り分けタスクを生成する（連絡案件詳細から「部員が向かいます」ボタン押下時）
+   * @returns {Promise<void>} 生成処理
+   */
+  const handleCreateDispatchTask = async () => {
+    if (!selectedTicket) {
+      showMessage('エラー', '連絡案件が選択されていません');
+      return;
+    }
+    if (!user?.id) {
+      showMessage('エラー', 'ログイン情報が取得できません');
+      return;
+    }
+
+    setIsCreatingDispatchTask(true);
+    /** 連絡案件種別の表示名 */
+    const ticketTypeLabel = TICKET_TYPE_LABELS[selectedTicket.ticket_type] || selectedTicket.ticket_type;
+    const { error } = await createDispatchPatrolTask({
+      ticket: selectedTicket,
+      ticketTypeLabel,
+      assignedTo: dispatchAssigneeId || null,
+      creatorUserId: user.id,
+    });
+    setIsCreatingDispatchTask(false);
+
+    if (error) {
+      showMessage('エラー', error.message || 'タスク生成に失敗しました');
+      return;
+    }
+
+    /** 完了メッセージ用に割当状態を保存してから state をリセット */
+    const wasAssigned = !!dispatchAssigneeId;
+    setIsDispatchModalVisible(false);
+    setDispatchAssigneeId('');
+    await loadHqPatrolTasks();
+    showMessage('タスク生成完了', wasAssigned ? '部員への通知を送信しました' : '振り分けタスクを作成しました（担当者未割当）');
+  };
+
+  /**
+   * タスク実績データを取得して担当者ごとに集計する
+   * @returns {Promise<void>} 取得処理
+   */
+  const loadTaskStats = async () => {
+    if (!isHQRole) {
+      return;
+    }
+
+    setIsLoadingTaskStats(true);
+    const { data, error } = await listPatrolTasksForStats({ limit: 500 });
+    setIsLoadingTaskStats(false);
+
+    if (error) {
+      console.error('タスク実績取得に失敗:', error);
+      return;
+    }
+
+    setTaskStatsData(data || []);
+
+    /** 担当者IDを収集してプロフィールマップを構築 */
+    const assigneeIds = [...new Set((data || []).map((task) => task.assigned_to).filter(Boolean))];
+    if (assigneeIds.length === 0) {
+      return;
+    }
+    const { profiles } = await getUserProfilesByIds(assigneeIds);
+    const profileMap = (profiles || []).reduce((accumulator, profile) => {
+      if (profile.user_id) {
+        accumulator[profile.user_id] = profile.name || profile.user_id;
+      }
+      return accumulator;
+    }, {});
+    setTaskStatsProfileMap(profileMap);
   };
 
   /**
@@ -1860,6 +2297,9 @@ const SupportDeskScreen = ({
 
   useEffect(() => {
     loadLastViewedAt();
+    /** 本部は初回マウント時に閾値設定・評価項目を読み込む */
+    loadHqAlertMinutes();
+    loadEvaluationItems();
     loadTickets();
     loadRadioLogs();
     loadHqPatrolTasks();
@@ -1868,7 +2308,30 @@ const SupportDeskScreen = ({
     loadPatrolHistory();
     loadHqOrganizationEvents();
     loadPrizeDistributions();
+    loadTaskStats();
+    loadPatrollingUsers();
   }, [roleType, user?.id]);
+
+  /**
+   * ダッシュボードタブ表示中は30秒ごとに巡回中スタッフを自動更新する
+   */
+  useEffect(() => {
+    if (!isHQRole || activeTab !== 'dashboard') {
+      return () => {};
+    }
+
+    /** 初回即時ロード */
+    loadPatrollingUsers();
+
+    /** 30秒ごとに自動更新するインターバル */
+    const intervalId = setInterval(() => {
+      loadPatrollingUsers();
+    }, 30000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [isHQRole, activeTab]);
 
   useEffect(() => {
     setTicketStatusFilter(getDefaultDepartmentStatusFilter(roleType));
@@ -2020,6 +2483,97 @@ const SupportDeskScreen = ({
       supabase.removeChannel(channel);
     };
   }, [isDepartmentRole, roleType, selectedTicketId, user?.id]);
+
+  /**
+   * HQ向け: patrol_tasks の Realtime 購読
+   * 巡回員が受諾・完了・割当変更した瞬間に本部の巡回タスク一覧を自動更新する
+   * ポーリングを使わずリアルタイム反映する
+   */
+  useEffect(() => {
+    if (!isHQRole || !user?.id) {
+      return () => {};
+    }
+
+    const supabase = getSupabaseClient();
+    /** 画面単位の購読チャネル名（ロールとユーザーIDで一意化） */
+    const channel = supabase.channel(`patrol_tasks_hq_${user.id}`);
+
+    channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'patrol_tasks' },
+      () => {
+        /** patrol_tasks に変更があった瞬間にHQ向け一覧を再取得 */
+        loadHqPatrolTasks();
+      }
+    );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isHQRole, user?.id]);
+
+  /**
+   * HQ向け: 画面フォーカス復帰時・アプリ復帰時に巡回タスク一覧を再取得する
+   * Realtime 接続が切れていた間の変更を確実に取り込む
+   */
+  useEffect(() => {
+    if (!isHQRole || !user?.id) {
+      return () => {};
+    }
+
+    /** フォーカス復帰時の再取得ハンドラ */
+    const handlePatrolFocus = () => {
+      loadHqPatrolTasks();
+    };
+
+    /** ナビゲーションフォーカスイベント */
+    const unsubscribeFocus = navigation?.addListener?.('focus', handlePatrolFocus) || (() => {});
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined') {
+      /** Web: タブ/ウィンドウがアクティブに戻ったときに再取得 */
+      const handleVisibilityChange = () => {
+        if (!document.hidden) {
+          loadHqPatrolTasks();
+        }
+      };
+      window.addEventListener('focus', handlePatrolFocus);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+        unsubscribeFocus();
+        window.removeEventListener('focus', handlePatrolFocus);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+
+    /** ネイティブ: アプリがフォアグラウンドに戻ったときに再取得 */
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        loadHqPatrolTasks();
+      }
+    });
+
+    return () => {
+      unsubscribeFocus();
+      appStateSubscription.remove();
+    };
+  }, [isHQRole, user?.id, navigation]);
+
+  /**
+   * HQ向け: フォールバックポーリング（60秒）
+   * RLS の設定によっては Realtime が届かない場合があるため、
+   * 念のため低頻度で再取得し変更の取り逃しを防ぐ
+   */
+  useEffect(() => {
+    if (!isHQRole) {
+      return () => {};
+    }
+    const interval = setInterval(() => {
+      loadHqPatrolTasks();
+    }, 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isHQRole]);
 
   useEffect(() => {
     if (selectedHqOrganizationEvent === ALL_ORGANIZATION_EVENT_FILTER) {
@@ -2313,6 +2867,13 @@ const SupportDeskScreen = ({
     setSelectedPatrolAssigneeId(selectedPatrolTask.assigned_to || '');
   }, [selectedPatrolTask?.assigned_to, selectedPatrolTask?.id]);
 
+  /**
+   * タスク選択が変わったときにメモドラフトを既存の notes で初期化する
+   */
+  useEffect(() => {
+    setPatrolTaskNoteDraft(selectedPatrolTask?.notes || '');
+  }, [selectedPatrolTask?.id]);
+
   useEffect(() => {
     /** 担当者IDを一意に抽出して名前を取得 */
     const assignedIds = [
@@ -2426,6 +2987,7 @@ const SupportDeskScreen = ({
                   loadTickets(selectedTicketId);
                   loadHqPatrolTasks();
                   loadRadioLogs();
+                  loadPatrollingUsers();
                 }}
               >
                 <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
@@ -2496,12 +3058,138 @@ const SupportDeskScreen = ({
                 <Text style={[styles.helpText, { color: theme.textSecondary }]}>新着の連絡案件はありません</Text>
               </View>
             )}
+
+            {/* 巡回中スタッフ */}
+            <View style={[styles.dashboardSection, { borderColor: theme.border }]}>
+              <View style={styles.dashboardPatrolHeader}>
+                <Text style={[styles.dashboardSectionTitle, { color: theme.text }]}>
+                  🚶 巡回中スタッフ
+                </Text>
+                <View style={[styles.dashboardPatrolCountBadge, {
+                  backgroundColor: patrollingUsers.length > 0 ? '#EAF8ED' : `${theme.border}40`,
+                  borderColor: patrollingUsers.length > 0 ? '#1A7F37' : theme.border,
+                }]}>
+                  <Text style={[styles.dashboardPatrolCountText, {
+                    color: patrollingUsers.length > 0 ? '#1A7F37' : theme.textSecondary,
+                  }]}>
+                    {patrollingUsers.length}人
+                  </Text>
+                </View>
+              </View>
+
+              {isLoadingPatrollingUsers ? (
+                <Text style={[styles.helpText, { color: theme.textSecondary }]}>読み込み中...</Text>
+              ) : patrollingUsers.length === 0 ? (
+                <Text style={[styles.helpText, { color: theme.textSecondary }]}>巡回中のスタッフはいません</Text>
+              ) : (
+                patrollingUsers.map((patrolUser) => {
+                  /** このスタッフが担当している進行中タスク */
+                  const userActiveTasks = hqPatrolTasks.filter(
+                    (task) =>
+                      task.assigned_to === patrolUser.user_id &&
+                      [PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(task.task_status)
+                  );
+                  /** 直近の進行中タスク（最初の1件） */
+                  const latestTask = userActiveTasks[0] || null;
+
+                  return (
+                    <View
+                      key={patrolUser.user_id}
+                      style={[styles.dashboardPatrolRow, { borderColor: theme.border, backgroundColor: theme.background }]}
+                    >
+                      {/* スタッフ名・所属 */}
+                      <View style={styles.dashboardPatrolUserInfo}>
+                        <Text style={[styles.dashboardPatrolName, { color: theme.text }]}>
+                          {patrolUser.name || '（名前未設定）'}
+                        </Text>
+                        {patrolUser.organization ? (
+                          <Text style={[styles.dashboardPatrolOrg, { color: theme.textSecondary }]}>
+                            {patrolUser.organization}
+                          </Text>
+                        ) : null}
+                      </View>
+
+                      {/* 担当中タスク */}
+                      {latestTask ? (
+                        <View style={[styles.dashboardPatrolTaskBadge, {
+                          backgroundColor: `${PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary}18`,
+                          borderColor: PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary,
+                        }]}>
+                          <Text style={[styles.dashboardPatrolTaskType, {
+                            color: PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary,
+                          }]}>
+                            {PATROL_TASK_TYPE_LABELS[latestTask.task_type] || latestTask.task_type}
+                          </Text>
+                          <Text style={[styles.dashboardPatrolTaskEvent, {
+                            color: PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary,
+                          }]} numberOfLines={1}>
+                            {latestTask.event_name || latestTask.location_text || ''}
+                          </Text>
+                        </View>
+                      ) : (
+                        <View style={[styles.dashboardPatrolTaskBadge, {
+                          backgroundColor: `${theme.border}30`,
+                          borderColor: theme.border,
+                        }]}>
+                          <Text style={[styles.dashboardPatrolTaskType, { color: theme.textSecondary }]}>
+                            待機中
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </View>
           </View>
         ) : null}
 
         {/* ─── 概況確認タブ: 企画報告確認 + 施錠確認 ─── */}
         {isHQRole && activeTab === 'overview' ? (
           <>
+            {/* ── 未巡回アラート閾値設定（本部のみ変更可能） ── */}
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={styles.sectionHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.sectionTitle, { color: theme.text }]}>未巡回アラート閾値設定</Text>
+                  <Text style={[styles.helpText, { color: theme.textSecondary, marginTop: 2 }]}>
+                    巡回サポートの「未巡回アラート」に適用される閾値です。この設定は巡回担当者には変更できません。
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.patrolAlertThresholdRow}>
+                {UNVISITED_ALERT_MINUTE_OPTIONS.map((minutes) => {
+                  /** 選択中かどうか */
+                  const isActive = minutes === hqUnvisitedAlertMinutes;
+                  return (
+                    <Pressable
+                      key={String(minutes)}
+                      style={[
+                        styles.patrolAlertThresholdButton,
+                        {
+                          borderColor: isActive ? theme.primary : theme.border,
+                          backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                        },
+                      ]}
+                      onPress={() => handleChangeHqAlertMinutes(minutes)}
+                    >
+                      <Text
+                        style={[
+                          styles.patrolAlertThresholdText,
+                          { color: isActive ? theme.primary : theme.textSecondary },
+                        ]}
+                      >
+                        {minutes}分
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                現在の設定: {hqUnvisitedAlertMinutes}分以上巡回がない場所にアラートを表示
+              </Text>
+            </View>
+
             {/* ── 企画報告確認セクション（開始確認・終了確認） ── */}
             <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
               <View style={styles.sectionHeader}>
@@ -2951,7 +3639,7 @@ const SupportDeskScreen = ({
 
         {/* ─── 無線タブ: 無線ログ ─── */}
 
-        {/* ─── 巡回・評価タブ ─── */}
+        {/* ─── 巡回タブ ─── */}
         {isHQRole && activeTab === 'patrol' ? (
           <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <View style={styles.sectionHeader}>
@@ -2981,34 +3669,141 @@ const SupportDeskScreen = ({
             ) : (
               <View style={styles.ticketList}>
                 {hqPatrolTasks.slice(0, 18).map((task) => {
+                  /** このタスク行が選択中かどうか */
                   const isActive = task.id === selectedPatrolTaskId;
+                  /** 担当者名（patrolAssigneesから検索） */
                   const assigneeName = patrolAssignees.find((candidate) => candidate.userId === task.assigned_to)?.name;
+                  /** 担当者が割り当てられているかどうか */
+                  const hasAssignee = !!task.assigned_to;
                   return (
-                    <Pressable
+                    <View
                       key={task.id}
                       style={[
                         styles.ticketItem,
                         {
-                          borderColor: isActive ? theme.primary : theme.border,
-                          backgroundColor: isActive ? `${theme.primary}18` : theme.background,
+                          borderColor: isActive ? theme.primary : (hasAssignee ? '#1565C0' : theme.border),
+                          backgroundColor: isActive ? `${theme.primary}18` : (hasAssignee ? '#E3F2FD' : theme.background),
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          borderLeftWidth: hasAssignee ? 4 : 1,
+                          borderLeftColor: hasAssignee ? '#1565C0' : theme.border,
                         },
                       ]}
-                      onPress={() => setSelectedPatrolTaskId(task.id)}
                     >
-                      <Text style={[styles.ticketTitle, { color: theme.text }]} numberOfLines={1}>
-                        {PATROL_TASK_TYPE_LABELS[task.task_type] || task.task_type}
-                      </Text>
-                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                        {task.event_name || '-'} / {task.event_location || task.location_text || '-'}
-                      </Text>
-                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                        {PATROL_TASK_STATUS_LABELS[task.task_status] || task.task_status} / 担当: {assigneeName || '未割当'}
-                      </Text>
-                    </Pressable>
+                      <Pressable style={styles.patrolTaskItemContent} onPress={() => setSelectedPatrolTaskId(task.id)}>
+                        <Text style={[styles.ticketTitle, { color: theme.text }]} numberOfLines={1}>
+                          {PATROL_TASK_TYPE_LABELS[task.task_type] || task.task_type}
+                        </Text>
+                        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+                          {task.event_name || '-'} / {task.event_location || task.location_text || '-'}
+                        </Text>
+                        {/* ステータスと担当者を横並びで表示。割当済みは色付きバッジ */}
+                        <View style={styles.patrolTaskStatusRow}>
+                          <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+                            {PATROL_TASK_STATUS_LABELS[task.task_status] || task.task_status}
+                          </Text>
+                          {hasAssignee ? (
+                            <View style={styles.assigneeBadge}>
+                              <Text style={styles.assigneeBadgeText}>{assigneeName || '担当あり'}</Text>
+                            </View>
+                          ) : (
+                            <View style={styles.unassignedBadge}>
+                              <Text style={styles.unassignedBadgeText}>未割当</Text>
+                            </View>
+                          )}
+                        </View>
+                      </Pressable>
+                      {/* 担当者が割り当てられている場合のみ「割当を外す」ボタンを表示 */}
+                      {hasAssignee ? (
+                        <TouchableOpacity
+                          style={[styles.unassignButton, { borderColor: theme.danger || '#E53E3E' }]}
+                          onPress={async () => {
+                            const { error } = await assignPatrolTask({
+                              taskId: task.id,
+                              assignedTo: null,
+                              actorUserId: user?.id || null,
+                            });
+                            if (error) {
+                              showMessage('エラー', error.message || '割当解除に失敗しました');
+                            } else {
+                              await loadHqPatrolTasks();
+                              showMessage('解除完了', '担当割当を外しました');
+                            }
+                          }}
+                        >
+                          <Text style={[styles.unassignButtonText, { color: theme.danger || '#E53E3E' }]}>割当を外す</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
                   );
                 })}
               </View>
             )}
+
+            {/* ─── 現在対応中タスク ─── */}
+            {(() => {
+              /** 現在アクティブ（ACCEPTED / EN_ROUTE）な担当済みタスク */
+              const inProgressTasks = hqPatrolTasks.filter(
+                (task) =>
+                  task.assigned_to &&
+                  [PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(task.task_status)
+              );
+              if (inProgressTasks.length === 0) {
+                return null;
+              }
+              /** 担当者IDをキーとしてタスクをグループ化 */
+              const groupMap = new Map();
+              inProgressTasks.forEach((task) => {
+                const key = task.assigned_to;
+                if (!groupMap.has(key)) {
+                  const name = patrolAssignees.find((c) => c.userId === key)?.name || '（不明）';
+                  groupMap.set(key, { name, tasks: [] });
+                }
+                groupMap.get(key).tasks.push(task);
+              });
+              const groups = Array.from(groupMap.values());
+              return (
+                <>
+                  <View style={[styles.inProgressDivider, { borderColor: theme.border }]} />
+                  <Text style={[styles.inProgressTitle, { color: theme.text }]}>現在対応中</Text>
+                  {groups.map((group) => (
+                    <View key={group.name} style={styles.inProgressGroup}>
+                      <Text style={[styles.inProgressGroupName, { color: theme.primary }]}>
+                        {group.name}（{group.tasks.length}件）
+                      </Text>
+                      {group.tasks.map((task) => {
+                        /** タスク種別ラベル */
+                        const typeLabel = PATROL_TASK_TYPE_LABELS[task.task_type] || task.task_type;
+                        /** ステータスラベル */
+                        const statusLabel = PATROL_TASK_STATUS_LABELS[task.task_status] || task.task_status;
+                        return (
+                          <View
+                            key={task.id}
+                            style={[styles.inProgressTaskRow, { borderColor: theme.border, backgroundColor: theme.background }]}
+                          >
+                            <Text style={[styles.inProgressTaskType, { color: theme.text }]} numberOfLines={1}>
+                              {typeLabel}
+                              {'  '}
+                              <Text style={[styles.inProgressTaskStatus, { color: theme.textSecondary }]}>
+                                [{statusLabel}]
+                              </Text>
+                            </Text>
+                            <Text style={[styles.inProgressTaskDetail, { color: theme.textSecondary }]} numberOfLines={1}>
+                              {task.event_name || '-'} / {task.event_location || task.location_text || '-'}
+                            </Text>
+                            {task.notes ? (
+                              <Text style={[styles.inProgressTaskNotes, { color: theme.textSecondary }]} numberOfLines={1}>
+                                メモ: {task.notes}
+                              </Text>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ))}
+                </>
+              );
+            })()}
 
             {selectedPatrolTask ? (
               <>
@@ -3068,12 +3863,133 @@ const SupportDeskScreen = ({
                     {isAssigningPatrolTask ? '更新中...' : '巡回担当を更新'}
                   </Text>
                 </TouchableOpacity>
+
+                {/* ─── タスクメモ入力 ─── */}
+                <View style={[styles.patrolNoteDivider, { borderColor: theme.border }]} />
+                <Text style={[styles.label, { color: theme.text }]}>タスクメモ</Text>
+                <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                  担当者への指示や補足情報を入力してください。巡回サポート側のタスク詳細に表示されます。
+                </Text>
+                <TextInput
+                  style={[
+                    styles.patrolNoteInput,
+                    {
+                      borderColor: theme.border,
+                      backgroundColor: theme.background,
+                      color: theme.text,
+                    },
+                  ]}
+                  value={patrolTaskNoteDraft}
+                  onChangeText={setPatrolTaskNoteDraft}
+                  placeholder="例: 3F 倉庫の鍵は赤いタグが目印です"
+                  placeholderTextColor={theme.textSecondary}
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.sendButton,
+                    { backgroundColor: isSavingPatrolTaskNote ? theme.border : (theme.success || '#22A06B') },
+                  ]}
+                  onPress={handleSavePatrolTaskNote}
+                  disabled={isSavingPatrolTaskNote}
+                >
+                  <Text style={styles.sendButtonText}>
+                    {isSavingPatrolTaskNote ? '保存中...' : 'メモを保存'}
+                  </Text>
+                </TouchableOpacity>
               </>
             ) : null}
           </View>
         ) : null}
 
-        {isHQRole && activeTab === 'patrol' ? (
+        {/* ─── 評価タブ: 評価項目設定 + 評価タスク生成 ─── */}
+        {isHQRole && activeTab === 'evaluation' ? (
+          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>評価項目設定</Text>
+            </View>
+            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+              評価する項目名を設定します。「評価しましょう」ボタンを押すと企画ごとに評価タスクが生成されます。
+            </Text>
+            {/* 現在の評価項目リスト */}
+            <View style={styles.evalItemList}>
+              {evaluationItems.map((item, index) => (
+                <View
+                  key={`eval-item-${index}`}
+                  style={[styles.evalItemRow, { borderColor: theme.border, backgroundColor: theme.background }]}
+                >
+                  <Text style={[styles.evalItemLabel, { color: theme.text }]} numberOfLines={1}>
+                    {index + 1}. {item}
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.evalItemRemoveButton, { borderColor: theme.border }]}
+                    onPress={() => handleRemoveEvaluationItem(index)}
+                  >
+                    <Text style={[styles.evalItemRemoveText, { color: theme.textSecondary }]}>削除</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+            {/* 項目追加欄 */}
+            <View style={styles.evalItemAddRow}>
+              <TextInput
+                value={newEvaluationItemText}
+                onChangeText={setNewEvaluationItemText}
+                placeholder="新しい評価項目名を入力"
+                placeholderTextColor={theme.textSecondary}
+                style={[styles.evalItemInput, { borderColor: theme.border, backgroundColor: theme.background, color: theme.text }]}
+                returnKeyType="done"
+                onSubmitEditing={handleAddEvaluationItem}
+              />
+              <TouchableOpacity
+                style={[styles.evalItemAddButton, { backgroundColor: theme.primary }]}
+                onPress={handleAddEvaluationItem}
+              >
+                <Text style={styles.evalItemAddButtonText}>追加</Text>
+              </TouchableOpacity>
+            </View>
+            {/* 企画を選んで評価タスク一括生成 */}
+            <Text style={[styles.label, { color: theme.text, marginTop: 8 }]}>評価対象企画を選んでタスク生成</Text>
+            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+              企画を選択して「評価しましょう」を押すと、上記項目ごとにタスクが生成されます。
+            </Text>
+            <View style={styles.evalOrgEventList}>
+              {(hqOrganizationEvents || []).slice(0, 30).map((orgEvent) => (
+                <TouchableOpacity
+                  key={orgEvent.id}
+                  style={[
+                    styles.evalOrgEventItem,
+                    { borderColor: theme.border, backgroundColor: theme.background },
+                  ]}
+                  onPress={() => handleCreateEvaluationTasks(orgEvent.event_id || orgEvent.id, orgEvent.eventName || orgEvent.event_name || orgEvent.name)}
+                  disabled={isCreatingEvaluationTasks}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.evalOrgEventOrg, { color: theme.textSecondary }]} numberOfLines={1}>
+                      {orgEvent.organizationName || orgEvent.organization_name || '-'}
+                    </Text>
+                    <Text style={[styles.evalOrgEventName, { color: theme.text }]} numberOfLines={1}>
+                      {orgEvent.eventName || orgEvent.event_name || orgEvent.name || '企画名未設定'}
+                    </Text>
+                  </View>
+                  <View style={[styles.evalStartButton, { backgroundColor: isCreatingEvaluationTasks ? theme.border : '#1A7F37' }]}>
+                    <Text style={styles.evalStartButtonText}>
+                      {isCreatingEvaluationTasks ? '生成中...' : '評価しましょう'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+              {(hqOrganizationEvents || []).length === 0 ? (
+                <Text style={[styles.helpText, { color: theme.textSecondary }]}>企画一覧が読み込まれていません</Text>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
+        {/* ─── 評価タブ: 評価承認 ─── */}
+        {isHQRole && activeTab === 'evaluation' ? (
           <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>評価承認</Text>
@@ -3138,8 +4054,8 @@ const SupportDeskScreen = ({
           </View>
         ) : null}
 
-        {/* ─── 巡回対応履歴カード ─── */}
-        {isHQRole && activeTab === 'patrol' ? (
+        {/* ─── 巡回対応履歴カード（評価タブ） ─── */}
+        {isHQRole && activeTab === 'evaluation' ? (
           <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>巡回対応履歴</Text>
@@ -3191,6 +4107,116 @@ const SupportDeskScreen = ({
                     </View>
                   );
                 })}
+              </View>
+            )}
+          </View>
+        ) : null}
+
+        {/* ─── タスク実績カード（担当者別集計）（実績タブ） ─── */}
+        {isHQRole && activeTab === 'stats' ? (
+          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>タスク実績</Text>
+              <TouchableOpacity
+                style={[styles.refreshButton, { borderColor: theme.border }]}
+                onPress={loadTaskStats}
+              >
+                <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* 並べ替えピル */}
+            <View style={styles.filterRow}>
+              {[
+                { key: 'total', label: '件数多い順' },
+                { key: 'name', label: '名前順' },
+              ].map((sortOption) => {
+                /** このオプションが選択中かどうか */
+                const isActive = taskStatsSortKey === sortOption.key;
+                return (
+                  <Pressable
+                    key={sortOption.key}
+                    style={[
+                      styles.filterChip,
+                      {
+                        borderColor: isActive ? theme.primary : theme.border,
+                        backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                      },
+                    ]}
+                    onPress={() => setTaskStatsSortKey(sortOption.key)}
+                  >
+                    <Text style={[styles.filterChipText, { color: isActive ? theme.primary : theme.textSecondary }]}>
+                      {sortOption.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* 凡例 */}
+            <View style={styles.statsLegendRow}>
+              {[
+                { label: '施錠', color: '#2E86AB' },
+                { label: '開始終了', color: '#22A06B' },
+                { label: '振り分け', color: '#9C4DCC' },
+                { label: '定常巡回', color: '#9F6E00' },
+                { label: 'その他', color: theme.textSecondary },
+              ].map((legend) => (
+                <View key={legend.label} style={styles.statsLegendItem}>
+                  <View style={[styles.statsLegendDot, { backgroundColor: legend.color }]} />
+                  <Text style={[styles.statsLegendText, { color: theme.textSecondary }]}>{legend.label}</Text>
+                </View>
+              ))}
+            </View>
+
+            {isLoadingTaskStats ? (
+              <SkeletonLoader lines={4} baseColor={theme.border} />
+            ) : taskStatsRows.length === 0 ? (
+              <EmptyState
+                icon={'\u{1F4CA}'}
+                title="タスク実績がありません"
+                description="担当者が割り当てられたタスクが集計されます。"
+                actionLabel="更新する"
+                onAction={loadTaskStats}
+                theme={theme}
+              />
+            ) : (
+              <View style={styles.statsTable}>
+                {/* テーブルヘッダー */}
+                <View style={[styles.statsHeaderRow, { borderColor: theme.border, backgroundColor: `${theme.primary}0A` }]}>
+                  <Text style={[styles.statsHeaderName, { color: theme.text }]}>担当者</Text>
+                  <Text style={[styles.statsHeaderCell, { color: '#2E86AB' }]}>施錠</Text>
+                  <Text style={[styles.statsHeaderCell, { color: '#22A06B' }]}>開始終了</Text>
+                  <Text style={[styles.statsHeaderCell, { color: '#9C4DCC' }]}>振り分け</Text>
+                  <Text style={[styles.statsHeaderCell, { color: '#9F6E00' }]}>定常</Text>
+                  <Text style={[styles.statsHeaderTotal, { color: theme.text }]}>合計</Text>
+                </View>
+                {taskStatsRows.map((row, index) => (
+                  <View
+                    key={row.userId}
+                    style={[
+                      styles.statsRow,
+                      {
+                        borderColor: theme.border,
+                        backgroundColor: index % 2 === 0 ? theme.background : theme.surface,
+                      },
+                    ]}
+                  >
+                    {/* 担当者名 */}
+                    <Text style={[styles.statsRowName, { color: theme.text }]} numberOfLines={1}>
+                      {index + 1}. {row.name}
+                    </Text>
+                    {/* 種別ごとの件数 */}
+                    <Text style={[styles.statsRowCell, { color: '#2E86AB' }]}>{row.lock_check || 0}</Text>
+                    <Text style={[styles.statsRowCell, { color: '#22A06B' }]}>{row.confirm || 0}</Text>
+                    <Text style={[styles.statsRowCell, { color: '#9C4DCC' }]}>{row.dispatch || 0}</Text>
+                    <Text style={[styles.statsRowCell, { color: '#9F6E00' }]}>{row.patrol || 0}</Text>
+                    {/* 合計 */}
+                    <View style={[styles.statsRowTotalCell]}>
+                      <Text style={[styles.statsRowTotal, { color: theme.primary }]}>{row.total}</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
             )}
           </View>
@@ -3528,6 +4554,30 @@ const SupportDeskScreen = ({
                     >
                       {selectedTicket.description}
                     </Text>
+
+                    {/* 本部向け: rule_question / layout_change のとき「部員が向かいます」タスク生成ボタン */}
+                    {isHQRole &&
+                      (selectedTicket.ticket_type === 'rule_question' ||
+                        selectedTicket.ticket_type === 'layout_change') ? (
+                      <View style={[styles.dispatchSection, { borderColor: theme.border, backgroundColor: `${theme.primary}08` }]}>
+                        <Text style={[styles.dispatchSectionTitle, { color: theme.text }]}>
+                          🚶 現地対応
+                        </Text>
+                        <Text style={[styles.dispatchSectionDesc, { color: theme.textSecondary }]}>
+                          企画管理部の部員を現地に向かわせるタスクを生成します。依頼者にも通知が届きます。
+                        </Text>
+                        <TouchableOpacity
+                          style={[styles.dispatchButton, { backgroundColor: theme.primary }]}
+                          onPress={() => {
+                            setDispatchAssigneeId('');
+                            setIsDispatchModalVisible(true);
+                            loadDispatchCandidates();
+                          }}
+                        >
+                          <Text style={styles.dispatchButtonText}>🚶 部員が向かいます</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
 
                     <View style={styles.sectionHeader}>
                       <Text style={[styles.label, { color: theme.text }]}>対応メッセージ</Text>
@@ -4459,6 +5509,111 @@ const SupportDeskScreen = ({
 
       </ScrollView>
 
+      {/* 振り分けタスク生成: 担当者選択モーダル（ScrollViewの外に配置してどのタブからでも表示可能） */}
+      <Modal
+        visible={isDispatchModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsDispatchModalVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setIsDispatchModalVisible(false)}>
+          <Pressable
+            style={[styles.dispatchModal, { borderColor: theme.border, backgroundColor: theme.surface }]}
+            onPress={() => {}}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>🚶 部員が向かいます</Text>
+            <Text style={[styles.helpText, { color: theme.textSecondary, marginBottom: 12 }]}>
+              担当者を選択してタスクを生成します。未割当のまま生成することもできます。
+            </Text>
+            {selectedTicket ? (
+              <View style={[styles.dispatchModalTicketPreview, { borderColor: theme.border, backgroundColor: theme.background }]}>
+                <Text style={[styles.ticketTitle, { color: theme.text }]} numberOfLines={1}>
+                  {selectedTicket.title}
+                </Text>
+                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+                  {selectedTicket.event_name} / {selectedTicket.event_location}
+                </Text>
+              </View>
+            ) : null}
+            <Text style={[styles.label, { color: theme.text }]}>担当者を選択（企画管理部）</Text>
+            {isLoadingDispatchCandidates ? (
+              <Text style={[styles.helpText, { color: theme.textSecondary }]}>読み込み中...</Text>
+            ) : dispatchCandidates.length === 0 ? (
+              <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                企画管理部のメンバーが見つかりません
+              </Text>
+            ) : (
+              <ScrollView style={styles.dispatchAssigneeList} contentContainerStyle={{ gap: 6 }}>
+                {/* 未割当オプション */}
+                <Pressable
+                  style={[
+                    styles.dispatchAssigneeItem,
+                    {
+                      borderColor: !dispatchAssigneeId ? theme.primary : theme.border,
+                      backgroundColor: !dispatchAssigneeId ? `${theme.primary}14` : theme.background,
+                    },
+                  ]}
+                  onPress={() => setDispatchAssigneeId('')}
+                >
+                  <Text style={[styles.dispatchAssigneeText, { color: !dispatchAssigneeId ? theme.primary : theme.text }]}>
+                    未割当のまま生成
+                  </Text>
+                </Pressable>
+                {dispatchCandidates.map((candidate) => {
+                  /** このメンバーが選択中かどうか */
+                  const isSelected = candidate.userId === dispatchAssigneeId;
+                  return (
+                    <Pressable
+                      key={candidate.userId}
+                      style={[
+                        styles.dispatchAssigneeItem,
+                        {
+                          borderColor: isSelected ? theme.primary : theme.border,
+                          backgroundColor: isSelected ? `${theme.primary}14` : theme.background,
+                        },
+                      ]}
+                      onPress={() => setDispatchAssigneeId(candidate.userId)}
+                    >
+                      <Text style={[styles.dispatchAssigneeText, { color: isSelected ? theme.primary : theme.text }]}>
+                        {candidate.name}
+                      </Text>
+                      {candidate.organization ? (
+                        <Text style={[styles.dispatchAssigneeSub, { color: theme.textSecondary }]}>
+                          {candidate.organization}
+                        </Text>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            )}
+            <View style={styles.dispatchModalActions}>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: theme.border }]}
+                onPress={() => setIsDispatchModalVisible(false)}
+              >
+                <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>キャンセル</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.dispatchConfirmButton,
+                  {
+                    backgroundColor: theme.primary,
+                    opacity: (isCreatingDispatchTask || isLoadingDispatchCandidates) ? 0.6 : 1,
+                  },
+                ]}
+                onPress={handleCreateDispatchTask}
+                disabled={isCreatingDispatchTask || isLoadingDispatchCandidates}
+              >
+                <Text style={styles.dispatchConfirmButtonText}>
+                  {isCreatingDispatchTask ? '生成中...' : dispatchAssigneeId ? '割り当てて生成' : '未割当で生成'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* 部署ロール向けステータス更新トースト */}
       <ToastMessage
         visible={toast.visible}
@@ -4492,14 +5647,14 @@ const styles = StyleSheet.create({
   },
   /** 個々のタブアイテム */
   iosTabItem: {
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
   },
   /** タブアイテムのテキスト */
   iosTabItemText: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
   },
   content: {
     padding: 16,
@@ -4614,6 +5769,349 @@ const styles = StyleSheet.create({
   dashboardTicketMeta: {
     fontSize: 11,
     marginTop: 2,
+  },
+  /** ダッシュボード: 巡回中スタッフセクションのヘッダー行 */
+  dashboardPatrolHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  /** ダッシュボード: 巡回中人数バッジ */
+  dashboardPatrolCountBadge: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+  },
+  /** ダッシュボード: 巡回中人数テキスト */
+  dashboardPatrolCountText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  /** ダッシュボード: 巡回中スタッフ行 */
+  dashboardPatrolRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  /** ダッシュボード: 巡回スタッフ名・所属のコンテナ */
+  dashboardPatrolUserInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  /** ダッシュボード: 巡回スタッフ名 */
+  dashboardPatrolName: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  /** ダッシュボード: 巡回スタッフ所属 */
+  dashboardPatrolOrg: {
+    fontSize: 11,
+  },
+  /** ダッシュボード: 担当中タスクバッジ */
+  dashboardPatrolTaskBadge: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignItems: 'flex-end',
+    maxWidth: 140,
+  },
+  /** ダッシュボード: 担当タスク種別テキスト */
+  dashboardPatrolTaskType: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  /** ダッシュボード: 担当タスクの企画名テキスト */
+  dashboardPatrolTaskEvent: {
+    fontSize: 10,
+    marginTop: 1,
+  },
+  /** 振り分けセクション（案件詳細内） */
+  dispatchSection: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 12,
+    marginBottom: 4,
+    gap: 8,
+  },
+  dispatchSectionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  dispatchSectionDesc: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  dispatchButton: {
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  dispatchButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  /** 振り分けモーダル */
+  dispatchModal: {
+    margin: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 20,
+    maxHeight: '80%',
+    gap: 4,
+  },
+  dispatchModalTicketPreview: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+    gap: 4,
+  },
+  dispatchAssigneeList: {
+    maxHeight: 250,
+    marginBottom: 12,
+  },
+  dispatchAssigneeItem: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 2,
+  },
+  dispatchAssigneeText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  dispatchAssigneeSub: {
+    fontSize: 11,
+  },
+  dispatchModalActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  cancelButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dispatchConfirmButton: {
+    flex: 2,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  dispatchConfirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  /** タスク実績テーブル */
+  statsLegendRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  statsLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statsLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
+  statsLegendText: {
+    fontSize: 11,
+  },
+  statsTable: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    gap: 1,
+  },
+  statsHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    marginBottom: 2,
+    gap: 4,
+  },
+  statsHeaderName: {
+    flex: 3,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  statsHeaderCell: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  statsHeaderTotal: {
+    width: 42,
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    gap: 4,
+  },
+  statsRowName: {
+    flex: 3,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  statsRowCell: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  statsRowTotalCell: {
+    width: 42,
+    alignItems: 'flex-end',
+  },
+  statsRowTotal: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  /** タスクメモセクションの区切り線 */
+  patrolNoteDivider: {
+    borderTopWidth: 1,
+    marginVertical: 12,
+  },
+  /** タスクメモ入力欄 */
+  patrolNoteInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    fontSize: 14,
+    lineHeight: 20,
+    minHeight: 80,
+    marginBottom: 8,
+  },
+  /** 巡回タスク行コンテンツ（割当ボタンと横並び） */
+  patrolTaskItemContent: {
+    flex: 1,
+  },
+  /** ステータスと担当バッジを横並びにする行 */
+  patrolTaskStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  /** 割当済みバッジ（青） */
+  assigneeBadge: {
+    backgroundColor: '#1565C0',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  assigneeBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  /** 未割当バッジ（グレー） */
+  unassignedBadge: {
+    backgroundColor: '#9E9E9E',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  unassignedBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  /** 割当解除ボタン */
+  unassignButton: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'center',
+    marginLeft: 8,
+  },
+  unassignButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  /** 現在対応中セクション区切り線 */
+  inProgressDivider: {
+    borderTopWidth: 1,
+    marginVertical: 12,
+  },
+  /** 現在対応中セクションタイトル */
+  inProgressTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  /** 担当者グループ */
+  inProgressGroup: {
+    marginBottom: 10,
+  },
+  /** 担当者名ヘッダー */
+  inProgressGroupName: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  /** 対応中タスク行 */
+  inProgressTaskRow: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 4,
+  },
+  /** タスク種別テキスト */
+  inProgressTaskType: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  /** ステータスラベル（インライン） */
+  inProgressTaskStatus: {
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  /** 企画名・場所 */
+  inProgressTaskDetail: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  /** メモ表示 */
+  inProgressTaskNotes: {
+    fontSize: 12,
+    marginTop: 2,
+    fontStyle: 'italic',
   },
   filterRow: {
     flexDirection: 'row',
@@ -5020,6 +6518,108 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     marginTop: 4,
+  },
+  /** 評価項目リスト */
+  evalItemList: {
+    gap: 6,
+  },
+  /** 評価項目1行 */
+  evalItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  evalItemLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  evalItemRemoveButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  evalItemRemoveText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  /** 評価項目追加欄 */
+  evalItemAddRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  evalItemInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+  },
+  evalItemAddButton: {
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  evalItemAddButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  /** 評価対象企画リスト */
+  evalOrgEventList: {
+    gap: 8,
+  },
+  evalOrgEventItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  evalOrgEventOrg: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  evalOrgEventName: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  evalStartButton: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  evalStartButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  /** 未巡回アラート閾値設定ボタン行 */
+  patrolAlertThresholdRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  /** 未巡回アラート閾値選択ボタン */
+  patrolAlertThresholdButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  /** 未巡回アラート閾値ボタンのテキスト */
+  patrolAlertThresholdText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
 

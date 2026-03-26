@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {
@@ -62,9 +63,11 @@ const RESULT_LABELS = {
  * @param {string} props.patrolMemo - 巡回メモ文字列
  * @param {Function} props.onChangePatrolMemo - メモ変更コールバック
  * @param {boolean} props.isSubmitting - 送信中フラグ
- * @param {boolean} props.canAccept - 受諾可能フラグ
+ * @param {boolean} props.canAccept - 受諾可能フラグ（向かいますボタン押下可否）
+ * @param {boolean} props.hasAnyActiveTask - 自分が対応中の別タスクが存在するかどうか
  * @param {boolean} props.canComplete - 完了可能フラグ
  * @param {Function} props.onAcceptTask - 向かいますボタン押下コールバック
+ * @param {Function} props.onRejectTask - 拒否ボタン押下コールバック（割当を外して未割当に戻す）
  * @param {Function} props.onCompleteTask - 完了ボタン押下コールバック
  * @param {Function} props.onSendMemoOnly - メモのみ共有ボタン押下コールバック
  * @param {Array} props.taskResults - タスク結果履歴配列
@@ -86,8 +89,10 @@ const PatrolTaskDetail = ({
   onChangePatrolMemo,
   isSubmitting,
   canAccept,
+  hasAnyActiveTask,
   canComplete,
   onAcceptTask,
+  onRejectTask,
   onCompleteTask,
   onSendMemoOnly,
   taskResults,
@@ -97,11 +102,17 @@ const PatrolTaskDetail = ({
   isLoadingSourceMessages,
   onRefreshSourceMessages,
 }) => {
+  /** 画面幅（レスポンシブ対応用） */
+  const { width: windowWidth } = useWindowDimensions();
+  /** スマホ幅かどうか（768px 未満） */
+  const isMobile = windowWidth < 768;
   /** 場所表示 */
   const locationLabel = selectedTask.event_location || selectedTask.location_text || '場所未設定';
+  /** 自分がこのタスクの担当者かどうか */
+  const isAssignedToMe = selectedTask.assigned_to && selectedTask.assigned_to === user?.id;
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.card, isMobile && styles.cardMobile, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <View style={styles.headerRow}>
         <View style={styles.headerTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>タスク詳細</Text>
@@ -156,12 +167,17 @@ const PatrolTaskDetail = ({
           {selectedTask.event_name || '企画名未設定'}
         </Text>
         <Text style={[styles.focusLocation, { color: theme.text }]}>📍 {locationLabel}</Text>
-        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-          タスク番号: {selectedTask.task_no || '-'}
-        </Text>
-        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-          元連絡案件: {selectedTask.source_ticket_id || 'なし'} / 元鍵貸出: {selectedTask.source_key_loan_id || 'なし'}
-        </Text>
+        {/* タスク番号・元連絡案件IDはスマホでは省略（管理情報のため） */}
+        {!isMobile ? (
+          <>
+            <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+              タスク番号: {selectedTask.task_no || '-'}
+            </Text>
+            <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+              元連絡案件: {selectedTask.source_ticket_id || 'なし'} / 元鍵貸出: {selectedTask.source_key_loan_id || 'なし'}
+            </Text>
+          </>
+        ) : null}
       </View>
 
       <View
@@ -174,34 +190,46 @@ const PatrolTaskDetail = ({
         <Text style={[styles.helpText, { color: theme.textSecondary }]}>
           現地へ向かうときは先に受諾し、対応後は結果とメモを添えて完了登録してください。
         </Text>
-        {/* 向かいます不可バナー: 別タスク対応中で受諾できない場合に表示 */}
-        {!canAccept && selectedTask.task_status === PATROL_TASK_STATUSES.OPEN && (
+        {/* 向かいます不可バナー: 別タスク対応中で未割当タスクを受諾できない場合に表示 */}
+        {!isAssignedToMe && hasAnyActiveTask && selectedTask.task_status === PATROL_TASK_STATUSES.OPEN && (
           <View style={styles.cannotAcceptBanner}>
             <Text style={styles.cannotAcceptBannerText}>
               現在別のタスクを対応中のため受諾できません
             </Text>
           </View>
         )}
-        <View style={styles.actionRow}>
+        <View style={[styles.actionRow, isMobile && styles.actionRowMobile]}>
           <TouchableOpacity
             style={[
               styles.actionButton,
+              isMobile && styles.actionButtonMobile,
               { backgroundColor: canAccept ? theme.primary : theme.border },
             ]}
             disabled={!canAccept || isSubmitting}
             onPress={onAcceptTask}
           >
-            <Text style={styles.actionButtonText}>向かいます</Text>
+            <Text style={[styles.actionButtonText, isMobile && styles.actionButtonTextMobile]}>向かいます</Text>
           </TouchableOpacity>
+          {/* 拒否ボタン: 自分に割り当てられたタスクのみ表示 */}
+          {isAssignedToMe ? (
+            <TouchableOpacity
+              style={[styles.actionButton, isMobile && styles.actionButtonMobile, { backgroundColor: '#E53E3E' }]}
+              disabled={isSubmitting}
+              onPress={onRejectTask}
+            >
+              <Text style={[styles.actionButtonText, isMobile && styles.actionButtonTextMobile]}>拒否</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={[
               styles.actionButton,
+              isMobile && styles.actionButtonMobile,
               { backgroundColor: canComplete ? (theme.success || '#22A06B') : theme.border },
             ]}
             disabled={!canComplete || isSubmitting}
             onPress={onCompleteTask}
           >
-            <Text style={styles.actionButtonText}>完了登録</Text>
+            <Text style={[styles.actionButtonText, isMobile && styles.actionButtonTextMobile]}>完了登録</Text>
           </TouchableOpacity>
         </View>
         <TouchableOpacity
@@ -411,6 +439,12 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
   },
+  /** スマホ向けカード: 余白を詰める */
+  cardMobile: {
+    padding: 12,
+    borderRadius: 14,
+    gap: 10,
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -546,16 +580,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  /** スマホ向けボタン行: 折り返し可能にして各ボタンを大きく */
+  actionRowMobile: {
+    flexWrap: 'wrap',
+    gap: 10,
+  },
   actionButton: {
     flex: 1,
     borderRadius: 14,
     paddingVertical: 13,
     alignItems: 'center',
   },
+  /** スマホ向けボタン: 最小幅を設定して折り返し時も押しやすく */
+  actionButtonMobile: {
+    minWidth: '45%',
+    paddingVertical: 16,
+    borderRadius: 16,
+  },
   actionButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  /** スマホ向けボタンテキスト: 少し大きく */
+  actionButtonTextMobile: {
+    fontSize: 15,
   },
   memoButton: {
     borderWidth: 1,
@@ -588,6 +637,21 @@ const styles = StyleSheet.create({
   messageDate: {
     fontSize: 11,
     marginTop: 4,
+  },
+  /** 自分に割り当てられたタスクであることを知らせるバナー（青系） */
+  assignedToMeBanner: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#1565C0',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  assignedToMeBannerText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   cannotAcceptBanner: {
     borderRadius: 10,

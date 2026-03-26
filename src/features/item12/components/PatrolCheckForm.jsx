@@ -144,6 +144,11 @@ const PatrolCheckForm = ({
 }) => {
   /** 団体名検索キーワード */
   const [organizationSearch, setOrganizationSearch] = useState('');
+  /**
+   * 選択済み状態で「選び直す」を押したときに企画一覧を再表示するフラグ
+   * true のときは selectedLocation があっても候補リストを表示する
+   */
+  const [isReselecting, setIsReselecting] = useState(false);
 
   /** 選択中企画 */
   const selectedLocation = useMemo(() => {
@@ -187,12 +192,32 @@ const PatrolCheckForm = ({
           >
             <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
           </TouchableOpacity>
-          {selectedLocation ? (
+          {selectedLocation && !isReselecting ? (
+            <>
+              {/* 選択済み状態から別の企画に選び直すボタン */}
+              <TouchableOpacity
+                style={[styles.reselectButton, { borderColor: theme.primary, backgroundColor: `${theme.primary}12` }]}
+                onPress={() => setIsReselecting(true)}
+              >
+                <Text style={[styles.reselectButtonText, { color: theme.primary }]}>選び直す</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: theme.border }]}
+                onPress={() => {
+                  setIsReselecting(false);
+                  onClearSelectedLocation();
+                }}
+              >
+                <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>キャンセル</Text>
+              </TouchableOpacity>
+            </>
+          ) : selectedLocation && isReselecting ? (
+            /* 選び直し中は「戻る」ボタン（選択をキャンセルして元の状態に戻す） */
             <TouchableOpacity
               style={[styles.cancelButton, { borderColor: theme.border }]}
-              onPress={onClearSelectedLocation}
+              onPress={() => setIsReselecting(false)}
             >
-              <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>キャンセル</Text>
+              <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>戻る</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -212,12 +237,18 @@ const PatrolCheckForm = ({
         </Text>
       </View>
 
-      {selectedLocation ? (
+      {selectedLocation && !isReselecting ? (
         <Text style={[styles.subLabel, { color: theme.textSecondary }]}>
-          選択中の企画だけ表示しています。別の企画を選ぶときはキャンセルしてください。
+          選択中の企画だけ表示しています。別の企画に変更するときは「選び直す」を押してください。
         </Text>
       ) : (
         <>
+          {/* 選び直し中の場合は現在の選択を強調表示 */}
+          {isReselecting && selectedLocation ? (
+            <Text style={[styles.subLabel, { color: theme.primary }]}>
+              ↩ 別の企画を選択すると切り替わります
+            </Text>
+          ) : null}
           <Text style={[styles.label, { color: theme.text }]}>団体名で絞り込み</Text>
           <TextInput
             value={organizationSearch}
@@ -255,7 +286,11 @@ const PatrolCheckForm = ({
                         backgroundColor: isActive ? `${theme.primary}12` : theme.background,
                       },
                     ]}
-                    onPress={() => onSelectLocation(location)}
+                    onPress={() => {
+                      /** 企画を選択したら選び直しモードを終了する */
+                      setIsReselecting(false);
+                      onSelectLocation(location);
+                    }}
                   >
                     <Text
                       style={[
@@ -501,6 +536,17 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   cancelButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  /** 選び直すボタン（選択済み状態で別企画に切り替えるとき） */
+  reselectButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  reselectButtonText: {
     fontSize: 12,
     fontWeight: '700',
   },

@@ -10,7 +10,7 @@ import {
   notifyPatrolTaskCompleted,
   notifyStartEndReportConfirmed,
 } from '../../shared/services/supportWorkflowNotificationService.js';
-import { notifyPatrolTaskAssigned } from './supportNotificationService.js';
+import { notifyPatrolTaskAssigned, notifyDispatchTaskCreated } from './supportNotificationService.js';
 
 const PATROL_TASKS_TABLE = 'patrol_tasks';
 const PATROL_TASK_RESULTS_TABLE = 'patrol_task_results';
@@ -438,6 +438,82 @@ export const completePatrolTask = async (input) => {
 };
 
 /**
+ * 連絡案件（rule_question / layout_change）から「部員が向かいます」振り分けタスクを生成する
+ * 本部スタッフが案件詳細から手動で生成するタスク
+ * @param {Object} input - 入力
+ * @param {Object} input.ticket - 元となる連絡案件オブジェクト
+ * @param {string} input.ticketTypeLabel - 連絡案件種別の表示名
+ * @param {string|null} [input.assignedTo=null] - 担当者ユーザーID
+ * @param {string|null} [input.creatorUserId=null] - タスク生成者（本部スタッフ）ユーザーID
+ * @returns {Promise<{data: Object|null, error: Error|null}>} 生成結果
+ */
+export const createDispatchPatrolTask = async ({
+  ticket,
+  ticketTypeLabel,
+  assignedTo = null,
+  creatorUserId = null,
+}) => {
+  try {
+    const normalizedAssignedTo = normalizeText(assignedTo) || null;
+    const normalizedCreatorUserId = normalizeText(creatorUserId) || null;
+
+    if (!ticket?.id) {
+      throw new Error('ticket.id が未指定です');
+    }
+
+    /** notes に「[種別]: [件名]」形式で格納することで振り分けタスクと識別可能にする */
+    const taskNotes = `${ticketTypeLabel || '連絡案件'}: ${ticket.title || ''}`.trim();
+
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .insert({
+        task_type: PATROL_TASK_TYPES.OTHER,
+        task_status: PATROL_TASK_STATUSES.OPEN,
+        event_name: ticket.event_name || null,
+        event_location: ticket.event_location || null,
+        location_text: ticket.event_location || null,
+        notes: taskNotes,
+        source_ticket_id: ticket.id,
+        assigned_to: normalizedAssignedTo,
+        created_by: normalizedCreatorUserId,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('振り分けタスク生成エラー:', error);
+      return { data: null, error };
+    }
+
+    // 担当者への割当通知
+    if (normalizedAssignedTo && normalizedCreatorUserId) {
+      const { error: assignNotifyError } = await notifyPatrolTaskAssigned({
+        task: data,
+        senderUserId: normalizedCreatorUserId,
+      });
+      if (assignNotifyError) {
+        console.warn('振り分けタスク割当通知エラー:', assignNotifyError);
+      }
+    }
+
+    // 案件作成者への「部員が向かいます」通知
+    const { error: dispatchNotifyError } = await notifyDispatchTaskCreated({
+      ticket,
+      task: data,
+      senderUserId: normalizedCreatorUserId,
+    });
+    if (dispatchNotifyError) {
+      console.warn('振り分けタスク依頼者通知エラー:', dispatchNotifyError);
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('振り分けタスク生成処理でエラー:', error);
+    return { data: null, error };
+  }
+};
+
+/**
  * emergency 連絡案件から emergency_support 巡回タスクを自動生成する
  * @param {Object} input - 入力
  * @param {Object} input.ticket - 元となる emergency 連絡案件オブジェクト
@@ -476,5 +552,67 @@ export const createEmergencyPatrolTask = async ({ ticket, creatorUserId = null }
   } catch (error) {
     console.error('emergency_support タスク生成処理でエラー:', error);
     return { data: null, error };
+  }
+};
+
+/**
+ * 担当者別タスク実績を取得する（本部スタッフのタスク集計向け）
+ * 完了・取消含む全タスクを assigned_to で集計するために raw データを返す
+ * @param {Object} [params={}] - 取得条件
+ * @param {number} [params.limit=500] - 最大件数
+ * @returns {Promise<{data: Array, error: Error|null}>} 取得結果
+ */
+/**
+ * 巡回タスクのメモ（notes）を更新する
+ * 本部が担当者への指示や補足情報をタスクに書き込むために使用する
+ * @param {Object} params - 更新条件
+ * @param {string} params.taskId - 更新対象タスクID
+ * @param {string} params.notes - 新しいメモ内容（空文字で消去可能）
+ * @returns {Promise<{data: Object|null, error: Error|null}>} 更新結果
+ */
+export const updatePatrolTaskNotes = async ({ taskId, notes }) => {
+  try {
+    const normalizedTaskId = normalizeText(taskId);
+    if (!normalizedTaskId) {
+      throw new Error('taskId が未指定です');
+    }
+
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .update({ notes: notes ?? null })
+      .eq('id', normalizedTaskId)
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('巡回タスクメモ更新エラー:', error);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('巡回タスクメモ更新処理でエラー:', error);
+    return { data: null, error };
+  }
+};
+
+export const listPatrolTasksForStats = async ({ limit = 500 } = {}) => {
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .select('id, task_type, task_status, assigned_to, source_ticket_id, created_at')
+      .not('assigned_to', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('タスク実績取得エラー:', error);
+      return { data: [], error };
+    }
+
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('タスク実績取得処理でエラー:', error);
+    return { data: [], error };
   }
 };

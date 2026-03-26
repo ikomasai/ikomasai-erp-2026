@@ -30,6 +30,7 @@ import {
   markReservationReady,
   updateKeyReservationStatus,
 } from '../../../services/supabase/keyReservationService';
+import { getUserProfilesByIds } from '../../../shared/services/notificationService';
 import KeyStatusBoardModal from './KeyStatusBoardModal';
 import KeyLoanTerminalModal from './KeyLoanTerminalModal';
 
@@ -443,16 +444,29 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
       const keyCode = normalizeText(originalReservation.key_code);
       /** keys join を優先し、なければ metadata.key_name、最後に key_code を使用 */
       const keyLabel = getReservationKeyLabel(originalReservation);
+
+      /** 申請者ユーザーIDからプロフィール名を取得して借受人名に設定する */
+      let borrowerName = null;
+      if (originalReservation.requested_by) {
+        const { profiles } = await getUserProfilesByIds([originalReservation.requested_by]);
+        borrowerName = profiles?.[0]?.name || null;
+      }
+
       if (keyCode && keyLabel) {
+        /** keys JOIN から鍵の場所テキストを取得（どの館のどこの鍵かを貸出記録に保存） */
+        const keyLocationText = normalizeText(originalReservation.keys?.location_text) || null;
         const { error: loanError } = await createKeyLoan({
           keyCode,
           keyLabel,
           eventName: normalizeText(originalReservation.event_name) || null,
           eventLocation: normalizeText(originalReservation.event_location) || null,
+          borrowerName,
           metadata: {
             /** 予約IDをメタデータに保存して予約との紐付けを維持 */
             reservation_id: originalReservation.id,
             org_id: originalReservation.org_id || null,
+            /** 鍵の物理的な場所（何館のどこか）を貸出記録に保存 */
+            key_location_text: keyLocationText,
           },
         });
         if (loanError) {
@@ -501,14 +515,25 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
 
       /** 貸出記録を自動作成 */
       if (keyCode && keyLabel) {
+        /** 申請者ユーザーIDからプロフィール名を取得して借受人名に設定する */
+        let borrowerName = null;
+        if (reservation.requested_by) {
+          const { profiles } = await getUserProfilesByIds([reservation.requested_by]);
+          borrowerName = profiles?.[0]?.name || null;
+        }
+        /** keys JOIN から鍵の場所テキストを取得（どの館のどこの鍵かを貸出記録に保存） */
+        const keyLocationText = normalizeText(reservation.keys?.location_text) || null;
         const { error: loanError } = await createKeyLoan({
           keyCode,
           keyLabel,
           eventName: normalizeText(reservation.event_name) || null,
           eventLocation: normalizeText(reservation.event_location) || null,
+          borrowerName,
           metadata: {
             reservation_id: reservation.id,
             org_id: reservation.org_id || null,
+            /** 鍵の物理的な場所（何館のどこか）を貸出記録に保存 */
+            key_location_text: keyLocationText,
           },
         });
         if (loanError) {
@@ -828,11 +853,17 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
                     index > 0 && { borderTopWidth: 1, borderTopColor: theme.border },
                   ]}
                 >
-                  {/* 鍵ラベル / 企画名 / 場所 */}
+                  {/* 鍵ラベル / 鍵の場所 / 企画名 */}
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.keyLabel, { color: theme.primary }]} numberOfLines={1}>
                       🔑 {loan.key_label || '-'}
                     </Text>
+                    {/* 鍵の物理的な場所（何館のどこか）を表示 */}
+                    {loan.metadata?.key_location_text ? (
+                      <Text style={[styles.lockCheckMeta, { color: theme.text }]} numberOfLines={1}>
+                        📍 {loan.metadata.key_location_text}
+                      </Text>
+                    ) : null}
                     <Text style={[styles.lockCheckMeta, { color: theme.textSecondary }]} numberOfLines={1}>
                       {loan.event_name || '-'}{loan.event_location ? ` / ${loan.event_location}` : ''}
                     </Text>
@@ -999,6 +1030,12 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
                 <Text style={[styles.keyLabel, { color: theme.primary }]} numberOfLines={1}>
                   🔑 {loan.key_label || '-'}
                 </Text>
+                {/* 鍵の物理的な場所（何館のどこか） */}
+                {loan.metadata?.key_location_text ? (
+                  <Text style={[styles.lockCheckMeta, { color: theme.text }]} numberOfLines={1}>
+                    📍 {loan.metadata.key_location_text}
+                  </Text>
+                ) : null}
                 {/* 団体名 / 借受人名 */}
                 <Text style={[styles.lockCheckMeta, { color: theme.text }]} numberOfLines={1}>
                   {loan.event_name || '-'} / {loan.borrower_name || '-'}
@@ -1122,7 +1159,7 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
                       index === 0 && { borderTopColor: theme.border },
                     ]}
                   >
-                    {/* 鍵ラベル + ステータスバッジ */}
+                    {/* 鍵ラベル + 鍵の場所 + ステータスバッジ */}
                     <View style={{ flex: 1 }}>
                       <Text
                         style={[styles.keyLabel, { color: theme.primary }]}
@@ -1130,6 +1167,12 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
                       >
                         🔑 {getReservationKeyLabel(reservation)}
                       </Text>
+                      {/* 鍵の物理的な場所（何館のどこか）を keys JOIN から表示 */}
+                      {reservation.keys?.location_text ? (
+                        <Text style={[styles.lockCheckMeta, { color: theme.text }]} numberOfLines={1}>
+                          📍 {reservation.keys.location_text}
+                        </Text>
+                      ) : null}
                       {/* 用意済みバッジ */}
                       {isReadyToLoan && (
                         <View style={styles.readyBadge}>

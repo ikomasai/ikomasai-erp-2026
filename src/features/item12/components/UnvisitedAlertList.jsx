@@ -67,35 +67,50 @@ const UnvisitedAlertList = ({
         </Text>
       </View>
 
-      <Text style={[styles.label, { color: theme.text }]}>アラート閾値</Text>
-      <View style={styles.optionGroup}>
-        {UNVISITED_ALERT_OPTIONS.map((minutes) => {
-          /** 選択中かどうか */
-          const isActive = minutes === unvisitedAlertMinutes;
-          return (
-            <Pressable
-              key={String(minutes)}
-              style={[
-                styles.optionButton,
-                {
-                  borderColor: isActive ? theme.primary : theme.border,
-                  backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
-                },
-              ]}
-              onPress={() => onChangeAlertMinutes(minutes)}
-            >
-              <Text
-                style={[
-                  styles.optionButtonText,
-                  { color: isActive ? theme.primary : theme.textSecondary },
-                ]}
-              >
-                {minutes}分
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {/* 閾値変更UIは onChangeAlertMinutes が渡された場合（本部）のみ表示 */}
+      {onChangeAlertMinutes ? (
+        <>
+          <Text style={[styles.label, { color: theme.text }]}>アラート閾値</Text>
+          <View style={styles.optionGroup}>
+            {UNVISITED_ALERT_OPTIONS.map((minutes) => {
+              /** 選択中かどうか */
+              const isActive = minutes === unvisitedAlertMinutes;
+              return (
+                <Pressable
+                  key={String(minutes)}
+                  style={[
+                    styles.optionButton,
+                    {
+                      borderColor: isActive ? theme.primary : theme.border,
+                      backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                    },
+                  ]}
+                  onPress={() => onChangeAlertMinutes(minutes)}
+                >
+                  <Text
+                    style={[
+                      styles.optionButtonText,
+                      { color: isActive ? theme.primary : theme.textSecondary },
+                    ]}
+                  >
+                    {minutes}分
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
+      ) : (
+        /* 閾値変更不可の場合（巡回サポート側）は現在の閾値を読み取り専用で表示 */
+        <View style={[styles.readonlyThresholdRow, { borderColor: theme.border, backgroundColor: theme.background }]}>
+          <Text style={[styles.readonlyThresholdLabel, { color: theme.textSecondary }]}>
+            アラート閾値（本部設定）
+          </Text>
+          <Text style={[styles.readonlyThresholdValue, { color: theme.text }]}>
+            {unvisitedAlertMinutes}分
+          </Text>
+        </View>
+      )}
 
       {isLoadingUnvisitedLocations ? (
         <SkeletonLoader lines={3} baseColor={theme.border} />
@@ -234,6 +249,24 @@ const styles = StyleSheet.create({
   optionButtonText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  /** 閾値の読み取り専用表示（巡回サポート側） */
+  readonlyThresholdRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  readonlyThresholdLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  readonlyThresholdValue: {
+    fontSize: 13,
+    fontWeight: '800',
   },
   ticketList: {
     gap: 8,

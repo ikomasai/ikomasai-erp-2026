@@ -656,16 +656,29 @@ export const notifyPatrolTaskAssigned = async ({ task, senderUserId = null }) =>
   const eventName = normalizeText(task?.event_name) || '企画名未設定';
   /** 場所 */
   const eventLocation = normalizeText(task?.event_location || task?.location_text) || '場所未設定';
+  /** 依頼内容・備考（notes フィールド）*/
+  const notes = normalizeText(task?.notes);
 
   if (!task?.id || !assignedTo) {
     return { error: null };
   }
 
+  /** 通知本文: 企画名・場所・依頼内容を改行で並べる */
+  const bodyLines = [
+    `企画: ${eventName}`,
+    `場所: ${eventLocation}`,
+  ];
+  if (notes) {
+    bodyLines.push(`依頼内容: ${notes}`);
+  }
+  /** 通知本文 */
+  const body = bodyLines.join('\n');
+
   /** 通知送信結果 */
   const result = await sendNotificationToUser(
     assignedTo,
-    `巡回割当: ${taskTypeLabel}`,
-    `${eventName} / ${eventLocation}`,
+    `巡回割当 [${taskTypeLabel}]: ${eventName}`,
+    body,
     {
       source: 'patrol_task',
       type: 'patrol_task_assigned',
@@ -683,4 +696,50 @@ export const notifyPatrolTaskAssigned = async ({ task, senderUserId = null }) =>
   }
 
   return { error: null, data: result };
+};
+
+/**
+ * 振り分けタスク生成時に連絡案件作成者へ「部員が向かいます」通知を送る
+ * @param {Object} params - 通知パラメータ
+ * @param {Object} params.ticket - 元連絡案件
+ * @param {Object} params.task - 生成したタスク
+ * @param {string|null} [params.senderUserId=null] - 送信者ユーザーID（本部スタッフ）
+ * @returns {Promise<{error: Error|null, data?: Object}>} 送信結果
+ */
+export const notifyDispatchTaskCreated = async ({ ticket, task, senderUserId = null }) => {
+  /** 連絡案件作成者ID */
+  const ticketCreatorId = normalizeText(ticket?.created_by);
+  /** 企画名 */
+  const eventName = normalizeText(ticket?.event_name || task?.event_name) || '企画名未設定';
+  /** 場所 */
+  const eventLocation = normalizeText(ticket?.event_location || task?.event_location || task?.location_text) || '場所未設定';
+  /** 連絡案件タイトル */
+  const ticketTitle = normalizeText(ticket?.title) || '連絡案件';
+
+  if (!ticketCreatorId) {
+    return { error: null };
+  }
+
+  /** 通知送信結果 */
+  const dispatchResult = await sendNotificationToUser(
+    ticketCreatorId,
+    `部員が向かいます: ${eventName}`,
+    `${ticketTitle}\n場所: ${eventLocation}\nまもなく担当部員が現地に向かいます。`,
+    {
+      source: 'patrol_task',
+      type: 'dispatch_task_created',
+      event: 'dispatch_created',
+      task_id: task?.id || null,
+      task_type: task?.task_type || null,
+      source_ticket_id: ticket?.id || null,
+      ticket_type: ticket?.ticket_type || null,
+    },
+    normalizeText(senderUserId) || null,
+  );
+
+  if (dispatchResult.error) {
+    return { error: dispatchResult.error };
+  }
+
+  return { error: null, data: dispatchResult };
 };

@@ -143,9 +143,21 @@ export const returnKeyAndCreateLockTask = async (input) => {
 
     if (!rpcError) {
       if (shouldCreateLockTask && rpcData?.task) {
+        /** RPC が作成したタスクの notes に鍵の場所を付記する（metadata.key_location_text が存在する場合のみ） */
+        const rpcLoan = rpcData.loan || null;
+        const rpcKeyLocationText = normalizeText(rpcLoan?.metadata?.key_location_text) || null;
+        if (rpcKeyLocationText && rpcData.task.notes && !rpcData.task.notes.includes('（')) {
+          /** "鍵返却後の施錠確認: [鍵名]" → "鍵返却後の施錠確認: [鍵名]（[場所]）" に更新 */
+          const updatedNotes = `${rpcData.task.notes}（${rpcKeyLocationText}）`;
+          await getSupabaseClient()
+            .from(PATROL_TASKS_TABLE)
+            .update({ notes: updatedNotes })
+            .eq('id', rpcData.task.id);
+          rpcData.task.notes = updatedNotes;
+        }
         const { error: notifyError } = await notifyLockCheckTaskCreated({
           task: rpcData.task,
-          loan: rpcData.loan || null,
+          loan: rpcLoan,
           senderUserId: returnUserId,
         });
         logNotificationError(notifyError);
@@ -171,6 +183,11 @@ export const returnKeyAndCreateLockTask = async (input) => {
 
     let createdTask = null;
     if (shouldCreateLockTask) {
+      /** 鍵の物理的な場所（metadata.key_location_text）を notes に含めて巡回担当者に伝える */
+      const keyLocationText = normalizeText(loanData.metadata?.key_location_text) || null;
+      const notesText = keyLocationText
+        ? `鍵返却後の施錠確認: ${loanData.key_label}（${keyLocationText}）`
+        : `鍵返却後の施錠確認: ${loanData.key_label}`;
       const { data: taskData, error: taskError } = await getSupabaseClient()
         .from(PATROL_TASKS_TABLE)
         .insert({
@@ -179,7 +196,7 @@ export const returnKeyAndCreateLockTask = async (input) => {
           location_text: loanData.event_location || loanData.key_label,
           event_name: loanData.event_name,
           event_location: loanData.event_location,
-          notes: `鍵返却後の施錠確認: ${loanData.key_label}`,
+          notes: notesText,
           source_key_loan_id: loanData.id,
           assigned_to: optionalAssignee,
           created_by: returnUserId,

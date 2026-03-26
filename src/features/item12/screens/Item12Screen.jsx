@@ -4,9 +4,10 @@
  * state管理とAPI呼び出しを集約するコンテナコンポーネント
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  AppState,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -15,15 +16,19 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { getSupabaseClient } from '../../../services/supabase/client';
 import { useTheme } from '../../../shared/hooks/useTheme';
 import { ThemedHeader } from '../../../shared/components/ThemedHeader';
 import { PATROL_TABS, PATROL_TAB_TYPES, SCREEN_NAME } from '../constants';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import { canAccessManagementSupportScreen } from '../../../services/supabase/permissionService';
+import { updatePatrolStatus } from '../../../services/supabase/userService';
 import {
   acceptPatrolTask,
+  assignPatrolTask,
   completePatrolTask,
   listPatrolTaskResults,
   listPatrolTasks,
@@ -119,12 +124,14 @@ const DEFAULT_UNVISITED_ALERT_MINUTES = 90;
 /** AsyncStorage: 巡回サポートに施錠確認サマリーを表示するかのキー */
 const ASYNC_KEY_SHOW_LOCK_CHECK_IN_PATROL = 'showLockCheckInPatrol';
 
+/** AsyncStorage: 未巡回アラート閾値（本部が設定し、巡回サポートは読み取り専用） */
+const ASYNC_KEY_UNVISITED_ALERT_MINUTES = 'unvisitedAlertMinutes';
+
 /** タブごとの案内文 */
 const PATROL_TAB_DESCRIPTIONS = {
   [PATROL_TAB_TYPES.DASHBOARD]: '件数と優先タスクだけを短く確認する巡回用の要約です。',
   [PATROL_TAB_TYPES.TASKS]: '優先度の高い巡回依頼を選んで、そのまま対応まで進めます。',
   [PATROL_TAB_TYPES.CHECK]: '定常巡回の記録と未巡回箇所の確認を同じ流れで行います。',
-  [PATROL_TAB_TYPES.EVENT_ORGS]: '団体別の企画一覧を絞り込みながら確認できます。',
 };
 
 /**
@@ -164,6 +171,10 @@ const getGoMessageByTaskType = (taskType) => {
 const Item12Screen = ({ navigation, route }) => {
   const { theme } = useTheme();
   const { user, userInfo } = useAuth();
+  /** 画面幅（レスポンシブ対応用） */
+  const { width: windowWidth } = useWindowDimensions();
+  /** スマホ幅かどうか（768px 未満） */
+  const isMobile = windowWidth < 768;
   const isRoleReady = Array.isArray(userInfo?.roles);
   const canAccess = !isRoleReady || canAccessManagementSupportScreen(userInfo?.roles || [], 'item12');
   /** 通知タップなどで指定された初期タブ */
@@ -244,6 +255,12 @@ const Item12Screen = ({ navigation, route }) => {
   const [showLockCheckInPatrol, setShowLockCheckInPatrol] = useState(false);
   /** 本日貸出中の鍵一覧（施錠確認進捗計算用） */
   const [todayKeyLoans, setTodayKeyLoans] = useState([]);
+
+  /* ---- 巡回中フラグ ---- */
+  /** 現在巡回中かどうか（本部ダッシュボードに表示される） */
+  const [isOnPatrol, setIsOnPatrol] = useState(false);
+  /** 巡回中フラグ更新中フラグ */
+  const [isUpdatingPatrolStatus, setIsUpdatingPatrolStatus] = useState(false);
 
   /* ---- トースト通知 ---- */
   /** トースト表示フラグ・メッセージ・種別 */
@@ -575,6 +592,31 @@ const Item12Screen = ({ navigation, route }) => {
   };
 
   /**
+   * 巡回中フラグをトグルする
+   * ON にすると本部ダッシュボードに「巡回中」として名前が表示される
+   * @returns {Promise<void>} 更新処理
+   */
+  const handleTogglePatrolStatus = async () => {
+    if (!user?.id || isUpdatingPatrolStatus) {
+      return;
+    }
+
+    /** 切り替え後の値 */
+    const nextValue = !isOnPatrol;
+    setIsUpdatingPatrolStatus(true);
+    const { error } = await updatePatrolStatus(user.id, nextValue);
+    setIsUpdatingPatrolStatus(false);
+
+    if (error) {
+      showToast('巡回中ステータスの更新に失敗しました', 'error');
+      return;
+    }
+
+    setIsOnPatrol(nextValue);
+    showToast(nextValue ? '巡回開始しました（本部に通知されます）' : '巡回終了しました');
+  };
+
+  /**
    * 団体別企画一覧を取得
    * @returns {Promise<void>} 取得処理
    */
@@ -865,6 +907,38 @@ const Item12Screen = ({ navigation, route }) => {
     showToast('メモを共有しました');
   };
 
+  /**
+   * 割り当てられたタスクを拒否する
+   * assigned_to を null にリセットし、タスクを未割当に戻す
+   * @returns {Promise<void>} 実行処理
+   */
+  const handleRejectTask = async () => {
+    if (!selectedTask || !user?.id) {
+      showToast('タスクまたはログイン情報が不足しています', 'error');
+      return;
+    }
+    if (selectedTask.assigned_to !== user.id) {
+      showToast('自分に割り当てられたタスクのみ拒否できます', 'error');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const { error } = await assignPatrolTask({
+      taskId: selectedTask.id,
+      assignedTo: null,
+      actorUserId: user.id,
+    });
+    setIsSubmitting(false);
+
+    if (error) {
+      showToast(error.message || '拒否処理に失敗しました', 'error');
+      return;
+    }
+
+    await loadTasks(selectedTask.id);
+    showToast('タスクを拒否しました（未割当に戻しました）');
+  };
+
   /** 自分のタスクまたは未割当かどうか */
   const isMineOrUnassigned = useMemo(
     () =>
@@ -890,8 +964,8 @@ const Item12Screen = ({ navigation, route }) => {
   }, [tasks, selectedTask?.id, user?.id]);
 
   /**
-   * 受諾可能かどうか
-   * - 自分に割り当て済み: ステータスが open/accepted/en_route であれば受諾可
+   * 受諾可能かどうか（＝「向かいます」ボタンを押せるか）
+   * - 自分に割り当て済み: 向かいます可能（割り当てられても行けない場合は拒否ボタンを使う）
    * - 未割当: 種別問わずアクティブタスクを1つでも持っていなければ受諾可
    * - 他者に割り当て済み: 受諾不可
    */
@@ -907,7 +981,7 @@ const Item12Screen = ({ navigation, route }) => {
     if (!isActiveStatus) {
       return false;
     }
-    /** 自分が担当者の場合はそのまま受諾可 */
+    /** 自分が担当者の場合は向かいます可能 */
     if (selectedTask.assigned_to === user?.id) {
       return true;
     }
@@ -964,13 +1038,103 @@ const Item12Screen = ({ navigation, route }) => {
     }
   }, [organizationEventOptions, selectedOrganizationEvent]);
 
+  /**
+   * 最新の selectedTaskId を Ref で保持する
+   * Realtime コールバック内から deps を増やさずに参照するため
+   */
+  const selectedTaskIdRef = useRef(selectedTaskId);
   useEffect(() => {
-    /** 30秒ごとに自動更新（他者が受諾したタスクを即座に非表示にする） */
-    const interval = setInterval(() => {
-      loadTasks(selectedTaskId);
-    }, 30 * 1000);
-    return () => clearInterval(interval);
+    selectedTaskIdRef.current = selectedTaskId;
   }, [selectedTaskId]);
+
+  /**
+   * patrol_tasks の Realtime 購読
+   * INSERT / UPDATE / DELETE が発生した瞬間にタスク一覧を再取得する
+   * selectedTaskId が変わってもチャネルを再接続しないよう Ref 経由で参照する
+   */
+  useEffect(() => {
+    if (!user?.id) {
+      return () => {};
+    }
+
+    const supabase = getSupabaseClient();
+    /** 画面単位の購読チャネル名（ユーザーIDで一意化） */
+    const channel = supabase.channel(`patrol_tasks_item12_${user.id}`);
+
+    channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'patrol_tasks' },
+      () => {
+        /** Ref 経由で最新の selectedTaskId を参照し、選択中タスクを維持しながら再取得 */
+        loadTasks(selectedTaskIdRef.current);
+      }
+    );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  /**
+   * 画面フォーカス復帰時・アプリ復帰時にタスク一覧を再取得する
+   * Realtime 接続が切れていた間の変更を確実に取り込む
+   * こちらも Ref 経由で selectedTaskId を参照し不要な再登録を防ぐ
+   */
+  useEffect(() => {
+    if (!user?.id) {
+      return () => {};
+    }
+
+    /** フォーカス復帰時の再取得ハンドラ */
+    const handleFocus = () => {
+      loadTasks(selectedTaskIdRef.current);
+    };
+
+    /** ナビゲーションフォーカスイベント */
+    const unsubscribeFocus = navigation?.addListener?.('focus', handleFocus) || (() => {});
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined') {
+      /** Web: タブ/ウィンドウがアクティブに戻ったときに再取得 */
+      const handleVisibilityChange = () => {
+        if (!document.hidden) {
+          loadTasks(selectedTaskIdRef.current);
+        }
+      };
+      window.addEventListener('focus', handleFocus);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+        unsubscribeFocus();
+        window.removeEventListener('focus', handleFocus);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+
+    /** ネイティブ: アプリがフォアグラウンドに戻ったときに再取得 */
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        loadTasks(selectedTaskIdRef.current);
+      }
+    });
+
+    return () => {
+      unsubscribeFocus();
+      appStateSubscription.remove();
+    };
+  }, [user?.id, navigation]);
+
+  /**
+   * フォールバックポーリング（60秒）
+   * RLS の設定によっては Realtime が届かない場合があるため、
+   * 念のため低頻度で再取得し変更の取り逃しを防ぐ
+   */
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadTasks(selectedTaskIdRef.current);
+    }, 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     loadTaskResults(selectedTaskId);
@@ -1002,6 +1166,39 @@ const Item12Screen = ({ navigation, route }) => {
   }, [initialTab]);
 
   /**
+   * 画面離脱・アプリバックグラウンド時に巡回中フラグを自動解除する
+   * isOnPatrol が true の状態で画面を閉じた場合でも本部側に残り続けないよう on_patrol = false にリセットする
+   */
+  useEffect(() => {
+    if (!user?.id) {
+      return () => {};
+    }
+
+    /** ナビゲーション離脱時にフラグをOFFにする */
+    const unsubscribeBlur = navigation?.addListener?.('blur', () => {
+      if (isOnPatrol) {
+        updatePatrolStatus(user.id, false).catch(() => {});
+        setIsOnPatrol(false);
+      }
+    }) || (() => {});
+
+    /** ネイティブ: アプリがバックグラウンドに移行したときもOFF */
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        if (isOnPatrol) {
+          updatePatrolStatus(user.id, false).catch(() => {});
+          setIsOnPatrol(false);
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeBlur();
+      appStateSubscription.remove();
+    };
+  }, [user?.id, navigation, isOnPatrol]);
+
+  /**
    * AsyncStorage から施錠確認サマリー表示設定を読み込む
    * HQKeyManagementPanel でONにした場合に巡回サポートにもサマリーを表示する
    */
@@ -1015,6 +1212,25 @@ const Item12Screen = ({ navigation, route }) => {
       }
     };
     loadLockCheckSetting();
+  }, []);
+
+  /**
+   * AsyncStorage から未巡回アラート閾値を読み込む
+   * 閾値は本部（SupportDeskScreen）が設定し、巡回サポートは読み取り専用として表示のみ行う
+   */
+  useEffect(() => {
+    const loadAlertMinutes = async () => {
+      try {
+        const value = await AsyncStorage.getItem(ASYNC_KEY_UNVISITED_ALERT_MINUTES);
+        const parsed = value ? parseInt(value, 10) : null;
+        if (Number.isFinite(parsed) && parsed > 0) {
+          setUnvisitedAlertMinutes(parsed);
+        }
+      } catch (e) {
+        console.warn('未巡回アラート閾値の読み込みに失敗:', e);
+      }
+    };
+    loadAlertMinutes();
   }, []);
 
   /**
@@ -1065,7 +1281,10 @@ const Item12Screen = ({ navigation, route }) => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         {/* ── タブコンテンツ ── */}
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[styles.content, isMobile && styles.contentMobile]}
+        >
           {pushNotice.isVisible ? (
             <WebPushStatusCard
               theme={theme}
@@ -1080,6 +1299,54 @@ const Item12Screen = ({ navigation, route }) => {
           {/* ダッシュボードタブ */}
           {activeTab === PATROL_TAB_TYPES.DASHBOARD && (
             <View style={[dashboardStyles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              {/* 巡回中トグル */}
+              <Pressable
+                style={[
+                  dashboardStyles.patrolToggle,
+                  {
+                    borderColor: isOnPatrol ? theme.success || '#22c55e' : theme.border,
+                    backgroundColor: isOnPatrol ? `${theme.success || '#22c55e'}18` : theme.background,
+                  },
+                ]}
+                onPress={handleTogglePatrolStatus}
+                disabled={isUpdatingPatrolStatus}
+              >
+                <View style={dashboardStyles.patrolToggleLeft}>
+                  <View
+                    style={[
+                      dashboardStyles.patrolToggleDot,
+                      {
+                        backgroundColor: isOnPatrol ? theme.success || '#22c55e' : theme.border,
+                      },
+                    ]}
+                  />
+                  <View>
+                    <Text
+                      style={[
+                        dashboardStyles.patrolToggleLabel,
+                        { color: isOnPatrol ? theme.success || '#22c55e' : theme.text },
+                      ]}
+                    >
+                      {isOnPatrol ? '巡回中' : '巡回していない'}
+                    </Text>
+                    <Text style={[dashboardStyles.patrolToggleHint, { color: theme.textSecondary }]}>
+                      {isOnPatrol ? '本部ダッシュボードに表示中' : 'タップして巡回開始を通知'}
+                    </Text>
+                  </View>
+                </View>
+                <Text
+                  style={[
+                    dashboardStyles.patrolToggleButton,
+                    {
+                      color: isOnPatrol ? theme.success || '#22c55e' : theme.textSecondary,
+                      borderColor: isOnPatrol ? theme.success || '#22c55e' : theme.border,
+                    },
+                  ]}
+                >
+                  {isUpdatingPatrolStatus ? '...' : isOnPatrol ? 'OFF' : 'ON'}
+                </Text>
+              </Pressable>
+
               <View style={dashboardStyles.header}>
                 <View style={dashboardStyles.headerTextBlock}>
                   <Text style={[dashboardStyles.title, { color: theme.text }]}>ダッシュボード</Text>
@@ -1248,8 +1515,10 @@ const Item12Screen = ({ navigation, route }) => {
                   onChangePatrolMemo={setPatrolMemo}
                   isSubmitting={isSubmitting}
                   canAccept={canAccept}
+                  hasAnyActiveTask={hasAnyActiveTask}
                   canComplete={canComplete}
                   onAcceptTask={handleAcceptTask}
+                  onRejectTask={handleRejectTask}
                   onCompleteTask={handleCompleteTask}
                   onSendMemoOnly={handleSendMemoOnly}
                   taskResults={taskResults}
@@ -1290,161 +1559,12 @@ const Item12Screen = ({ navigation, route }) => {
                 unvisitedLocations={unvisitedLocations}
                 isLoadingUnvisitedLocations={isLoadingUnvisitedLocations}
                 unvisitedAlertMinutes={unvisitedAlertMinutes}
-                onChangeAlertMinutes={setUnvisitedAlertMinutes}
                 onRefresh={loadUnvisitedAlerts}
               />
             </>
           )}
 
           {/* 企画一覧タブ */}
-          {activeTab === PATROL_TAB_TYPES.EVENT_ORGS && (
-            <View style={[eventOrgStyles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <View style={eventOrgStyles.header}>
-                <Text style={[eventOrgStyles.title, { color: theme.text }]}>企画一覧</Text>
-                <Pressable
-                  style={[eventOrgStyles.refreshButton, { borderColor: theme.border }]}
-                  onPress={loadOrganizationEvents}
-                >
-                  <Text style={[eventOrgStyles.refreshButtonText, { color: theme.textSecondary }]}>
-                    {isLoadingOrganizationEvents ? '読込中...' : '更新'}
-                  </Text>
-                </Pressable>
-              </View>
-              <Text style={[eventOrgStyles.helpText, { color: theme.textSecondary }]}>
-                organizations_events の団体別企画一覧です。団体を選ぶと対象企画だけ確認できます。
-              </Text>
-
-              {/* 団体候補検索バー */}
-              <TextInput
-                value={organizationEventSearch}
-                onChangeText={handleOrganizationEventSearchChange}
-                onFocus={() => setIsOrganizationEventDropdownOpen(true)}
-                placeholder="団体名を入力して候補を絞り込み..."
-                placeholderTextColor={theme.textSecondary}
-                style={[
-                  eventOrgStyles.searchInput,
-                  { borderColor: theme.border, backgroundColor: theme.background, color: theme.text },
-                ]}
-              />
-
-              <View
-                style={[
-                  eventOrgStyles.selectedSummaryCard,
-                  { borderColor: theme.border, backgroundColor: theme.background },
-                ]}
-              >
-                <View style={eventOrgStyles.selectedSummaryContent}>
-                  <Text style={[eventOrgStyles.selectedSummaryLabel, { color: theme.textSecondary }]}>
-                    選択中の団体
-                  </Text>
-                  <Text style={[eventOrgStyles.selectedSummaryValue, { color: theme.text }]}>
-                    {selectedOrganizationEventLabel}
-                  </Text>
-                </View>
-                <Pressable
-                  style={[eventOrgStyles.inlineActionButton, { borderColor: theme.border }]}
-                  onPress={handleOrganizationEventReset}
-                >
-                  <Text style={[eventOrgStyles.inlineActionButtonText, { color: theme.textSecondary }]}>
-                    すべて表示
-                  </Text>
-                </Pressable>
-              </View>
-
-              {isOrganizationEventDropdownOpen ? (
-                <View
-                  style={[
-                    eventOrgStyles.dropdownOptionList,
-                    { borderColor: theme.border, backgroundColor: theme.background },
-                  ]}
-                >
-                  {filteredOrganizationEventOptions.length === 0 ? (
-                    <Text style={[eventOrgStyles.helpText, { color: theme.textSecondary }]}>
-                      該当する団体候補がありません
-                    </Text>
-                  ) : (
-                    <>
-                      {visibleOrganizationEventOptions.map((option) => {
-                        /** 選択中団体かどうか */
-                        const isSelected = option.value === selectedOrganizationEvent;
-
-                        return (
-                          <Pressable
-                            key={option.value}
-                            onPress={() => handleOrganizationEventSelect(option.value)}
-                            style={[
-                              eventOrgStyles.dropdownOptionItem,
-                              {
-                                borderColor: theme.border,
-                                backgroundColor: isSelected ? theme.primary : theme.surface,
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                eventOrgStyles.dropdownOptionTitle,
-                                { color: isSelected ? '#FFFFFF' : theme.text },
-                              ]}
-                            >
-                              {option.label}
-                            </Text>
-                            <Text
-                              style={[
-                                eventOrgStyles.dropdownOptionMeta,
-                                { color: isSelected ? 'rgba(255,255,255,0.86)' : theme.textSecondary },
-                              ]}
-                            >
-                              企画 {option.count} 件
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-
-                      {filteredOrganizationEventOptions.length > visibleOrganizationEventOptions.length ? (
-                        <Text style={[eventOrgStyles.dropdownOverflowText, { color: theme.textSecondary }]}>
-                          ほか {filteredOrganizationEventOptions.length - visibleOrganizationEventOptions.length} 件あります。さらに入力すると絞り込めます。
-                        </Text>
-                      ) : null}
-                    </>
-                  )}
-                </View>
-              ) : null}
-
-              {isLoadingOrganizationEvents ? (
-                <Text style={[eventOrgStyles.emptyText, { color: theme.textSecondary }]}>読み込み中...</Text>
-              ) : organizationEvents.length === 0 ? (
-                <Text style={[eventOrgStyles.emptyText, { color: theme.textSecondary }]}>
-                  団体別企画データがありません
-                </Text>
-              ) : filteredOrganizationEvents.length === 0 ? (
-                <Text style={[eventOrgStyles.emptyText, { color: theme.textSecondary }]}>
-                  該当する企画がありません
-                </Text>
-              ) : (
-                <View style={eventOrgStyles.list}>
-                  {filteredOrganizationEvents.map((item) => (
-                    <View
-                      key={`${item.id}-${item.organization_name}-${item.event_name}`}
-                      style={[eventOrgStyles.item, { borderColor: theme.border, backgroundColor: theme.background }]}
-                    >
-                      <Text style={[eventOrgStyles.itemMeta, { color: theme.textSecondary }]}>
-                        {item.organization_name || '団体名未設定'}
-                      </Text>
-                      <Text style={[eventOrgStyles.itemName, { color: theme.text }]}>
-                        {item.event_name || '企画名未設定'}
-                      </Text>
-                      {item.sheet_name ? (
-                        <Text style={[eventOrgStyles.itemSubText, { color: theme.textSecondary }]}>
-                          シート: {item.sheet_name}
-                        </Text>
-                      ) : null}
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-          )}
-
         </ScrollView>
 
         {/* ── トースト通知（タブバーの上に浮かせる） ── */}
@@ -1456,7 +1576,7 @@ const Item12Screen = ({ navigation, route }) => {
         />
 
         {/* ── 下部 iOS タブバー ── */}
-        <View style={[styles.bottomArea, { borderTopColor: theme.border, backgroundColor: theme.background }]}>
+        <View style={[styles.bottomArea, isMobile && styles.bottomAreaMobile, { borderTopColor: theme.border, backgroundColor: theme.background }]}>
           <View style={[styles.iosTabBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             {PATROL_TABS.map((tab) => {
               /** アクティブタブかどうか */
@@ -1466,6 +1586,7 @@ const Item12Screen = ({ navigation, route }) => {
                   key={tab.key}
                   style={[
                     styles.tabButton,
+                    isMobile && styles.tabButtonMobile,
                     isActive && [
                       styles.tabButtonActive,
                       { backgroundColor: theme.background, borderColor: theme.border },
@@ -1473,10 +1594,11 @@ const Item12Screen = ({ navigation, route }) => {
                   ]}
                   onPress={() => setActiveTab(tab.key)}
                 >
-                  <Text style={styles.tabButtonIcon}>{tab.icon}</Text>
+                  <Text style={[styles.tabButtonIcon, isMobile && styles.tabButtonIconMobile]}>{tab.icon}</Text>
                   <Text
                     style={[
                       styles.tabButtonText,
+                      isMobile && styles.tabButtonTextMobile,
                       { color: isActive ? theme.text : theme.textSecondary },
                     ]}
                   >
@@ -1522,6 +1644,45 @@ const dashboardStyles = StyleSheet.create({
     borderWidth: 1,
     padding: 16,
     gap: 12,
+  },
+  /** 巡回中トグルカード */
+  patrolToggle: {
+    borderWidth: 2,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  patrolToggleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  /** 状態インジケーター（丸） */
+  patrolToggleDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  patrolToggleLabel: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  patrolToggleHint: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  patrolToggleButton: {
+    fontSize: 13,
+    fontWeight: '800',
+    borderWidth: 2,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
   },
   header: {
     flexDirection: 'row',
@@ -1767,12 +1928,24 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     gap: 12,
   },
+  /** スマホ向け: 横余白を減らしてコンテンツを広く使う */
+  contentMobile: {
+    padding: 8,
+    paddingBottom: 24,
+    gap: 8,
+  },
   /** 下部タブバーエリア */
   bottomArea: {
     borderTopWidth: 1,
     paddingHorizontal: 14,
     paddingTop: 10,
     paddingBottom: 14,
+  },
+  /** スマホ向けタブバーエリア: 余白を小さく */
+  bottomAreaMobile: {
+    paddingHorizontal: 6,
+    paddingTop: 6,
+    paddingBottom: 10,
   },
   /** iOS スタイルのタブバー pill */
   iosTabBar: {
@@ -1791,6 +1964,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
   },
+  /** スマホ向けタブボタン: 高さを小さく */
+  tabButtonMobile: {
+    minHeight: 50,
+    paddingVertical: 6,
+    gap: 2,
+  },
   tabButtonActive: {
     borderWidth: 1,
     shadowColor: '#000000',
@@ -1802,10 +1981,18 @@ const styles = StyleSheet.create({
   tabButtonIcon: {
     fontSize: 17,
   },
+  /** スマホ向けアイコン: 少し小さく */
+  tabButtonIconMobile: {
+    fontSize: 15,
+  },
   tabButtonText: {
     fontSize: 11,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  /** スマホ向けタブテキスト: さらに小さく */
+  tabButtonTextMobile: {
+    fontSize: 10,
   },
 });
 
