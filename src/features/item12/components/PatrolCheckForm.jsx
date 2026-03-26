@@ -1,6 +1,6 @@
 /**
  * 定常巡回チェックフォームコンポーネント
- * organizations_events を巡回対象として選び、設問ごとの回答と項目別メモを記録する
+ * 本部評価と同じ企画マスタを巡回対象として選び、設問ごとの回答と項目別メモを記録する
  */
 
 import React, { useMemo, useState } from 'react';
@@ -107,7 +107,7 @@ const normalizeHistoryCheckItems = (value) => {
  * 定常巡回チェックフォームコンポーネント
  * @param {Object} props - コンポーネントプロパティ
  * @param {Object} props.theme - テーマオブジェクト
- * @param {Array} props.patrolLocations - 巡回対象候補配列（organizations_events）
+ * @param {Array} props.patrolLocations - 巡回対象候補配列（events ベース）
  * @param {string} props.selectedPatrolLocationId - 選択中企画ID
  * @param {Function} props.onSelectLocation - 企画選択コールバック
  * @param {string} props.patrolLocationText - 選択中企画表示文字列

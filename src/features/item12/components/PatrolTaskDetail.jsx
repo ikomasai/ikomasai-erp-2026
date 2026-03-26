@@ -14,12 +14,18 @@ import {
   View,
 } from 'react-native';
 import {
+  getEvaluationPatrolTaskItemName,
+  getPatrolTaskDisplayType,
   PATROL_RESULT_CODES,
+  PATROL_TASK_DISPLAY_TYPES,
   PATROL_TASK_STATUSES,
   PATROL_TASK_TYPES,
 } from '../../../services/supabase/patrolTaskService';
 import SkeletonLoader from '../../../shared/components/SkeletonLoader';
 import EmptyState from '../../../shared/components/EmptyState';
+
+/** 表示専用の評価タスクラベル */
+const EVALUATION_TASK_LABEL = '企画評価';
 
 /** タスク種別表示名 */
 const TASK_TYPE_LABELS = {
@@ -110,6 +116,9 @@ const PatrolTaskDetail = ({
   const locationLabel = selectedTask.event_location || selectedTask.location_text || '場所未設定';
   /** 自分がこのタスクの担当者かどうか */
   const isAssignedToMe = selectedTask.assigned_to && selectedTask.assigned_to === user?.id;
+  const evaluationItemName = getEvaluationPatrolTaskItemName(selectedTask);
+  const isEvaluationTask = getPatrolTaskDisplayType(selectedTask) === PATROL_TASK_DISPLAY_TYPES.EVALUATION;
+  const taskTypeLabel = isEvaluationTask ? EVALUATION_TASK_LABEL : TASK_TYPE_LABELS[selectedTask.task_type] || selectedTask.task_type;
 
   return (
     <View style={[styles.card, isMobile && styles.cardMobile, { backgroundColor: theme.surface }]}>
@@ -146,7 +155,7 @@ const PatrolTaskDetail = ({
             ]}
           >
             <Text style={[styles.focusBadgeText, { color: theme.primary }]}>
-              {TASK_TYPE_LABELS[selectedTask.task_type] || selectedTask.task_type}
+              {taskTypeLabel}
             </Text>
           </View>
           {selectedTask.source_ticket_id ? (
@@ -254,7 +263,12 @@ const PatrolTaskDetail = ({
       >
         <Text style={[styles.label, { color: theme.text }]}>指示メモ</Text>
         {/* 施錠確認タスクの場合は鍵名を目立つように強調表示する */}
-        {selectedTask.task_type === PATROL_TASK_TYPES.LOCK_CHECK && selectedTask.notes ? (
+        {isEvaluationTask && evaluationItemName ? (
+          <View>
+            <Text style={[styles.requestBody, { color: theme.textSecondary }]}>評価項目</Text>
+            <Text style={[styles.keyLabelHighlight, { color: theme.text }]}>{evaluationItemName}</Text>
+          </View>
+        ) : selectedTask.task_type === PATROL_TASK_TYPES.LOCK_CHECK && selectedTask.notes ? (
           (() => {
             /** notes が "鍵返却後の施錠確認: [鍵ラベル]" 形式かチェック */
             const colonIndex = selectedTask.notes.indexOf(':');

@@ -44,19 +44,17 @@ import { createRadioLog, listRadioLogs } from '../../../services/supabase/radioL
 import {
   assignPatrolTask,
   createDispatchPatrolTask,
+  createEvaluationPatrolTask,
+  getEvaluationPatrolTaskItemName,
+  getPatrolTaskDisplayType,
   listPatrolTasks,
   listPatrolTasksForStats,
+  PATROL_TASK_DISPLAY_TYPES,
   updatePatrolTaskNotes,
   PATROL_TASK_STATUSES,
   PATROL_TASK_TYPES,
 } from '../../../services/supabase/patrolTaskService';
-import {
-  EVALUATION_STATUSES,
-  createEvaluationCheck,
-  listAllEvaluationChecks,
-  listEvaluationChecks,
-  reviewEvaluationCheck,
-} from '../../../services/supabase/evaluationService';
+import { selectEventsForEvaluation } from '../../../services/supabase/eventService';
 import { notifySupportTicketCreated } from '../../../shared/services/supportWorkflowNotificationService';
 import {
   getRoles,
@@ -322,13 +320,7 @@ const PATROL_TASK_TYPE_LABELS = {
   emergency_support: '緊急対応',
   routine_patrol: '定常巡回',
   other: 'その他',
-};
-
-const EVALUATION_STATUS_LABELS = {
-  [EVALUATION_STATUSES.PENDING]: '承認待ち',
-  [EVALUATION_STATUSES.APPROVED]: '承認済み',
-  [EVALUATION_STATUSES.REJECTED]: '却下',
-  [EVALUATION_STATUSES.REWORK]: '差戻し',
+  [PATROL_TASK_DISPLAY_TYPES.EVALUATION]: '企画評価',
 };
 
 const PATROL_ROLE_NAMES = ['企画管理部'];
@@ -481,6 +473,17 @@ const getElapsedAlertInfo = (createdAt, ticketStatus) => {
 };
 
 const normalizeText = (value) => (value || '').trim();
+
+/**
+ * 巡回タスクの種別表示名を返す
+ * @param {Object|null|undefined} task - 巡回タスク
+ * @returns {string} 表示用種別名
+ */
+const getPatrolTaskTypeLabel = (task) => {
+  /** 表示用種別 */
+  const displayType = getPatrolTaskDisplayType(task);
+  return PATROL_TASK_TYPE_LABELS[displayType] || task?.task_type || '巡回タスク';
+};
 const formatFileSize = (fileSizeBytes) => {
   const size = Number(fileSizeBytes);
   if (!Number.isFinite(size) || size < 0) {
@@ -645,9 +648,6 @@ const SupportDeskScreen = ({
   /** メモ保存中フラグ */
   const [isSavingPatrolTaskNote, setIsSavingPatrolTaskNote] = useState(false);
 
-  const [pendingEvaluations, setPendingEvaluations] = useState([]);
-  const [isLoadingPendingEvaluations, setIsLoadingPendingEvaluations] = useState(false);
-  const [isReviewingEvaluation, setIsReviewingEvaluation] = useState(false);
   const [isRenotifying, setIsRenotifying] = useState(false);
 
   /** 巡回対応履歴（完了・取消済みタスク） */
@@ -703,7 +703,7 @@ const SupportDeskScreen = ({
   /** 概況ダッシュボード: 施錠確認の確認状況フィルター */
   const [overviewLockConfirmationFilter, setOverviewLockConfirmationFilter] = useState('all');
 
-  /** 団体別企画一覧（organizations_events）- HQ向け */
+  /** 団体別企画一覧（events ベースの統一企画マスタ）- HQ向け */
   const [hqOrganizationEvents, setHqOrganizationEvents] = useState([]);
   /** 団体別企画一覧読み込み中フラグ */
   const [isLoadingHqOrganizationEvents, setIsLoadingHqOrganizationEvents] = useState(false);
@@ -713,6 +713,10 @@ const SupportDeskScreen = ({
   const [selectedHqOrganizationEvent, setSelectedHqOrganizationEvent] = useState(ALL_ORGANIZATION_EVENT_FILTER);
   /** HQ企画一覧の団体候補表示フラグ */
   const [isHqOrganizationEventDropdownOpen, setIsHqOrganizationEventDropdownOpen] = useState(false);
+  /** 評価タブ向け企画一覧（events, UUIDベース） */
+  const [hqEvaluationEvents, setHqEvaluationEvents] = useState([]);
+  /** 評価タブ向け企画一覧読み込み中フラグ */
+  const [isLoadingHqEvaluationEvents, setIsLoadingHqEvaluationEvents] = useState(false);
   /** 企画ID別の定常巡回チェック履歴マップ（locationId → 配列） */
   const [patrolChecksByLocation, setPatrolChecksByLocation] = useState({});
   /** 企画別巡回チェック読み込み中フラグ */
@@ -768,7 +772,7 @@ const SupportDeskScreen = ({
   const [hqUnvisitedAlertMinutes, setHqUnvisitedAlertMinutes] = useState(90);
   /**
    * 評価項目リスト（本部が設定、AsyncStorage に保存）
-   * 評価タスク生成時にこの項目ごとに evaluation_checks レコードを作成する
+   * 評価タスク生成時は、この一覧を1件の企画評価タスクへまとめて保存する
    */
   const [evaluationItems, setEvaluationItems] = useState(DEFAULT_EVALUATION_ITEMS);
   /** 評価項目の追加入力欄 */
@@ -1207,6 +1211,19 @@ const SupportDeskScreen = ({
     return hqPatrolTasks.find((task) => task.id === selectedPatrolTaskId) || null;
   }, [hqPatrolTasks, selectedPatrolTaskId]);
 
+  /** 現在未完了の評価タスク一覧 */
+  const activeEvaluationTasks = useMemo(() => {
+    return hqPatrolTasks.filter((task) => getPatrolTaskDisplayType(task) === PATROL_TASK_DISPLAY_TYPES.EVALUATION);
+  }, [hqPatrolTasks]);
+
+  /** 評価項目一覧を1件のタスク表示用に連結した文字列 */
+  const evaluationTaskItemLabel = useMemo(() => {
+    return evaluationItems
+      .map((item) => normalizeText(item))
+      .filter(Boolean)
+      .join(' / ');
+  }, [evaluationItems]);
+
   const dashboardSummary = useMemo(() => {
     const now = Date.now();
     const delayedMinutes = 60;
@@ -1440,7 +1457,7 @@ const SupportDeskScreen = ({
 
   /**
    * 現在選択中の企画に対して評価タスクを生成する
-   * 評価項目ごとに 1 件の evaluation_checks レコードを作成する
+   * 評価項目ごとに 1 件の巡回サポート用 patrol_tasks レコードを作成する
    * @param {string} eventId - 対象企画ID
    * @param {string} eventName - 対象企画名（ログ・表示用）
    * @returns {Promise<void>} 生成処理
@@ -1458,28 +1475,43 @@ const SupportDeskScreen = ({
       showMessage('エラー', '評価対象の企画を選択してください');
       return;
     }
-
-    setIsCreatingEvaluationTasks(true);
-    /** 評価項目ごとに evaluation_checks レコードを作成する */
-    const results = await Promise.all(
-      evaluationItems.map((itemName) =>
-        createEvaluationCheck({
-          evaluatorId: user.id,
-          eventId,
-          score: null,
-          comment: itemName,
-        })
-      )
-    );
-    setIsCreatingEvaluationTasks(false);
-
-    const hasError = results.some((r) => r.error);
-    if (hasError) {
-      showMessage('生成エラー', '一部の評価タスクの作成に失敗しました');
+    if (activeEvaluationTasks.length > 0) {
+      showMessage('生成不可', '未完了の評価タスクが残っているため、新しい評価タスクは生成できません');
       return;
     }
-    showMessage('生成完了', `「${eventName}」の評価タスク ${evaluationItems.length}件を作成しました`);
-    await loadPendingEvaluations();
+    if (!evaluationTaskItemLabel) {
+      showMessage('エラー', '有効な評価項目が設定されていません');
+      return;
+    }
+
+    /** 選択された企画レコード */
+    const targetEvent = (hqEvaluationEvents || []).find((event) => String(event.id) === String(eventId));
+    /** 表示・保存用企画名 */
+    const targetEventName = targetEvent?.eventName || targetEvent?.event_name || targetEvent?.name || eventName;
+    /** 保存用企画場所 */
+    const targetEventLocation =
+      targetEvent?.locationName || targetEvent?.location_name || targetEvent?.event_location || targetEvent?.location || null;
+
+    setIsCreatingEvaluationTasks(true);
+    /** 企画ごとに評価項目をまとめた評価タスクを1件だけ作成する */
+    const results = await Promise.all([
+      createEvaluationPatrolTask({
+        eventName: targetEventName,
+        eventLocation: targetEventLocation,
+        evaluationItemName: evaluationTaskItemLabel,
+        creatorUserId: user.id,
+      }),
+    ]);
+    setIsCreatingEvaluationTasks(false);
+
+    /** 失敗した最初のエラー */
+    const firstError = results.find((result) => result.error)?.error;
+    if (firstError) {
+      showMessage('生成エラー', firstError.message || '巡回サポート用の評価タスク作成に失敗しました');
+      return;
+    }
+    showMessage('生成完了', `「${targetEventName}」の評価タスク 1件を巡回サポートへ作成しました`);
+    await loadHqPatrolTasks();
   };
 
   /**
@@ -1517,28 +1549,44 @@ const SupportDeskScreen = ({
       showMessage('エラー', '評価対象の企画を1件以上選択してください');
       return;
     }
+    if (activeEvaluationTasks.length > 0) {
+      showMessage('生成不可', '未完了の評価タスクが残っているため、新しい評価タスクは生成できません');
+      return;
+    }
+    if (!evaluationTaskItemLabel) {
+      showMessage('エラー', '有効な評価項目が設定されていません');
+      return;
+    }
+
+    /** 選択中の企画レコード一覧 */
+    const selectedEvents = (hqEvaluationEvents || []).filter((event) => selectedEvalEventIds.has(String(event.id)));
+    if (selectedEvents.length === 0) {
+      showMessage('エラー', '評価対象の企画情報を再読み込みしてください');
+      return;
+    }
 
     setIsCreatingEvaluationTasks(true);
+    /** メッセージ表示用に現在の選択件数を保持 */
+    const selectedEventCount = selectedEvents.length;
 
-    /** 選択企画ごとに各評価項目のレコードを作成 */
+    /** 選択企画ごとに、評価項目をまとめた巡回評価タスクを1件ずつ作成 */
     const allResults = await Promise.all(
-      Array.from(selectedEvalEventIds).flatMap((eventId) =>
-        evaluationItems.map((itemName) =>
-          createEvaluationCheck({
-            evaluatorId: user.id,
-            eventId,
-            score: null,
-            comment: itemName,
-          })
-        )
+      selectedEvents.map((event) =>
+        createEvaluationPatrolTask({
+          eventName: event.eventName || event.event_name || event.name || '企画名未設定',
+          eventLocation: event.locationName || event.location_name || event.event_location || event.location || null,
+          evaluationItemName: evaluationTaskItemLabel,
+          creatorUserId: user.id,
+        })
       )
     );
 
     setIsCreatingEvaluationTasks(false);
 
-    const hasError = allResults.some((r) => r.error);
-    if (hasError) {
-      showMessage('生成エラー', '一部の評価タスクの作成に失敗しました');
+    /** 失敗した最初のエラー */
+    const firstError = allResults.find((result) => result.error)?.error;
+    if (firstError) {
+      showMessage('生成エラー', firstError.message || '巡回サポート用の評価タスク作成に失敗しました');
       return;
     }
 
@@ -1546,9 +1594,9 @@ const SupportDeskScreen = ({
     setSelectedEvalEventIds(new Set());
     showMessage(
       '生成完了',
-      `${selectedEvalEventIds.size}件の企画に評価タスク（各${evaluationItems.length}項目）を作成しました`
+      `${selectedEventCount}件の企画に、評価項目をまとめた評価タスクを巡回サポートへ作成しました`
     );
-    await loadPendingEvaluations();
+    await loadHqPatrolTasks();
   };
 
   /**
@@ -1563,28 +1611,49 @@ const SupportDeskScreen = ({
     }
 
     showMessage('取得中', '評価データを取得しています...');
-    const { data, error } = await listAllEvaluationChecks({ limit: 500 });
+    const { data: patrolTasks, error } = await listPatrolTasks({
+      taskTypes: [PATROL_TASK_TYPES.OTHER],
+      limit: 500,
+    });
 
     if (error) {
       showMessage('取得エラー', '評価データの取得に失敗しました');
       return;
     }
 
-    if (data.length === 0) {
+    /** 評価タスクだけを抽出 */
+    const evaluationTasks = (patrolTasks || []).filter((task) => getPatrolTaskDisplayType(task) === PATROL_TASK_DISPLAY_TYPES.EVALUATION);
+    if (evaluationTasks.length === 0) {
       showMessage('データなし', '出力できる評価データがありません');
       return;
     }
 
-    /** ステータス日本語マップ */
-    const statusLabels = {
-      pending: '承認待ち',
-      approved: '承認済み',
-      rejected: '却下',
-      rework: '差戻し',
-    };
+    /** 評価タスクID一覧 */
+    const taskIds = evaluationTasks.map((task) => task.id).filter(Boolean);
+    /** タスクIDごとの最新結果マップ */
+    const latestResultMap = {};
+
+    if (taskIds.length > 0) {
+      const { data: taskResults, error: taskResultsError } = await getSupabaseClient()
+        .from('patrol_task_results')
+        .select('task_id,result_code,memo,created_at,created_by')
+        .in('task_id', taskIds)
+        .order('created_at', { ascending: false });
+
+      if (taskResultsError) {
+        showMessage('取得エラー', '評価タスク結果の取得に失敗しました');
+        return;
+      }
+
+      (taskResults || []).forEach((result) => {
+        if (!latestResultMap[result.task_id]) {
+          latestResultMap[result.task_id] = result;
+        }
+      });
+    }
 
     /** CSVヘッダー行 */
-    const headers = ['ID', '企画ID', '評価者ID', 'ステータス', 'スコア', 'コメント', 'レビュー担当', 'レビュー日時', '作成日時'];
+    const headers = ['タスクID', '企画名', '場所', '評価項目', 'タスク状態', '担当者ID', '最新結果', '最新メモ', '結果記録者', '結果記録日時', '作成日時'];
 
     /**
      * CSV用に値をエスケープする
@@ -1604,17 +1673,23 @@ const SupportDeskScreen = ({
     };
 
     /** データ行配列 */
-    const rows = data.map((evaluation) => [
-      escapeCsvValue(evaluation.id),
-      escapeCsvValue(evaluation.event_id || ''),
-      escapeCsvValue(evaluation.evaluator_id || ''),
-      escapeCsvValue(statusLabels[evaluation.evaluation_status] || evaluation.evaluation_status || ''),
-      escapeCsvValue(evaluation.score || ''),
-      escapeCsvValue(evaluation.comment || ''),
-      escapeCsvValue(evaluation.reviewed_by || ''),
-      escapeCsvValue(evaluation.reviewed_at ? new Date(evaluation.reviewed_at).toLocaleString('ja-JP') : ''),
-      escapeCsvValue(new Date(evaluation.created_at).toLocaleString('ja-JP')),
-    ]);
+    const rows = evaluationTasks.map((task) => {
+      /** 最新の結果レコード */
+      const latestResult = latestResultMap[task.id] || null;
+      return [
+        escapeCsvValue(task.id),
+        escapeCsvValue(task.event_name || ''),
+        escapeCsvValue(task.event_location || task.location_text || ''),
+        escapeCsvValue(getEvaluationPatrolTaskItemName(task)),
+        escapeCsvValue(PATROL_TASK_STATUS_LABELS[task.task_status] || task.task_status || ''),
+        escapeCsvValue(task.assigned_to || ''),
+        escapeCsvValue(latestResult?.result_code || ''),
+        escapeCsvValue(latestResult?.memo || ''),
+        escapeCsvValue(latestResult?.created_by || ''),
+        escapeCsvValue(latestResult?.created_at ? new Date(latestResult.created_at).toLocaleString('ja-JP') : ''),
+        escapeCsvValue(new Date(task.created_at).toLocaleString('ja-JP')),
+      ];
+    });
 
     /** BOM付きCSV文字列（Excel日本語対応） */
     const csvContent =
@@ -1632,7 +1707,7 @@ const SupportDeskScreen = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    showMessage('出力完了', `${data.length}件の評価データをCSVでダウンロードしました`);
+    showMessage('出力完了', `${evaluationTasks.length}件の評価タスクデータをCSVでダウンロードしました`);
   };
 
   /**
@@ -2274,30 +2349,6 @@ const SupportDeskScreen = ({
   };
 
   /**
-   * HQ向け評価承認一覧を取得
-   * @returns {Promise<void>} 取得処理
-   */
-  const loadPendingEvaluations = async () => {
-    if (!isHQRole) {
-      return;
-    }
-
-    setIsLoadingPendingEvaluations(true);
-    const { data, error } = await listEvaluationChecks({
-      statuses: [EVALUATION_STATUSES.PENDING, EVALUATION_STATUSES.REWORK],
-      limit: 60,
-    });
-    setIsLoadingPendingEvaluations(false);
-
-    if (error) {
-      console.error('評価承認一覧取得に失敗:', error);
-      return;
-    }
-
-    setPendingEvaluations(data || []);
-  };
-
-  /**
    * 巡回対応履歴を取得（完了・取消済みタスク + 担当者名解決）
    * @returns {Promise<void>} 取得処理
    */
@@ -2334,54 +2385,6 @@ const SupportDeskScreen = ({
       profileMap[p.user_id] = p.name || p.user_id;
     });
     setPatrolHistoryProfileMap(profileMap);
-  };
-
-  /**
-   * 評価承認状態を更新
-   * @param {string} evaluationId - 評価ID
-   * @param {'approved'|'rejected'|'rework'} nextStatus - 更新状態
-   * @returns {Promise<void>} 更新処理
-   */
-  const handleReviewEvaluation = async (evaluationId, nextStatus) => {
-    if (!user?.id) {
-      showMessage('更新エラー', 'ログイン情報が取得できません');
-      return;
-    }
-
-    /** 確認ダイアログを表示 */
-    const statusLabel = EVALUATION_STATUS_LABELS[nextStatus] || nextStatus;
-    const confirmMessage = `評価を「${statusLabel}」に更新しますか？`;
-    if (Platform.OS === 'web') {
-      if (!window.confirm(confirmMessage)) {
-        return;
-      }
-    } else {
-      const confirmed = await new Promise((resolve) => {
-        Alert.alert('確認', confirmMessage, [
-          { text: 'キャンセル', style: 'cancel', onPress: () => resolve(false) },
-          { text: '更新', onPress: () => resolve(true) },
-        ]);
-      });
-      if (!confirmed) {
-        return;
-      }
-    }
-
-    setIsReviewingEvaluation(true);
-    const { error } = await reviewEvaluationCheck({
-      evaluationId,
-      status: nextStatus,
-      reviewedBy: user.id,
-    });
-    setIsReviewingEvaluation(false);
-
-    if (error) {
-      showMessage('更新エラー', error.message || '評価承認の更新に失敗しました');
-      return;
-    }
-
-    await loadPendingEvaluations();
-    showMessage('更新完了', '評価承認状態を更新しました');
   };
 
   /**
@@ -2438,6 +2441,28 @@ const SupportDeskScreen = ({
   };
 
   /**
+   * 評価タブ向け企画一覧を取得
+   * 表示用IDではなく events.id (UUID) ベースで評価対象企画を選べるようにする
+   * @returns {Promise<void>} 取得処理
+   */
+  const loadHqEvaluationEvents = async () => {
+    if (!isHQRole) {
+      return;
+    }
+
+    setIsLoadingHqEvaluationEvents(true);
+    const { data, error } = await selectEventsForEvaluation({ limit: 200 });
+    setIsLoadingHqEvaluationEvents(false);
+
+    if (error) {
+      console.error('評価対象企画取得に失敗:', error);
+      return;
+    }
+
+    setHqEvaluationEvents(data || []);
+  };
+
+  /**
    * 企画別定常巡回チェック履歴を取得（本部：企画一覧タブ用）
    * @returns {Promise<void>} 取得処理
    */
@@ -2487,9 +2512,9 @@ const SupportDeskScreen = ({
     loadRadioLogs();
     loadHqPatrolTasks();
     loadPatrolAssignees();
-    loadPendingEvaluations();
     loadPatrolHistory();
     loadHqOrganizationEvents();
+    loadHqEvaluationEvents();
     loadPatrolChecksByLocation();
     loadPrizeDistributions();
     loadTaskStats();
@@ -3300,7 +3325,7 @@ const SupportDeskScreen = ({
                           <Text style={[styles.dashboardPatrolTaskType, {
                             color: PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary,
                           }]}>
-                            {PATROL_TASK_TYPE_LABELS[latestTask.task_type] || latestTask.task_type}
+                            {getPatrolTaskTypeLabel(latestTask)}
                           </Text>
                           <Text style={[styles.dashboardPatrolTaskEvent, {
                             color: PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary,
@@ -3494,7 +3519,7 @@ const SupportDeskScreen = ({
                               </Text>
                             </View>
                             <Text style={[styles.overviewTaskType, { color: theme.text }]}>
-                              {PATROL_TASK_TYPE_LABELS[task.task_type] || task.task_type}
+                              {getPatrolTaskTypeLabel(task)}
                             </Text>
                           </View>
                           <Text style={[styles.overviewTaskLocation, { color: theme.text }]} numberOfLines={1}>
@@ -3681,7 +3706,7 @@ const SupportDeskScreen = ({
               </TouchableOpacity>
             </View>
             <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-              organizations_events の団体別企画一覧です。団体を選ぶと対象企画だけ確認できます。
+              評価タブや定常巡回チェックと同じ企画マスタ一覧です。団体を選ぶと対象企画だけ確認できます。
             </Text>
 
             {/* 団体候補検索バー */}
@@ -3954,7 +3979,7 @@ const SupportDeskScreen = ({
                     >
                       <Pressable style={styles.patrolTaskItemContent} onPress={() => setSelectedPatrolTaskId(task.id)}>
                         <Text style={[styles.ticketTitle, { color: theme.text }]} numberOfLines={1}>
-                          {PATROL_TASK_TYPE_LABELS[task.task_type] || task.task_type}
+                          {getPatrolTaskTypeLabel(task)}
                         </Text>
                         <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
                           {task.event_name || '-'} / {task.event_location || task.location_text || '-'}
@@ -4035,7 +4060,7 @@ const SupportDeskScreen = ({
                       </Text>
                       {group.tasks.map((task) => {
                         /** タスク種別ラベル */
-                        const typeLabel = PATROL_TASK_TYPE_LABELS[task.task_type] || task.task_type;
+                        const typeLabel = getPatrolTaskTypeLabel(task);
                         /** ステータスラベル */
                         const statusLabel = PATROL_TASK_STATUS_LABELS[task.task_status] || task.task_status;
                         return (
@@ -4173,7 +4198,7 @@ const SupportDeskScreen = ({
               <Text style={[styles.sectionTitle, { color: theme.text }]}>評価項目設定</Text>
             </View>
             <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-              評価する項目名を設定します。「評価しましょう」ボタンを押すと企画ごとに評価タスクが生成されます。
+              評価する項目名を設定します。生成した評価タスクは巡回サポートのタスク一覧へ追加されます。
             </Text>
             {/* 現在の評価項目リスト */}
             <View style={styles.evalItemList}>
@@ -4215,15 +4240,38 @@ const SupportDeskScreen = ({
             {/* 企画を選んで評価タスク一括生成 */}
             <Text style={[styles.label, { color: theme.text, marginTop: 8 }]}>評価対象企画を選択（複数可）</Text>
             <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-              チェックを入れた企画すべてに上記評価項目のタスクをまとめて生成します。
+              チェックを入れた企画ごとに、上記評価項目を1件の企画評価タスクへまとめて生成します。
             </Text>
+            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+              生成対象の企画一覧と定常巡回チェックの対象企画は、同じ企画マスタを参照します。
+            </Text>
+            {evaluationTaskItemLabel ? (
+              <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                1件の評価タスクに入る項目: {evaluationTaskItemLabel}
+              </Text>
+            ) : null}
+            {activeEvaluationTasks.length > 0 ? (
+              <View style={[styles.patrolCheckSummaryRow, { borderColor: theme.border, backgroundColor: '#FFF4E5' }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.patrolCheckSummaryLabel, { color: '#BF6A02' }]}>
+                    未完了の評価タスクがあります
+                  </Text>
+                  <Text style={[styles.patrolCheckSummaryDate, { color: theme.textSecondary }]}>
+                    1件でも残っている間は、新しい評価タスクを生成できません。
+                  </Text>
+                </View>
+                <Text style={[styles.patrolCheckSummaryCount, { color: '#BF6A02' }]}>
+                  {activeEvaluationTasks.length}件
+                </Text>
+              </View>
+            ) : null}
 
             {/* 全選択/全解除ボタン */}
-            {(hqOrganizationEvents || []).length > 0 ? (
+            {!isLoadingHqEvaluationEvents && (hqEvaluationEvents || []).length > 0 ? (
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TouchableOpacity
                   style={[styles.inlineActionButton, { borderColor: theme.primary, backgroundColor: `${theme.primary}12` }]}
-                  onPress={() => setSelectedEvalEventIds(new Set((hqOrganizationEvents || []).map((e) => String(e.event_id || e.id))))}
+                  onPress={() => setSelectedEvalEventIds(new Set((hqEvaluationEvents || []).map((event) => String(event.id))))}
                 >
                   <Text style={[styles.inlineActionButtonText, { color: theme.primary }]}>全選択</Text>
                 </TouchableOpacity>
@@ -4240,51 +4288,55 @@ const SupportDeskScreen = ({
             ) : null}
 
             <View style={styles.evalOrgEventList}>
-              {(hqOrganizationEvents || []).slice(0, 60).map((orgEvent) => {
-                /** この企画のID（event_id優先） */
-                const eid = String(orgEvent.event_id || orgEvent.id);
-                /** 選択中かどうか */
-                const isChecked = selectedEvalEventIds.has(eid);
+              {isLoadingHqEvaluationEvents ? (
+                <SkeletonLoader lines={3} baseColor={theme.border} />
+              ) : (
+                (hqEvaluationEvents || []).slice(0, 60).map((event) => {
+                  /** この企画のUUID */
+                  const eventId = String(event.id);
+                  /** 選択中かどうか */
+                  const isChecked = selectedEvalEventIds.has(eventId);
 
-                return (
-                  <TouchableOpacity
-                    key={orgEvent.id}
-                    style={[
-                      styles.evalSelectRow,
-                      {
-                        borderColor: isChecked ? theme.primary : theme.border,
-                        backgroundColor: isChecked ? `${theme.primary}0A` : theme.background,
-                      },
-                    ]}
-                    onPress={() => handleToggleEvalEventSelection(eid)}
-                    disabled={isCreatingEvaluationTasks}
-                  >
-                    <View
+                  return (
+                    <TouchableOpacity
+                      key={event.id}
                       style={[
-                        styles.evalSelectCheckbox,
+                        styles.evalSelectRow,
                         {
                           borderColor: isChecked ? theme.primary : theme.border,
-                          backgroundColor: isChecked ? theme.primary : 'transparent',
+                          backgroundColor: isChecked ? `${theme.primary}0A` : theme.background,
                         },
                       ]}
+                      onPress={() => handleToggleEvalEventSelection(eventId)}
+                      disabled={isCreatingEvaluationTasks}
                     >
-                      {isChecked ? (
-                        <Text style={styles.evalSelectCheckboxTick}>✓</Text>
-                      ) : null}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.evalSelectOrg, { color: theme.textSecondary }]} numberOfLines={1}>
-                        {orgEvent.organizationName || orgEvent.organization_name || '-'}
-                      </Text>
-                      <Text style={[styles.evalSelectName, { color: theme.text }]} numberOfLines={1}>
-                        {orgEvent.eventName || orgEvent.event_name || orgEvent.name || '企画名未設定'}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-              {(hqOrganizationEvents || []).length === 0 ? (
-                <Text style={[styles.helpText, { color: theme.textSecondary }]}>企画一覧が読み込まれていません</Text>
+                      <View
+                        style={[
+                          styles.evalSelectCheckbox,
+                          {
+                            borderColor: isChecked ? theme.primary : theme.border,
+                            backgroundColor: isChecked ? theme.primary : 'transparent',
+                          },
+                        ]}
+                      >
+                        {isChecked ? (
+                          <Text style={styles.evalSelectCheckboxTick}>✓</Text>
+                        ) : null}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.evalSelectOrg, { color: theme.textSecondary }]} numberOfLines={1}>
+                          {event.organizationName || event.organization_name || '-'}
+                        </Text>
+                        <Text style={[styles.evalSelectName, { color: theme.text }]} numberOfLines={1}>
+                          {event.eventName || event.event_name || event.name || '企画名未設定'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+              {!isLoadingHqEvaluationEvents && (hqEvaluationEvents || []).length === 0 ? (
+                <Text style={[styles.helpText, { color: theme.textSecondary }]}>評価対象企画が読み込まれていません</Text>
               ) : null}
             </View>
 
@@ -4292,85 +4344,26 @@ const SupportDeskScreen = ({
             <TouchableOpacity
               style={[
                 styles.evalBulkButton,
-                { backgroundColor: selectedEvalEventIds.size === 0 || isCreatingEvaluationTasks ? theme.border : '#1A7F37' },
+                {
+                  backgroundColor:
+                    selectedEvalEventIds.size === 0 || isCreatingEvaluationTasks || activeEvaluationTasks.length > 0
+                      ? theme.border
+                      : '#1A7F37',
+                },
               ]}
               onPress={handleBulkCreateEvaluationTasks}
-              disabled={selectedEvalEventIds.size === 0 || isCreatingEvaluationTasks}
+              disabled={selectedEvalEventIds.size === 0 || isCreatingEvaluationTasks || activeEvaluationTasks.length > 0}
             >
               <Text style={styles.evalBulkButtonText}>
                 {isCreatingEvaluationTasks
                   ? '生成中...'
+                  : activeEvaluationTasks.length > 0
+                  ? '未完了の評価タスクがあります'
                   : selectedEvalEventIds.size === 0
                   ? '企画を選択してください'
                   : `選択した${selectedEvalEventIds.size}件に評価タスクを生成`}
               </Text>
             </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {/* ─── 評価タブ: 評価承認 ─── */}
-        {isHQRole && activeTab === 'evaluation' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface }]}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>評価承認</Text>
-              <TouchableOpacity
-                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
-                onPress={loadPendingEvaluations}
-              >
-                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
-              </TouchableOpacity>
-            </View>
-
-            {isLoadingPendingEvaluations ? (
-              <SkeletonLoader lines={2} baseColor={theme.border} />
-            ) : pendingEvaluations.length === 0 ? (
-              <EmptyState
-                icon={'\u{2705}'}
-                title="承認待ちの評価はありません"
-                description="巡回担当が評価を登録すると表示されます。"
-                theme={theme}
-              />
-            ) : (
-              <View style={styles.messageList}>
-                {pendingEvaluations.map((evaluation) => (
-                  <View
-                    key={evaluation.id}
-                    style={[styles.messageItem, { borderColor: theme.border, backgroundColor: theme.background }]}
-                  >
-                    <Text style={[styles.messageAuthor, { color: theme.textSecondary }]}> 
-                      {EVALUATION_STATUS_LABELS[evaluation.evaluation_status] || evaluation.evaluation_status} / {evaluation.score || '-'}点
-                    </Text>
-                    <Text style={[styles.messageBody, { color: theme.text }]}>{evaluation.comment || 'コメントなし'}</Text>
-                    <Text style={[styles.messageDate, { color: theme.textSecondary }]}> 
-                      {evaluation.task?.task_no || evaluation.ticket?.ticket_no || evaluation.id}
-                    </Text>
-                    <View style={styles.statusActions}>
-                      <TouchableOpacity
-                        style={[styles.statusButton, { borderColor: theme.border, backgroundColor: theme.background }]}
-                        onPress={() => handleReviewEvaluation(evaluation.id, EVALUATION_STATUSES.APPROVED)}
-                        disabled={isReviewingEvaluation}
-                      >
-                        <Text style={[styles.statusButtonText, { color: '#22A06B' }]}>承認</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.statusButton, { borderColor: theme.border, backgroundColor: theme.background }]}
-                        onPress={() => handleReviewEvaluation(evaluation.id, EVALUATION_STATUSES.REWORK)}
-                        disabled={isReviewingEvaluation}
-                      >
-                        <Text style={[styles.statusButtonText, { color: '#9F6E00' }]}>差戻し</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.statusButton, { borderColor: theme.border, backgroundColor: theme.background }]}
-                        onPress={() => handleReviewEvaluation(evaluation.id, EVALUATION_STATUSES.REJECTED)}
-                        disabled={isReviewingEvaluation}
-                      >
-                        <Text style={[styles.statusButtonText, { color: '#D1242F' }]}>却下</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
           </View>
         ) : null}
 
@@ -4381,7 +4374,7 @@ const SupportDeskScreen = ({
               <Text style={[styles.sectionTitle, { color: theme.text }]}>評価データ出力</Text>
             </View>
             <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-              全評価データをCSVファイルでダウンロードします。Excel で開けます（BOM付きUTF-8）。
+              巡回サポート向けに生成した評価タスクと最新結果をCSVファイルでダウンロードします。Excel で開けます（BOM付きUTF-8）。
             </Text>
             <TouchableOpacity
               style={[styles.evalExportButton, { borderColor: theme.primary }]}
@@ -4422,7 +4415,7 @@ const SupportDeskScreen = ({
                   /** 担当者名（プロフィールマップから取得、未解決時は不明） */
                   const assigneeName = patrolHistoryProfileMap[task.assigned_to] || '不明';
                   /** タスク種別表示名 */
-                  const taskLabel = PATROL_TASK_TYPE_LABELS[task.task_type] || task.task_type;
+                  const taskLabel = getPatrolTaskTypeLabel(task);
                   /** ステータス表示名 */
                   const statusLabel = PATROL_TASK_STATUS_LABELS[task.task_status] || task.task_status;
                   /** 対応完了日時（done_at がなければ updated_at で代替） */

@@ -46,6 +46,14 @@ export const PATROL_RESULT_CODES = {
   CANNOT_CONFIRM: 'CANNOT_CONFIRM',
 };
 
+/** 巡回タスクの表示専用種別 */
+export const PATROL_TASK_DISPLAY_TYPES = {
+  EVALUATION: 'evaluation',
+};
+
+/** 評価タスクの notes 接頭辞 */
+const EVALUATION_PATROL_TASK_NOTES_PREFIX = '評価項目:';
+
 const normalizeText = (value) => (value || '').trim();
 
 const logNotificationError = (label, error) => {
@@ -63,6 +71,55 @@ const toLockCheckStatus = (resultCode) => {
     return 'unlocked';
   }
   return 'cannot_confirm';
+};
+
+/**
+ * 評価タスク用 notes を組み立てる
+ * @param {string} evaluationItemName - 評価項目名
+ * @returns {string} notes 文字列
+ */
+export const buildEvaluationPatrolTaskNotes = (evaluationItemName) => {
+  /** 前後空白を除去した評価項目名 */
+  const normalizedEvaluationItemName = normalizeText(evaluationItemName);
+  if (!normalizedEvaluationItemName) {
+    throw new Error('evaluationItemName が未指定です');
+  }
+  return `${EVALUATION_PATROL_TASK_NOTES_PREFIX} ${normalizedEvaluationItemName}`;
+};
+
+/**
+ * 評価タスクの評価項目名を取り出す
+ * @param {Object|string|null|undefined} taskOrNotes - タスクまたは notes 文字列
+ * @returns {string} 評価項目名
+ */
+export const getEvaluationPatrolTaskItemName = (taskOrNotes) => {
+  /** 判定対象 notes */
+  const notes = normalizeText(typeof taskOrNotes === 'string' ? taskOrNotes : taskOrNotes?.notes);
+  if (!notes.startsWith(EVALUATION_PATROL_TASK_NOTES_PREFIX)) {
+    return '';
+  }
+  return normalizeText(notes.slice(EVALUATION_PATROL_TASK_NOTES_PREFIX.length));
+};
+
+/**
+ * 巡回タスクが評価タスクかどうかを返す
+ * @param {Object|null|undefined} task - 巡回タスク
+ * @returns {boolean} 評価タスクなら true
+ */
+export const isEvaluationPatrolTask = (task) => {
+  return Boolean(getEvaluationPatrolTaskItemName(task));
+};
+
+/**
+ * 巡回タスクの表示用種別を返す
+ * @param {Object|null|undefined} task - 巡回タスク
+ * @returns {string} 表示用種別
+ */
+export const getPatrolTaskDisplayType = (task) => {
+  if (isEvaluationPatrolTask(task)) {
+    return PATROL_TASK_DISPLAY_TYPES.EVALUATION;
+  }
+  return normalizeText(task?.task_type) || PATROL_TASK_TYPES.OTHER;
 };
 
 /**
@@ -551,6 +608,61 @@ export const createEmergencyPatrolTask = async ({ ticket, creatorUserId = null }
     return { data, error: null };
   } catch (error) {
     console.error('emergency_support タスク生成処理でエラー:', error);
+    return { data: null, error };
+  }
+};
+
+/**
+ * HQ の評価生成から巡回サポート向け評価タスクを作成する
+ * @param {Object} input - 入力値
+ * @param {string} input.eventName - 企画名
+ * @param {string|null} [input.eventLocation=null] - 企画場所
+ * @param {string} input.evaluationItemName - 評価項目名
+ * @param {string|null} [input.creatorUserId=null] - 作成者ユーザーID
+ * @returns {Promise<{data: Object|null, error: Error|null}>} 作成結果
+ */
+export const createEvaluationPatrolTask = async ({
+  eventName,
+  eventLocation = null,
+  evaluationItemName,
+  creatorUserId = null,
+}) => {
+  try {
+    /** 前後空白を除去した企画名 */
+    const normalizedEventName = normalizeText(eventName);
+    /** 前後空白を除去した企画場所 */
+    const normalizedEventLocation = normalizeText(eventLocation) || null;
+    /** 前後空白を除去した作成者ユーザーID */
+    const normalizedCreatorUserId = normalizeText(creatorUserId) || null;
+    /** 評価タスクの notes */
+    const taskNotes = buildEvaluationPatrolTaskNotes(evaluationItemName);
+
+    if (!normalizedEventName) {
+      throw new Error('eventName が未指定です');
+    }
+
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .insert({
+        task_type: PATROL_TASK_TYPES.OTHER,
+        task_status: PATROL_TASK_STATUSES.OPEN,
+        event_name: normalizedEventName,
+        event_location: normalizedEventLocation,
+        location_text: normalizedEventLocation,
+        notes: taskNotes,
+        created_by: normalizedCreatorUserId,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('評価巡回タスク作成エラー:', error);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('評価巡回タスク作成時にエラー:', error);
     return { data: null, error };
   }
 };

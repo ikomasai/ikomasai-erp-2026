@@ -30,8 +30,10 @@ import {
   acceptPatrolTask,
   assignPatrolTask,
   completePatrolTask,
+  getPatrolTaskDisplayType,
   listPatrolTaskResults,
   listPatrolTasks,
+  PATROL_TASK_DISPLAY_TYPES,
   PATROL_RESULT_CODES,
   PATROL_TASK_STATUSES,
   PATROL_TASK_TYPES,
@@ -61,6 +63,11 @@ import OfflineBanner from '../../../shared/components/OfflineBanner';
 import { useManagedPushSubscription } from '../../notifications/hooks/useManagedPushSubscription';
 import WebPushStatusCard from '../../notifications/components/WebPushStatusCard';
 import SupportScreenAccessGuard from '../../support/components/SupportScreenAccessGuard';
+
+/** 表示専用の評価タスクラベル */
+const EVALUATION_TASK_LABEL = '企画評価';
+/** 表示専用の評価タスク向け「向かいます」通知文 */
+const EVALUATION_TASK_GO_MESSAGE = '巡回担当が企画評価のため現地へ向かいます。';
 
 /** 種別ごとの完了結果候補 */
 const RESULT_OPTIONS_BY_TASK_TYPE = {
@@ -162,6 +169,33 @@ const getGoMessageByTaskType = (taskType) => {
 };
 
 /**
+ * タスクの表示名を返す
+ * @param {Object|null|undefined} task - 巡回タスク
+ * @returns {string} 表示用種別名
+ */
+const getTaskTypeLabel = (task) => {
+  if (!task) {
+    return '巡回タスク';
+  }
+  if (getPatrolTaskDisplayType(task) === PATROL_TASK_DISPLAY_TYPES.EVALUATION) {
+    return EVALUATION_TASK_LABEL;
+  }
+  return TASK_TYPE_LABELS[task.task_type] || task.task_type;
+};
+
+/**
+ * タスクごとの「向かいます」通知文を返す
+ * @param {Object|null|undefined} task - 巡回タスク
+ * @returns {string} 通知文
+ */
+const getGoMessageByTask = (task) => {
+  if (task && getPatrolTaskDisplayType(task) === PATROL_TASK_DISPLAY_TYPES.EVALUATION) {
+    return EVALUATION_TASK_GO_MESSAGE;
+  }
+  return getGoMessageByTaskType(task?.task_type);
+};
+
+/**
  * 項目12画面コンポーネント
  * @param {Object} props - コンポーネントプロパティ
  * @param {Object} props.navigation - React Navigationのnavigationオブジェクト
@@ -239,7 +273,7 @@ const Item12Screen = ({ navigation, route }) => {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   /* ---- 企画一覧関連 ---- */
-  /** 団体別企画一覧（organizations_events） */
+  /** 団体別企画一覧（events ベースの統一企画マスタ） */
   const [organizationEvents, setOrganizationEvents] = useState([]);
   /** 団体別企画一覧読み込み中フラグ */
   const [isLoadingOrganizationEvents, setIsLoadingOrganizationEvents] = useState(false);
@@ -808,7 +842,7 @@ const Item12Screen = ({ navigation, route }) => {
       await createTicketMessage({
         ticketId: selectedTask.source_ticket_id,
         authorId: user.id,
-        body: getGoMessageByTaskType(selectedTask.task_type),
+        body: getGoMessageByTask(selectedTask),
       });
     }
 
@@ -842,7 +876,7 @@ const Item12Screen = ({ navigation, route }) => {
       return;
     }
 
-    const taskLabel = TASK_TYPE_LABELS[selectedTask.task_type] || selectedTask.task_type;
+    const taskLabel = getTaskTypeLabel(selectedTask);
     const resultLabel = RESULT_LABELS[resultCode] || resultCode;
 
     setIsSubmitting(true);
@@ -1419,12 +1453,12 @@ const Item12Screen = ({ navigation, route }) => {
                 </Text>
                 <Text style={[dashboardStyles.focusTitle, { color: theme.text }]}>
                   {selectedTask
-                    ? selectedTask.event_name || TASK_TYPE_LABELS[selectedTask.task_type] || '巡回タスク'
+                    ? selectedTask.event_name || getTaskTypeLabel(selectedTask) || '巡回タスク'
                     : 'タスクを選択してください'}
                 </Text>
                 <Text style={[dashboardStyles.focusBody, { color: theme.textSecondary }]}>
                   {selectedTask
-                    ? `${TASK_TYPE_LABELS[selectedTask.task_type] || selectedTask.task_type} / ${selectedTaskLocationLabel}`
+                    ? `${getTaskTypeLabel(selectedTask)} / ${selectedTaskLocationLabel}`
                     : '下のタブでタスクを開くと、受諾と完了登録に進めます。'}
                 </Text>
               </View>
@@ -1474,7 +1508,7 @@ const Item12Screen = ({ navigation, route }) => {
                     recentHistoryItems.map((task) => (
                       <View key={task.id} style={dashboardStyles.compactItem}>
                         <Text style={[dashboardStyles.compactTitle, { color: theme.text }]} numberOfLines={1}>
-                          {task.event_name || TASK_TYPE_LABELS[task.task_type] || '巡回対応'}
+                          {task.event_name || getTaskTypeLabel(task) || '巡回対応'}
                         </Text>
                         <Text style={[dashboardStyles.compactMeta, { color: theme.textSecondary }]}>
                           {task.done_at

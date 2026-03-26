@@ -5,9 +5,33 @@
 
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import { PATROL_TASK_STATUSES, PATROL_TASK_TYPES } from '../../../services/supabase/patrolTaskService';
+import {
+  getEvaluationPatrolTaskItemName,
+  getPatrolTaskDisplayType,
+  PATROL_TASK_DISPLAY_TYPES,
+  PATROL_TASK_STATUSES,
+  PATROL_TASK_TYPES,
+} from '../../../services/supabase/patrolTaskService';
 import SkeletonLoader from '../../../shared/components/SkeletonLoader';
 import EmptyState from '../../../shared/components/EmptyState';
+/** 表示専用の評価タスクラベル */
+const EVALUATION_TASK_LABEL = '企画評価';
+/** 表示専用の評価タスクアイコン */
+const EVALUATION_TASK_ICON = '◎';
+/** 表示専用の評価タスク強調色 */
+const EVALUATION_TASK_ACCENT_COLOR = '#1A7F37';
+/** 表示専用の評価タスク背景色 */
+const EVALUATION_TASK_BG_COLOR = '#EAF8ED';
+/** 表示順制御用の種別配列 */
+const DISPLAY_TASK_TYPE_ORDER = [
+  PATROL_TASK_TYPES.EMERGENCY_SUPPORT,
+  PATROL_TASK_TYPES.CONFIRM_START,
+  PATROL_TASK_TYPES.CONFIRM_END,
+  PATROL_TASK_DISPLAY_TYPES.EVALUATION,
+  PATROL_TASK_TYPES.LOCK_CHECK,
+  PATROL_TASK_TYPES.ROUTINE_PATROL,
+  PATROL_TASK_TYPES.OTHER,
+];
 
 /** タスク状態表示名 */
 const TASK_STATUS_LABELS = {
@@ -110,7 +134,7 @@ const PatrolTaskList = ({
     /** task_type → タスク配列 のマップを構築 */
     const typeMap = new Map();
     tasks.forEach((task) => {
-      const type = task.task_type || PATROL_TASK_TYPES.OTHER;
+      const type = getPatrolTaskDisplayType(task);
       if (!typeMap.has(type)) {
         typeMap.set(type, []);
       }
@@ -118,13 +142,13 @@ const PatrolTaskList = ({
     });
 
     /** 定義順でフィルタリングし、存在する種別のみ出力 */
-    const orderedGroups = TASK_TYPE_ORDER
+    const orderedGroups = DISPLAY_TASK_TYPE_ORDER
       .filter((type) => typeMap.has(type))
       .map((type) => ({ type, tasks: typeMap.get(type) }));
 
     /** 定義外の種別が存在する場合は末尾に追加 */
     typeMap.forEach((groupTasks, type) => {
-      if (!TASK_TYPE_ORDER.includes(type)) {
+      if (!DISPLAY_TASK_TYPE_ORDER.includes(type)) {
         orderedGroups.push({ type, tasks: groupTasks });
       }
     });
@@ -212,9 +236,9 @@ const PatrolTaskList = ({
         <View style={styles.groupList}>
           {groupedTasks.map(({ type, tasks: groupTasks }) => {
             /** 種別アイコン */
-            const icon = TASK_TYPE_ICONS[type] || '📋';
+            const icon = type === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? EVALUATION_TASK_ICON : TASK_TYPE_ICONS[type] || '📋';
             /** 種別表示ラベル */
-            const label = TASK_TYPE_LABELS[type] || type;
+            const label = type === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? EVALUATION_TASK_LABEL : TASK_TYPE_LABELS[type] || type;
             /** 緊急対応は強調表示 */
             const isEmergency = type === PATROL_TASK_TYPES.EMERGENCY_SUPPORT;
 
@@ -225,7 +249,7 @@ const PatrolTaskList = ({
                   style={[
                     styles.typeHeader,
                     {
-                      backgroundColor: TASK_TYPE_BG_COLORS[type] || '#F6F8FA',
+                      backgroundColor: type === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? EVALUATION_TASK_BG_COLOR : TASK_TYPE_BG_COLORS[type] || '#F6F8FA',
                     },
                   ]}
                 >
@@ -260,6 +284,7 @@ const PatrolTaskList = ({
                   {groupTasks.map((task) => {
                     /** 選択中かどうか */
                     const isActive = task.id === selectedTaskId;
+                    const evaluationItemName = getEvaluationPatrolTaskItemName(task);
                     /** 担当者ラベル */
                     const assigneeLabel = !task.assigned_to
                       ? '未割当'
@@ -274,7 +299,10 @@ const PatrolTaskList = ({
                           isMobile && styles.ticketItemMobile,
                           {
                             borderColor: isActive ? theme.primary : theme.border,
-                            borderLeftColor: TASK_TYPE_ACCENT_COLORS[type] || '#57606A',
+                            borderLeftColor:
+                              type === PATROL_TASK_DISPLAY_TYPES.EVALUATION
+                                ? EVALUATION_TASK_ACCENT_COLOR
+                                : TASK_TYPE_ACCENT_COLORS[type] || '#57606A',
                             backgroundColor: isActive ? `${theme.primary}14` : theme.background,
                           },
                         ]}
@@ -333,7 +361,17 @@ const PatrolTaskList = ({
                         <Text style={[styles.ticketLocation, { color: theme.text }]} numberOfLines={1}>
                           📍 {task.event_location || task.location_text || '場所未設定'}
                         </Text>
-                        {task.task_type === PATROL_TASK_TYPES.LOCK_CHECK && task.notes ? (
+                        {evaluationItemName ? (
+                          <Text
+                            style={[
+                              styles.keyLabel,
+                              { color: type === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? EVALUATION_TASK_ACCENT_COLOR : theme.primary },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            評価項目: {evaluationItemName}
+                          </Text>
+                        ) : task.task_type === PATROL_TASK_TYPES.LOCK_CHECK && task.notes ? (
                           /** 施錠確認タスクは notes から鍵名を抽出してインライン表示 */
                           <Text style={[styles.keyLabel, { color: theme.primary }]} numberOfLines={1}>
                             🔑 {task.notes.includes(':') ? task.notes.split(':').slice(1).join(':').trim() : task.notes}
