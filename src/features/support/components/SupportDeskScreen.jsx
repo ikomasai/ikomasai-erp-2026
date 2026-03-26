@@ -46,9 +46,12 @@ import {
   createDispatchPatrolTask,
   createEvaluationPatrolTask,
   getEvaluationPatrolTaskItemName,
+  getEvaluationPatrolTaskItemNames,
+  getEvaluationPatrolTaskMeta,
   getPatrolTaskDisplayType,
   listPatrolTasks,
   listPatrolTasksForStats,
+  parseEvaluationPatrolTaskResultMemo,
   PATROL_TASK_DISPLAY_TYPES,
   updatePatrolTaskNotes,
   PATROL_TASK_STATUSES,
@@ -523,6 +526,50 @@ const normalizePrizeSearchValue = (value) => {
 };
 
 /**
+ * 評価対象企画の検索文字列を正規化
+ * @param {string|null|undefined} value - 入力値
+ * @returns {string} 正規化済み文字列
+ */
+const normalizeEvaluationEventSearchValue = (value) => {
+  return normalizeText(value).replace(/[\s\u3000]+/g, '').toLowerCase();
+};
+
+/**
+ * 団体評価一覧の検索文字列を正規化
+ * @param {string|null|undefined} value - 入力値
+ * @returns {string} 正規化済み文字列
+ */
+const normalizeEvaluationReviewSearchValue = (value) => {
+  return normalizeText(value).replace(/[\s\u3000]+/g, '').toLowerCase();
+};
+
+/**
+ * 団体評価一覧の状態ラベルに応じた色を返す
+ * @param {string} statusLabel - 状態ラベル
+ * @returns {{backgroundColor: string, textColor: string}} 表示色
+ */
+const getEvaluationReviewStatusTone = (statusLabel) => {
+  if (statusLabel === '評価完了') {
+    return {
+      backgroundColor: '#EAF8ED',
+      textColor: '#1A7F37',
+    };
+  }
+
+  if (statusLabel === '一部入力済み') {
+    return {
+      backgroundColor: '#EAF2FF',
+      textColor: '#0969DA',
+    };
+  }
+
+  return {
+    backgroundColor: '#FFF4E5',
+    textColor: '#BF6A02',
+  };
+};
+
+/**
  * 景品配布基準の検索キーワードに一致するかを判定
  * 部分一致に加えて、略称入力向けに文字の順序一致も許可する
  * @param {string|null|undefined} source - 候補文字列
@@ -639,6 +686,10 @@ const SupportDeskScreen = ({
   const [hqPatrolTasks, setHqPatrolTasks] = useState([]);
   const [isLoadingHqPatrolTasks, setIsLoadingHqPatrolTasks] = useState(false);
   const [selectedPatrolTaskId, setSelectedPatrolTaskId] = useState(null);
+  /** 巡回タスク割当セクションのY座標 */
+  const [patrolAssignmentSectionY, setPatrolAssignmentSectionY] = useState(0);
+  /** 巡回タスク選択時の自動スクロール要求 */
+  const [shouldScrollToPatrolAssignment, setShouldScrollToPatrolAssignment] = useState(false);
   const [patrolAssignees, setPatrolAssignees] = useState([]);
   const [isLoadingPatrolAssignees, setIsLoadingPatrolAssignees] = useState(false);
   const [selectedPatrolAssigneeId, setSelectedPatrolAssigneeId] = useState('');
@@ -781,6 +832,16 @@ const SupportDeskScreen = ({
   const [isCreatingEvaluationTasks, setIsCreatingEvaluationTasks] = useState(false);
   /** 評価一括生成で選択中の企画IDセット */
   const [selectedEvalEventIds, setSelectedEvalEventIds] = useState(new Set());
+  /** 評価対象企画の検索キーワード */
+  const [evaluationEventSearch, setEvaluationEventSearch] = useState('');
+  /** 評価対象企画で選択中だけ表示するか */
+  const [showSelectedEvaluationEventsOnly, setShowSelectedEvaluationEventsOnly] = useState(false);
+  /** 団体評価一覧の検索キーワード */
+  const [evaluationReviewSearch, setEvaluationReviewSearch] = useState('');
+  /** 団体別にまとめた評価結果一覧 */
+  const [evaluationReviewGroups, setEvaluationReviewGroups] = useState([]);
+  /** 団体評価一覧の読み込み中フラグ */
+  const [isLoadingEvaluationReviewGroups, setIsLoadingEvaluationReviewGroups] = useState(false);
 
   /**
    * メッセージ表示
@@ -1224,6 +1285,87 @@ const SupportDeskScreen = ({
       .join(' / ');
   }, [evaluationItems]);
 
+  /** 評価対象企画の検索キーワード */
+  const normalizedEvaluationEventSearch = useMemo(() => {
+    return normalizeEvaluationEventSearchValue(evaluationEventSearch);
+  }, [evaluationEventSearch]);
+
+  /** 検索・表示条件を反映した評価対象企画一覧 */
+  const filteredHqEvaluationEvents = useMemo(() => {
+    return (hqEvaluationEvents || []).filter((event) => {
+      if (showSelectedEvaluationEventsOnly && !selectedEvalEventIds.has(String(event.id))) {
+        return false;
+      }
+
+      if (!normalizedEvaluationEventSearch) {
+        return true;
+      }
+
+      const searchSource = [
+        event.organizationName,
+        event.organization_name,
+        event.eventName,
+        event.event_name,
+        event.name,
+        event.locationName,
+        event.location_name,
+        event.event_location,
+        event.label,
+      ]
+        .map(normalizeEvaluationEventSearchValue)
+        .filter(Boolean)
+        .join(' ');
+
+      return searchSource.includes(normalizedEvaluationEventSearch);
+    });
+  }, [
+    hqEvaluationEvents,
+    normalizedEvaluationEventSearch,
+    selectedEvalEventIds,
+    showSelectedEvaluationEventsOnly,
+  ]);
+
+  /** 団体評価一覧の検索キーワード */
+  const normalizedEvaluationReviewSearch = useMemo(() => {
+    return normalizeEvaluationReviewSearchValue(evaluationReviewSearch);
+  }, [evaluationReviewSearch]);
+
+  /** 検索条件を反映した団体別評価一覧 */
+  const filteredEvaluationReviewGroups = useMemo(() => {
+    if (!normalizedEvaluationReviewSearch) {
+      return evaluationReviewGroups;
+    }
+
+    return evaluationReviewGroups
+      .map((group) => {
+        const filteredEvents = (group.events || []).filter((event) => {
+          const searchSource = [
+            group.organizationName,
+            event.eventName,
+            event.eventLocation,
+            event.statusLabel,
+            ...(event.items || []).flatMap((item) => [item.itemName, item.comment]),
+            event.summaryMemo,
+          ]
+            .map(normalizeEvaluationReviewSearchValue)
+            .filter(Boolean)
+            .join(' ');
+
+          return searchSource.includes(normalizedEvaluationReviewSearch);
+        });
+
+        if (filteredEvents.length === 0) {
+          return null;
+        }
+
+        return {
+          ...group,
+          events: filteredEvents,
+        };
+      })
+      .filter(Boolean);
+  }, [evaluationReviewGroups, normalizedEvaluationReviewSearch]);
+
   const dashboardSummary = useMemo(() => {
     const now = Date.now();
     const delayedMinutes = 60;
@@ -1457,7 +1599,7 @@ const SupportDeskScreen = ({
 
   /**
    * 現在選択中の企画に対して評価タスクを生成する
-   * 評価項目ごとに 1 件の巡回サポート用 patrol_tasks レコードを作成する
+   * 企画ごとに評価項目をまとめた巡回サポート用 patrol_tasks レコードを 1 件作成する
    * @param {string} eventId - 対象企画ID
    * @param {string} eventName - 対象企画名（ログ・表示用）
    * @returns {Promise<void>} 生成処理
@@ -1491,14 +1633,18 @@ const SupportDeskScreen = ({
     /** 保存用企画場所 */
     const targetEventLocation =
       targetEvent?.locationName || targetEvent?.location_name || targetEvent?.event_location || targetEvent?.location || null;
+    /** 保存用団体名 */
+    const targetOrganizationName = targetEvent?.organizationName || targetEvent?.organization_name || '';
 
     setIsCreatingEvaluationTasks(true);
     /** 企画ごとに評価項目をまとめた評価タスクを1件だけ作成する */
     const results = await Promise.all([
       createEvaluationPatrolTask({
+        eventId,
         eventName: targetEventName,
         eventLocation: targetEventLocation,
-        evaluationItemName: evaluationTaskItemLabel,
+        organizationName: targetOrganizationName,
+        evaluationItemNames: evaluationItems,
         creatorUserId: user.id,
       }),
     ]);
@@ -1530,6 +1676,28 @@ const SupportDeskScreen = ({
       }
       return next;
     });
+  };
+
+  /**
+   * 現在表示中の評価対象企画をまとめて選択する
+   * @returns {void}
+   */
+  const handleSelectVisibleEvaluationEvents = () => {
+    setSelectedEvalEventIds((prev) => {
+      const next = new Set(prev);
+      filteredHqEvaluationEvents.forEach((event) => {
+        next.add(String(event.id));
+      });
+      return next;
+    });
+  };
+
+  /**
+   * 評価対象企画の選択を全解除する
+   * @returns {void}
+   */
+  const handleClearEvaluationEventSelection = () => {
+    setSelectedEvalEventIds(new Set());
   };
 
   /**
@@ -1573,9 +1741,11 @@ const SupportDeskScreen = ({
     const allResults = await Promise.all(
       selectedEvents.map((event) =>
         createEvaluationPatrolTask({
+          eventId: event.id,
           eventName: event.eventName || event.event_name || event.name || '企画名未設定',
           eventLocation: event.locationName || event.location_name || event.event_location || event.location || null,
-          evaluationItemName: evaluationTaskItemLabel,
+          organizationName: event.organizationName || event.organization_name || '',
+          evaluationItemNames: evaluationItems,
           creatorUserId: user.id,
         })
       )
@@ -2192,6 +2362,16 @@ const SupportDeskScreen = ({
   };
 
   /**
+   * 巡回タスクを選択し、担当者選択セクションへの移動を予約する
+   * @param {string} taskId - 選択したタスクID
+   * @returns {void}
+   */
+  const handleSelectPatrolTask = (taskId) => {
+    setSelectedPatrolTaskId(taskId);
+    setShouldScrollToPatrolAssignment(true);
+  };
+
+  /**
    * 巡回タスクのメモを保存する
    * ドラフトの内容を patrol_tasks.notes に書き込む
    * @returns {Promise<void>} 保存処理
@@ -2388,6 +2568,294 @@ const SupportDeskScreen = ({
   };
 
   /**
+   * 団体別の評価結果一覧を取得する
+   * 旧形式の「1項目1タスク」と、新形式の「1企画1タスク」を同じ一覧へまとめる
+   * @returns {Promise<void>} 取得処理
+   */
+  const loadEvaluationReviewGroups = async () => {
+    if (!isHQRole) {
+      return;
+    }
+
+    setIsLoadingEvaluationReviewGroups(true);
+
+    const { data: patrolTasks, error } = await listPatrolTasks({
+      taskTypes: [PATROL_TASK_TYPES.OTHER],
+      limit: 500,
+    });
+
+    if (error) {
+      setIsLoadingEvaluationReviewGroups(false);
+      console.error('団体別評価取得に失敗:', error);
+      return;
+    }
+
+    const evaluationTasks = (patrolTasks || []).filter(
+      (task) => getPatrolTaskDisplayType(task) === PATROL_TASK_DISPLAY_TYPES.EVALUATION
+    );
+
+    if (evaluationTasks.length === 0) {
+      setEvaluationReviewGroups([]);
+      setIsLoadingEvaluationReviewGroups(false);
+      return;
+    }
+
+    const evaluationTaskIds = evaluationTasks.map((task) => task.id).filter(Boolean);
+    const latestResultMap = {};
+
+    if (evaluationTaskIds.length > 0) {
+      const { data: taskResults, error: taskResultsError } = await getSupabaseClient()
+        .from('patrol_task_results')
+        .select('task_id,result_code,memo,created_at,created_by')
+        .in('task_id', evaluationTaskIds)
+        .order('created_at', { ascending: false });
+
+      if (taskResultsError) {
+        setIsLoadingEvaluationReviewGroups(false);
+        console.error('団体別評価の結果取得に失敗:', taskResultsError);
+        return;
+      }
+
+      (taskResults || []).forEach((result) => {
+        if (!latestResultMap[result.task_id]) {
+          latestResultMap[result.task_id] = result;
+        }
+      });
+    }
+
+    const eventById = new Map();
+    const eventByNameAndLocation = new Map();
+    const eventNameBuckets = new Map();
+
+    (hqEvaluationEvents || []).forEach((event) => {
+      const eventId = normalizeText(event.id);
+      const eventName = normalizeText(event.eventName || event.event_name || event.name);
+      const eventLocation = normalizeText(event.locationName || event.location_name || event.event_location);
+      const organizationName = normalizeText(event.organizationName || event.organization_name);
+      const normalizedEvent = {
+        eventId,
+        eventName: eventName || '企画名未設定',
+        eventLocation,
+        organizationName: organizationName || '団体未設定',
+      };
+
+      if (eventId) {
+        eventById.set(eventId, normalizedEvent);
+      }
+
+      if (eventName || eventLocation) {
+        eventByNameAndLocation.set(`${eventName}::${eventLocation}`, normalizedEvent);
+      }
+
+      if (eventName) {
+        const bucket = eventNameBuckets.get(eventName) || [];
+        bucket.push(normalizedEvent);
+        eventNameBuckets.set(eventName, bucket);
+      }
+    });
+
+    const buildItemSortWeight = (itemName) => {
+      const configuredIndex = evaluationItems.findIndex((configuredItem) => configuredItem === itemName);
+      if (configuredIndex !== -1) {
+        return configuredIndex;
+      }
+      return evaluationItems.length + 100;
+    };
+
+    const resolveTaskEventMeta = (task) => {
+      const taskMeta = getEvaluationPatrolTaskMeta(task);
+      if (taskMeta.eventId && eventById.has(taskMeta.eventId)) {
+        return eventById.get(taskMeta.eventId);
+      }
+
+      const eventName = normalizeText(task.event_name);
+      const eventLocation = normalizeText(task.event_location || task.location_text);
+      const exactMatch = eventByNameAndLocation.get(`${eventName}::${eventLocation}`);
+      if (exactMatch) {
+        return exactMatch;
+      }
+
+      const sameNameEvents = eventName ? eventNameBuckets.get(eventName) || [] : [];
+      if (sameNameEvents.length === 1) {
+        return sameNameEvents[0];
+      }
+
+      return {
+        eventId: taskMeta.eventId || '',
+        eventName: task.event_name || '企画名未設定',
+        eventLocation: task.event_location || task.location_text || '',
+        organizationName: taskMeta.organizationName || '団体未設定',
+      };
+    };
+
+    const eventEvaluationMap = new Map();
+
+    evaluationTasks.forEach((task) => {
+      const resolvedMeta = resolveTaskEventMeta(task);
+      const eventGroupKey =
+        resolvedMeta.eventId ||
+        `${normalizeText(resolvedMeta.organizationName)}::${normalizeText(resolvedMeta.eventName)}::${normalizeText(resolvedMeta.eventLocation)}`;
+
+      if (!eventEvaluationMap.has(eventGroupKey)) {
+        eventEvaluationMap.set(eventGroupKey, {
+          organizationName: resolvedMeta.organizationName || '団体未設定',
+          eventName: resolvedMeta.eventName || '企画名未設定',
+          eventLocation: resolvedMeta.eventLocation || '',
+          latestUpdatedAt: task.updated_at || task.created_at || '',
+          latestSummaryAt: '',
+          summaryMemo: '',
+          itemMap: new Map(),
+          taskStatuses: new Set(),
+        });
+      }
+
+      const group = eventEvaluationMap.get(eventGroupKey);
+      group.taskStatuses.add(task.task_status);
+
+      const taskUpdatedAt = task.updated_at || task.created_at || '';
+      if (taskUpdatedAt && (!group.latestUpdatedAt || new Date(taskUpdatedAt) > new Date(group.latestUpdatedAt))) {
+        group.latestUpdatedAt = taskUpdatedAt;
+      }
+
+      const itemNames = getEvaluationPatrolTaskItemNames(task);
+      itemNames.forEach((itemName) => {
+        if (!group.itemMap.has(itemName)) {
+          group.itemMap.set(itemName, {
+            itemName,
+            score: null,
+            comment: '',
+            resultCode: '',
+            updatedAt: '',
+          });
+        }
+      });
+
+      const latestResult = latestResultMap[task.id] || null;
+      if (!latestResult) {
+        return;
+      }
+
+      const parsedMemo = parseEvaluationPatrolTaskResultMemo(latestResult.memo);
+      const resultUpdatedAt = latestResult.created_at || taskUpdatedAt;
+
+      if (parsedMemo.summaryMemo) {
+        if (!group.latestSummaryAt || new Date(resultUpdatedAt) >= new Date(group.latestSummaryAt)) {
+          group.latestSummaryAt = resultUpdatedAt;
+          group.summaryMemo = parsedMemo.summaryMemo;
+        }
+      }
+
+      if (parsedMemo.itemResults.length > 0) {
+        parsedMemo.itemResults.forEach((itemResult) => {
+          const previousItem = group.itemMap.get(itemResult.itemName) || {
+            itemName: itemResult.itemName,
+            score: null,
+            comment: '',
+            resultCode: '',
+            updatedAt: '',
+          };
+
+          if (!previousItem.updatedAt || new Date(resultUpdatedAt) >= new Date(previousItem.updatedAt)) {
+            group.itemMap.set(itemResult.itemName, {
+              itemName: itemResult.itemName,
+              score: Number(itemResult.score || 0) || null,
+              comment: itemResult.comment || '',
+              resultCode: latestResult.result_code || '',
+              updatedAt: resultUpdatedAt,
+            });
+          }
+        });
+        return;
+      }
+
+      if (itemNames.length === 1) {
+        const itemName = itemNames[0];
+        const previousItem = group.itemMap.get(itemName) || {
+          itemName,
+          score: null,
+          comment: '',
+          resultCode: '',
+          updatedAt: '',
+        };
+
+        if (!previousItem.updatedAt || new Date(resultUpdatedAt) >= new Date(previousItem.updatedAt)) {
+          group.itemMap.set(itemName, {
+            itemName,
+            score: null,
+            comment: latestResult.memo || '',
+            resultCode: latestResult.result_code || '',
+            updatedAt: resultUpdatedAt,
+          });
+        }
+      }
+    });
+
+    const organizationGroups = Array.from(eventEvaluationMap.values())
+      .map((group) => {
+        const items = Array.from(group.itemMap.values()).sort((left, right) => {
+          const leftWeight = buildItemSortWeight(left.itemName);
+          const rightWeight = buildItemSortWeight(right.itemName);
+          if (leftWeight !== rightWeight) {
+            return leftWeight - rightWeight;
+          }
+          return left.itemName.localeCompare(right.itemName, 'ja');
+        });
+
+        const completedItemCount = items.filter((item) => Number.isFinite(item.score) && item.score > 0).length;
+        const hasActiveTask = [PATROL_TASK_STATUSES.OPEN, PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].some((status) =>
+          group.taskStatuses.has(status)
+        );
+        const statusLabel =
+          completedItemCount === items.length && items.length > 0
+            ? '評価完了'
+            : completedItemCount > 0
+            ? '一部入力済み'
+            : hasActiveTask
+            ? '入力待ち'
+            : '未入力';
+
+        return {
+          organizationName: group.organizationName,
+          eventName: group.eventName,
+          eventLocation: group.eventLocation,
+          latestUpdatedAt: group.latestUpdatedAt,
+          summaryMemo: group.summaryMemo,
+          completedItemCount,
+          totalItemCount: items.length,
+          statusLabel,
+          items,
+        };
+      })
+      .sort((left, right) => {
+        const orgCompare = left.organizationName.localeCompare(right.organizationName, 'ja');
+        if (orgCompare !== 0) {
+          return orgCompare;
+        }
+        const eventCompare = left.eventName.localeCompare(right.eventName, 'ja');
+        if (eventCompare !== 0) {
+          return eventCompare;
+        }
+        return left.eventLocation.localeCompare(right.eventLocation, 'ja');
+      })
+      .reduce((accumulator, event) => {
+        const currentGroup = accumulator.find((group) => group.organizationName === event.organizationName);
+        if (currentGroup) {
+          currentGroup.events.push(event);
+          return accumulator;
+        }
+
+        accumulator.push({
+          organizationName: event.organizationName,
+          events: [event],
+        });
+        return accumulator;
+      }, []);
+
+    setEvaluationReviewGroups(organizationGroups);
+    setIsLoadingEvaluationReviewGroups(false);
+  };
+
+  /**
    * 部署へ再通知
    * @returns {Promise<void>} 再通知処理
    */
@@ -2520,6 +2988,14 @@ const SupportDeskScreen = ({
     loadTaskStats();
     loadPatrollingUsers();
   }, [roleType, user?.id]);
+
+  useEffect(() => {
+    if (!isHQRole || activeTab !== 'evaluation') {
+      return;
+    }
+
+    loadEvaluationReviewGroups();
+  }, [activeTab, evaluationItems, hqEvaluationEvents, hqPatrolTasks, isHQRole]);
 
   /**
    * ダッシュボードタブ表示中は30秒ごとに巡回中スタッフを自動更新する
@@ -3075,6 +3551,39 @@ const SupportDeskScreen = ({
     }
     setSelectedPatrolAssigneeId(selectedPatrolTask.assigned_to || '');
   }, [selectedPatrolTask?.assigned_to, selectedPatrolTask?.id]);
+
+  /**
+   * 本部サポートの巡回タブでタスクを選んだら担当者選択まで自動スクロールする
+   */
+  useEffect(() => {
+    if (
+      !isHQRole ||
+      activeTab !== 'patrol' ||
+      !shouldScrollToPatrolAssignment ||
+      !selectedPatrolTask?.id ||
+      patrolAssignmentSectionY <= 0
+    ) {
+      return;
+    }
+
+    const timerId = setTimeout(() => {
+      departmentScrollViewRef.current?.scrollTo({
+        y: Math.max(patrolAssignmentSectionY - 12, 0),
+        animated: true,
+      });
+      setShouldScrollToPatrolAssignment(false);
+    }, 60);
+
+    return () => {
+      clearTimeout(timerId);
+    };
+  }, [
+    activeTab,
+    isHQRole,
+    patrolAssignmentSectionY,
+    selectedPatrolTask?.id,
+    shouldScrollToPatrolAssignment,
+  ]);
 
   /**
    * タスク選択が変わったときにメモドラフトを既存の notes で初期化する
@@ -3977,7 +4486,10 @@ const SupportDeskScreen = ({
                         },
                       ]}
                     >
-                      <Pressable style={styles.patrolTaskItemContent} onPress={() => setSelectedPatrolTaskId(task.id)}>
+                      <Pressable
+                        style={styles.patrolTaskItemContent}
+                        onPress={() => handleSelectPatrolTask(task.id)}
+                      >
                         <Text style={[styles.ticketTitle, { color: theme.text }]} numberOfLines={1}>
                           {getPatrolTaskTypeLabel(task)}
                         </Text>
@@ -4093,7 +4605,11 @@ const SupportDeskScreen = ({
             })()}
 
             {selectedPatrolTask ? (
-              <>
+              <View
+                onLayout={(event) => {
+                  setPatrolAssignmentSectionY(event.nativeEvent.layout.y);
+                }}
+              >
                 <Text style={[styles.label, { color: theme.text }]}>担当者選択</Text>
                 {isLoadingPatrolAssignees ? (
                   <Text style={[styles.helpText, { color: theme.textSecondary }]}>担当候補を読み込み中...</Text>
@@ -4186,7 +4702,7 @@ const SupportDeskScreen = ({
                     {isSavingPatrolTaskNote ? '保存中...' : 'メモを保存'}
                   </Text>
                 </TouchableOpacity>
-              </>
+              </View>
             ) : null}
           </View>
         ) : null}
@@ -4266,32 +4782,102 @@ const SupportDeskScreen = ({
               </View>
             ) : null}
 
+            <TextInput
+              value={evaluationEventSearch}
+              onChangeText={setEvaluationEventSearch}
+              placeholder="団体名・企画名・場所で検索"
+              placeholderTextColor={theme.textSecondary}
+              style={[
+                styles.compactInput,
+                {
+                  borderColor: theme.border,
+                  backgroundColor: theme.background,
+                  color: theme.text,
+                  marginTop: 8,
+                },
+              ]}
+            />
+
             {/* 全選択/全解除ボタン */}
             {!isLoadingHqEvaluationEvents && (hqEvaluationEvents || []).length > 0 ? (
-              <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <TouchableOpacity
                   style={[styles.inlineActionButton, { borderColor: theme.primary, backgroundColor: `${theme.primary}12` }]}
-                  onPress={() => setSelectedEvalEventIds(new Set((hqEvaluationEvents || []).map((event) => String(event.id))))}
+                  onPress={handleSelectVisibleEvaluationEvents}
+                  disabled={filteredHqEvaluationEvents.length === 0}
                 >
-                  <Text style={[styles.inlineActionButtonText, { color: theme.primary }]}>全選択</Text>
+                  <Text style={[styles.inlineActionButtonText, { color: theme.primary }]}>
+                    表示中を全選択
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.inlineActionButton, { borderColor: theme.border }]}
-                  onPress={() => setSelectedEvalEventIds(new Set())}
+                  onPress={handleClearEvaluationEventSelection}
                 >
                   <Text style={[styles.inlineActionButtonText, { color: theme.textSecondary }]}>全解除</Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.inlineActionButton,
+                    {
+                      borderColor: showSelectedEvaluationEventsOnly ? theme.primary : theme.border,
+                      backgroundColor: showSelectedEvaluationEventsOnly ? `${theme.primary}12` : theme.background,
+                    },
+                  ]}
+                  onPress={() => setShowSelectedEvaluationEventsOnly((prev) => !prev)}
+                >
+                  <Text
+                    style={[
+                      styles.inlineActionButtonText,
+                      { color: showSelectedEvaluationEventsOnly ? theme.primary : theme.textSecondary },
+                    ]}
+                  >
+                    選択中だけ表示
+                  </Text>
+                </TouchableOpacity>
                 <Text style={[styles.helpText, { color: theme.textSecondary, alignSelf: 'center' }]}>
-                  {selectedEvalEventIds.size}件選択中
+                  {selectedEvalEventIds.size}件選択中 / {filteredHqEvaluationEvents.length}件表示
                 </Text>
               </View>
             ) : null}
 
+            <TouchableOpacity
+              style={[
+                styles.evalBulkButton,
+                {
+                  backgroundColor:
+                    selectedEvalEventIds.size === 0 || isCreatingEvaluationTasks || activeEvaluationTasks.length > 0
+                      ? theme.border
+                      : '#1A7F37',
+                  marginTop: 10,
+                },
+              ]}
+              onPress={handleBulkCreateEvaluationTasks}
+              disabled={selectedEvalEventIds.size === 0 || isCreatingEvaluationTasks || activeEvaluationTasks.length > 0}
+            >
+              <Text style={styles.evalBulkButtonText}>
+                {isCreatingEvaluationTasks
+                  ? '生成中...'
+                  : activeEvaluationTasks.length > 0
+                  ? '未完了の評価タスクがあります'
+                  : selectedEvalEventIds.size === 0
+                  ? '企画を選択してください'
+                  : `選択した${selectedEvalEventIds.size}件に評価タスクを生成`}
+              </Text>
+            </TouchableOpacity>
+
             <View style={styles.evalOrgEventList}>
               {isLoadingHqEvaluationEvents ? (
                 <SkeletonLoader lines={3} baseColor={theme.border} />
+              ) : filteredHqEvaluationEvents.length === 0 && (hqEvaluationEvents || []).length > 0 ? (
+                <EmptyState
+                  icon={'\u{1F50D}'}
+                  title="表示条件に一致する企画はありません"
+                  description="検索条件を変えるか、「選択中だけ表示」を解除してください。"
+                  theme={theme}
+                />
               ) : (
-                (hqEvaluationEvents || []).slice(0, 60).map((event) => {
+                filteredHqEvaluationEvents.map((event) => {
                   /** この企画のUUID */
                   const eventId = String(event.id);
                   /** 選択中かどうか */
@@ -4384,6 +4970,157 @@ const SupportDeskScreen = ({
                 📥 評価データをCSVでダウンロード
               </Text>
             </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {isHQRole && activeTab === 'evaluation' ? (
+          <View style={[styles.card, { backgroundColor: theme.surface }]}>
+            <View style={styles.sectionHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>団体別評価</Text>
+                <Text style={[styles.helpText, { color: theme.textSecondary, marginTop: 2 }]}>
+                  団体ごとに、各企画の評価項目・点数・コメントをまとめて確認できます。
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
+                onPress={loadEvaluationReviewGroups}
+              >
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              value={evaluationReviewSearch}
+              onChangeText={setEvaluationReviewSearch}
+              placeholder="団体名・企画名・評価項目で検索"
+              placeholderTextColor={theme.textSecondary}
+              style={[
+                styles.compactInput,
+                {
+                  borderColor: theme.border,
+                  backgroundColor: theme.background,
+                  color: theme.text,
+                },
+              ]}
+            />
+
+            {isLoadingEvaluationReviewGroups ? (
+              <SkeletonLoader lines={4} baseColor={theme.border} />
+            ) : filteredEvaluationReviewGroups.length === 0 ? (
+              <EmptyState
+                icon={'\u{1F4DD}'}
+                title="表示できる団体評価はありません"
+                description="評価が完了すると、団体ごとにここで確認できます。"
+                theme={theme}
+              />
+            ) : (
+              <View style={styles.evalReviewGroupList}>
+                {filteredEvaluationReviewGroups.map((group) => (
+                  <View
+                    key={group.organizationName}
+                    style={[styles.evalReviewGroupCard, { borderColor: theme.border, backgroundColor: theme.background }]}
+                  >
+                    <View style={styles.evalReviewGroupHeader}>
+                      <Text style={[styles.evalReviewGroupTitle, { color: theme.text }]}>{group.organizationName}</Text>
+                      <Text style={[styles.evalReviewGroupMeta, { color: theme.textSecondary }]}>
+                        {group.events.length}企画
+                      </Text>
+                    </View>
+
+                    <View style={styles.evalReviewEventList}>
+                      {group.events.map((event) => {
+                        const statusTone = getEvaluationReviewStatusTone(event.statusLabel);
+                        return (
+                          <View
+                            key={`${group.organizationName}-${event.eventName}-${event.eventLocation}`}
+                            style={[styles.evalReviewEventCard, { borderColor: theme.border, backgroundColor: theme.surface }]}
+                          >
+                            <View style={styles.evalReviewEventHeader}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.evalReviewEventTitle, { color: theme.text }]}>
+                                  {event.eventName}
+                                </Text>
+                                {event.eventLocation ? (
+                                  <Text style={[styles.evalReviewEventMeta, { color: theme.textSecondary }]}>
+                                    {event.eventLocation}
+                                  </Text>
+                                ) : null}
+                              </View>
+                              <View
+                                style={[
+                                  styles.evalReviewStatusBadge,
+                                  { backgroundColor: statusTone.backgroundColor },
+                                ]}
+                              >
+                                <Text style={[styles.evalReviewStatusBadgeText, { color: statusTone.textColor }]}>
+                                  {event.statusLabel}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <Text style={[styles.evalReviewProgressText, { color: theme.textSecondary }]}>
+                              {event.completedItemCount}/{event.totalItemCount} 項目入力済み
+                              {event.latestUpdatedAt
+                                ? ` / 最終更新 ${new Date(event.latestUpdatedAt).toLocaleString('ja-JP')}`
+                                : ''}
+                            </Text>
+
+                            <View style={styles.evalReviewItemList}>
+                              {event.items.map((item) => (
+                                <View key={`${event.eventName}-${item.itemName}`} style={styles.evalReviewItemCard}>
+                                  <View style={styles.evalReviewItemHeader}>
+                                    <Text style={[styles.evalReviewItemName, { color: theme.text }]}>
+                                      {item.itemName}
+                                    </Text>
+                                    <View
+                                      style={[
+                                        styles.evalReviewScoreBadge,
+                                        {
+                                          backgroundColor: item.score ? `${theme.primary}16` : theme.border,
+                                        },
+                                      ]}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.evalReviewScoreBadgeText,
+                                          { color: item.score ? theme.primary : theme.textSecondary },
+                                        ]}
+                                      >
+                                        {item.score ? `${item.score}点` : '未入力'}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                  {item.comment ? (
+                                    <Text style={[styles.evalReviewItemComment, { color: theme.textSecondary }]}>
+                                      コメント: {item.comment}
+                                    </Text>
+                                  ) : null}
+                                </View>
+                              ))}
+                            </View>
+
+                            {event.summaryMemo ? (
+                              <View
+                                style={[
+                                  styles.evalReviewSummaryBox,
+                                  { borderColor: theme.border, backgroundColor: theme.background },
+                                ]}
+                              >
+                                <Text style={[styles.evalReviewSummaryLabel, { color: theme.text }]}>総評</Text>
+                                <Text style={[styles.evalReviewSummaryText, { color: theme.textSecondary }]}>
+                                  {event.summaryMemo}
+                                </Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         ) : null}
 
@@ -7084,6 +7821,109 @@ const styles = StyleSheet.create({
   evalExportButtonText: {
     fontSize: 14,
     fontWeight: '700',
+  },
+  /** 団体別評価一覧 */
+  evalReviewGroupList: {
+    gap: 12,
+    marginTop: 10,
+  },
+  evalReviewGroupCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+  },
+  evalReviewGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  evalReviewGroupTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  evalReviewGroupMeta: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  evalReviewEventList: {
+    gap: 10,
+  },
+  evalReviewEventCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 8,
+  },
+  evalReviewEventHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  evalReviewEventTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  evalReviewEventMeta: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  evalReviewStatusBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  evalReviewStatusBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  evalReviewProgressText: {
+    fontSize: 12,
+  },
+  evalReviewItemList: {
+    gap: 8,
+  },
+  evalReviewItemCard: {
+    gap: 4,
+  },
+  evalReviewItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  evalReviewItemName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  evalReviewScoreBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  evalReviewScoreBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  evalReviewItemComment: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  evalReviewSummaryBox: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    gap: 4,
+  },
+  evalReviewSummaryLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  evalReviewSummaryText: {
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
 

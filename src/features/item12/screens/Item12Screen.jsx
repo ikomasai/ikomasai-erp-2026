@@ -25,11 +25,17 @@ import { ThemedHeader } from '../../../shared/components/ThemedHeader';
 import { PATROL_TABS, PATROL_TAB_TYPES, SCREEN_NAME } from '../constants';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import { canAccessManagementSupportScreen } from '../../../services/supabase/permissionService';
-import { updatePatrolStatus } from '../../../services/supabase/userService';
+import { selectUserProfile, updatePatrolStatus } from '../../../services/supabase/userService';
 import {
   acceptPatrolTask,
+  acceptPatrolTaskGroup,
   assignPatrolTask,
+  assignPatrolTaskGroup,
+  buildEvaluationPatrolTaskNotes,
   completePatrolTask,
+  completePatrolTaskGroup,
+  getEvaluationPatrolTaskItemNames,
+  getEvaluationPatrolTaskMeta,
   getPatrolTaskDisplayType,
   listPatrolTaskResults,
   listPatrolTasks,
@@ -68,6 +74,8 @@ import SupportScreenAccessGuard from '../../support/components/SupportScreenAcce
 const EVALUATION_TASK_LABEL = '企画評価';
 /** 表示専用の評価タスク向け「向かいます」通知文 */
 const EVALUATION_TASK_GO_MESSAGE = '巡回担当が企画評価のため現地へ向かいます。';
+/** 既定の評価項目順 */
+const DEFAULT_EVALUATION_ITEM_ORDER = ['企画書通りの進行', '安全管理', '来場者対応', '設営・片付け', '全体印象'];
 
 /** 種別ごとの完了結果候補 */
 const RESULT_OPTIONS_BY_TASK_TYPE = {
@@ -138,6 +146,7 @@ const ASYNC_KEY_UNVISITED_ALERT_MINUTES = 'unvisitedAlertMinutes';
 const PATROL_TAB_DESCRIPTIONS = {
   [PATROL_TAB_TYPES.DASHBOARD]: '件数と優先タスクだけを短く確認する巡回用の要約です。',
   [PATROL_TAB_TYPES.TASKS]: '優先度の高い巡回依頼を選んで、そのまま対応まで進めます。',
+  [PATROL_TAB_TYPES.EVALUATION]: '企画評価タスクをまとめて確認し、現地評価を登録します。',
   [PATROL_TAB_TYPES.CHECK]: '定常巡回の記録と未巡回箇所の確認を同じ流れで行います。',
 };
 
@@ -196,6 +205,194 @@ const getGoMessageByTask = (task) => {
 };
 
 /**
+ * 評価タスクの入力内容を完了メモへ整形する
+ * @param {Object} params - 整形対象
+ * @param {string[]} params.itemNames - 評価項目一覧
+ * @param {Object} params.inputs - 評価項目入力状態
+ * @param {string} [params.summaryMemo=''] - 総評メモ
+ * @returns {string} 保存用メモ
+ */
+const buildEvaluationCompletionMemo = ({ itemNames, inputs, summaryMemo = '' }) => {
+  const lines = [];
+
+  if (Array.isArray(itemNames) && itemNames.length > 0) {
+    lines.push('評価項目');
+    itemNames.forEach((itemName) => {
+      const score = Number(inputs[itemName]?.score || 0);
+      const comment = (inputs[itemName]?.comment || '').trim();
+      lines.push(`- ${itemName}: ${score}点`);
+      if (comment) {
+        lines.push(`  コメント: ${comment}`);
+      }
+    });
+  }
+
+  const normalizedSummaryMemo = summaryMemo.trim();
+  if (normalizedSummaryMemo) {
+    if (lines.length > 0) {
+      lines.push('');
+    }
+    lines.push('総評');
+    lines.push(normalizedSummaryMemo);
+  }
+
+  return lines.join('\n').trim();
+};
+
+/**
+ * 評価項目名一覧を既定順に並べ替える
+ * @param {string[]} itemNames - 評価項目一覧
+ * @returns {string[]} ソート済み評価項目一覧
+ */
+const sortEvaluationItemNames = (itemNames) => {
+  const orderMap = DEFAULT_EVALUATION_ITEM_ORDER.reduce((accumulator, itemName, index) => {
+    accumulator[itemName] = index;
+    return accumulator;
+  }, {});
+
+  return [...new Set((Array.isArray(itemNames) ? itemNames : []).filter(Boolean))].sort((left, right) => {
+    const leftOrder = orderMap[left];
+    const rightOrder = orderMap[right];
+
+    if (Number.isInteger(leftOrder) && Number.isInteger(rightOrder) && leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    if (Number.isInteger(leftOrder)) {
+      return -1;
+    }
+    if (Number.isInteger(rightOrder)) {
+      return 1;
+    }
+    return left.localeCompare(right, 'ja');
+  });
+};
+
+/**
+ * 旧形式の評価タスク群をまとめるためのキーを返す
+ * @param {Object} task - 巡回タスク
+ * @returns {string} グループキー
+ */
+const getLegacyEvaluationTaskGroupKey = (task) => {
+  const taskMeta = getEvaluationPatrolTaskMeta(task);
+  if (taskMeta.eventId) {
+    return `event:${taskMeta.eventId}`;
+  }
+
+  const eventName = (task?.event_name || '').trim();
+  const locationLabel = (task?.event_location || task?.location_text || '').trim();
+  if (eventName || locationLabel) {
+    return `name:${eventName}::${locationLabel}`;
+  }
+
+  return `task:${task?.id || 'unknown'}`;
+};
+
+/**
+ * 旧形式の評価タスク（1項目1件）を画面表示上は1企画1件へまとめる
+ * @param {Array} inputTasks - 巡回タスク一覧
+ * @returns {Array} 画面表示用に整形した巡回タスク一覧
+ */
+const mergePatrolTasksForDisplay = (inputTasks) => {
+  const tasks = Array.isArray(inputTasks) ? inputTasks : [];
+  const groupedEvaluationTasks = new Map();
+  const passthroughTasks = [];
+
+  tasks.forEach((task) => {
+    if (getPatrolTaskDisplayType(task) !== PATROL_TASK_DISPLAY_TYPES.EVALUATION) {
+      passthroughTasks.push(task);
+      return;
+    }
+
+    const itemNames = getEvaluationPatrolTaskItemNames(task);
+    if (itemNames.length !== 1) {
+      passthroughTasks.push(task);
+      return;
+    }
+
+    const groupKey = getLegacyEvaluationTaskGroupKey(task);
+    if (!groupedEvaluationTasks.has(groupKey)) {
+      groupedEvaluationTasks.set(groupKey, []);
+    }
+    groupedEvaluationTasks.get(groupKey).push(task);
+  });
+
+  const mergedLegacyEvaluationTasks = Array.from(groupedEvaluationTasks.entries()).map(([groupKey, groupTasks]) => {
+    if (!Array.isArray(groupTasks) || groupTasks.length <= 1) {
+      return groupTasks?.[0] || null;
+    }
+
+    const latestTask = groupTasks.slice().sort((left, right) => {
+      return new Date(right.updated_at || right.created_at || 0) - new Date(left.updated_at || left.created_at || 0);
+    })[0];
+
+    const taskMeta = groupTasks.reduce(
+      (accumulator, task) => {
+        const nextMeta = getEvaluationPatrolTaskMeta(task);
+        return {
+          eventId: accumulator.eventId || nextMeta.eventId || '',
+          organizationName: accumulator.organizationName || nextMeta.organizationName || '',
+        };
+      },
+      { eventId: '', organizationName: '' }
+    );
+
+    const mergedItemNames = sortEvaluationItemNames(
+      groupTasks.flatMap((task) => getEvaluationPatrolTaskItemNames(task))
+    );
+
+    const evaluationTaskIdByItem = {};
+    groupTasks.forEach((task) => {
+      getEvaluationPatrolTaskItemNames(task).forEach((itemName) => {
+        if (!evaluationTaskIdByItem[itemName]) {
+          evaluationTaskIdByItem[itemName] = task.id;
+        }
+      });
+    });
+
+    const assignedUsers = [...new Set(groupTasks.map((task) => task.assigned_to).filter(Boolean))];
+    const statusPriority = [
+      PATROL_TASK_STATUSES.EN_ROUTE,
+      PATROL_TASK_STATUSES.ACCEPTED,
+      PATROL_TASK_STATUSES.OPEN,
+      PATROL_TASK_STATUSES.CANCELED,
+      PATROL_TASK_STATUSES.DONE,
+    ];
+    const mergedStatus =
+      statusPriority.find((status) => groupTasks.some((task) => task.task_status === status)) ||
+      latestTask.task_status;
+
+    return {
+      ...latestTask,
+      id: `evaluation-group:${groupKey}`,
+      notes: buildEvaluationPatrolTaskNotes({
+        items: mergedItemNames,
+        eventId: taskMeta.eventId,
+        organizationName: taskMeta.organizationName,
+      }),
+      task_status: mergedStatus,
+      assigned_to: assignedUsers.length === 1 ? assignedUsers[0] : assignedUsers[0] || null,
+      accepted_at:
+        groupTasks
+          .map((task) => task.accepted_at)
+          .filter(Boolean)
+          .sort((left, right) => new Date(right) - new Date(left))[0] || null,
+      done_at:
+        groupTasks
+          .map((task) => task.done_at)
+          .filter(Boolean)
+          .sort((left, right) => new Date(right) - new Date(left))[0] || null,
+      evaluationTaskIds: groupTasks.map((task) => task.id),
+      evaluationTaskIdByItem,
+      isLegacyEvaluationGroup: true,
+    };
+  }).filter(Boolean);
+
+  return [...passthroughTasks, ...mergedLegacyEvaluationTasks].sort((left, right) => {
+    return new Date(right.created_at || 0) - new Date(left.created_at || 0);
+  });
+};
+
+/**
  * 項目12画面コンポーネント
  * @param {Object} props - コンポーネントプロパティ
  * @param {Object} props.navigation - React Navigationのnavigationオブジェクト
@@ -241,6 +438,12 @@ const Item12Screen = ({ navigation, route }) => {
   const [tasks, setTasks] = useState([]);
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
+  /** タスクタブ全体のスクロール参照 */
+  const patrolScrollViewRef = useRef(null);
+  /** タスク詳細セクションのY座標 */
+  const [taskDetailSectionY, setTaskDetailSectionY] = useState(0);
+  /** 一覧選択後に詳細へ自動スクロールするか */
+  const [shouldScrollToTaskDetail, setShouldScrollToTaskDetail] = useState(false);
 
   /* ---- タスク詳細関連 ---- */
   const [taskResults, setTaskResults] = useState([]);
@@ -248,6 +451,8 @@ const Item12Screen = ({ navigation, route }) => {
   const [sourceMessages, setSourceMessages] = useState([]);
   const [isLoadingSourceMessages, setIsLoadingSourceMessages] = useState(false);
   const [patrolMemo, setPatrolMemo] = useState('');
+  const [evaluationInputs, setEvaluationInputs] = useState({});
+  const [evaluationSummaryMemo, setEvaluationSummaryMemo] = useState('');
   const [resultCode, setResultCode] = useState(PATROL_RESULT_CODES.OK);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -295,6 +500,8 @@ const Item12Screen = ({ navigation, route }) => {
   const [isOnPatrol, setIsOnPatrol] = useState(false);
   /** 巡回中フラグ更新中フラグ */
   const [isUpdatingPatrolStatus, setIsUpdatingPatrolStatus] = useState(false);
+  /** 初回読込より手動トグルを優先するためのフラグ */
+  const hasTouchedPatrolStatusRef = useRef(false);
 
   /* ---- トースト通知 ---- */
   /** トースト表示フラグ・メッセージ・種別 */
@@ -366,6 +573,34 @@ const Item12Screen = ({ navigation, route }) => {
   const selectedTask = useMemo(() => {
     return tasks.find((task) => task.id === selectedTaskId) || null;
   }, [selectedTaskId, tasks]);
+
+  /** 通常の巡回タスク一覧（評価タスクを除く） */
+  const regularTasks = useMemo(() => {
+    return tasks.filter((task) => getPatrolTaskDisplayType(task) !== PATROL_TASK_DISPLAY_TYPES.EVALUATION);
+  }, [tasks]);
+
+  /** 評価タスク一覧 */
+  const evaluationTasks = useMemo(() => {
+    return tasks.filter((task) => getPatrolTaskDisplayType(task) === PATROL_TASK_DISPLAY_TYPES.EVALUATION);
+  }, [tasks]);
+
+  /** 選択中評価タスクの評価項目一覧 */
+  const selectedEvaluationItemNames = useMemo(() => {
+    if (!selectedTask || getPatrolTaskDisplayType(selectedTask) !== PATROL_TASK_DISPLAY_TYPES.EVALUATION) {
+      return [];
+    }
+
+    return getEvaluationPatrolTaskItemNames(selectedTask);
+  }, [selectedTask?.id, selectedTask?.notes]);
+
+  /** 選択中タスクに紐づく実タスクID一覧 */
+  const selectedTaskIds = useMemo(() => {
+    if (Array.isArray(selectedTask?.evaluationTaskIds) && selectedTask.evaluationTaskIds.length > 0) {
+      return selectedTask.evaluationTaskIds;
+    }
+
+    return selectedTask?.id ? [selectedTask.id] : [];
+  }, [selectedTask?.id, selectedTask?.evaluationTaskIds]);
 
   /** 選択中タスクの結果候補 */
   const resultOptions = useMemo(() => {
@@ -468,7 +703,7 @@ const Item12Screen = ({ navigation, route }) => {
       return;
     }
 
-    const nextTasks = data || [];
+    const nextTasks = mergePatrolTasksForDisplay(data || []);
     setTasks(nextTasks);
 
     if (nextTasks.length === 0) {
@@ -486,18 +721,61 @@ const Item12Screen = ({ navigation, route }) => {
   };
 
   /**
+   * 一覧からタスクを選択し、詳細セクションへの移動を予約する
+   * @param {string} taskId - 選択したタスクID
+   * @returns {void}
+   */
+  const handleSelectTask = (taskId) => {
+    setSelectedTaskId(taskId);
+    setShouldScrollToTaskDetail(true);
+  };
+
+  /**
+   * 評価項目の点数を更新
+   * @param {string} itemName - 評価項目名
+   * @param {number} score - 点数
+   * @returns {void}
+   */
+  const handleChangeEvaluationScore = (itemName, score) => {
+    setEvaluationInputs((prev) => ({
+      ...prev,
+      [itemName]: {
+        ...(prev[itemName] || {}),
+        score,
+      },
+    }));
+  };
+
+  /**
+   * 評価項目のコメントを更新
+   * @param {string} itemName - 評価項目名
+   * @param {string} comment - コメント
+   * @returns {void}
+   */
+  const handleChangeEvaluationComment = (itemName, comment) => {
+    setEvaluationInputs((prev) => ({
+      ...prev,
+      [itemName]: {
+        ...(prev[itemName] || {}),
+        comment,
+      },
+    }));
+  };
+
+  /**
    * タスク結果一覧取得
    * @param {string|null} taskId - タスクID
    * @returns {Promise<void>} 取得処理
    */
-  const loadTaskResults = async (taskId) => {
-    if (!taskId) {
+  const loadTaskResults = async (taskId, taskIds = []) => {
+    const normalizedTaskIds = [taskId, ...(Array.isArray(taskIds) ? taskIds : [])].filter(Boolean);
+    if (normalizedTaskIds.length === 0) {
       setTaskResults([]);
       return;
     }
 
     setIsLoadingTaskResults(true);
-    const { data, error } = await listPatrolTaskResults({ taskId });
+    const { data, error } = await listPatrolTaskResults({ taskId, taskIds });
     setIsLoadingTaskResults(false);
 
     if (error) {
@@ -635,6 +913,7 @@ const Item12Screen = ({ navigation, route }) => {
       return;
     }
 
+    hasTouchedPatrolStatusRef.current = true;
     /** 切り替え後の値 */
     const nextValue = !isOnPatrol;
     setIsUpdatingPatrolStatus(true);
@@ -832,13 +1111,24 @@ const Item12Screen = ({ navigation, route }) => {
       return;
     }
 
-    setIsSubmitting(true);
-    const { error } = await acceptPatrolTask({
-      taskId: selectedTask.id,
-      patrolUserId: user.id,
-    });
+    const groupedTaskIds =
+      Array.isArray(selectedTask.evaluationTaskIds) && selectedTask.evaluationTaskIds.length > 1
+        ? selectedTask.evaluationTaskIds
+        : [];
 
-    if (!error && selectedTask.source_ticket_id) {
+    setIsSubmitting(true);
+    const { error } =
+      groupedTaskIds.length > 0
+        ? await acceptPatrolTaskGroup({
+            taskIds: groupedTaskIds,
+            patrolUserId: user.id,
+          })
+        : await acceptPatrolTask({
+            taskId: selectedTask.id,
+            patrolUserId: user.id,
+          });
+
+    if (!error && groupedTaskIds.length === 0 && selectedTask.source_ticket_id) {
       await createTicketMessage({
         ticketId: selectedTask.source_ticket_id,
         authorId: user.id,
@@ -855,7 +1145,7 @@ const Item12Screen = ({ navigation, route }) => {
 
     await Promise.all([
       loadTasks(selectedTask.id),
-      loadTaskResults(selectedTask.id),
+      loadTaskResults(selectedTask.id, selectedTask.evaluationTaskIds || []),
       loadSourceMessages(selectedTask.source_ticket_id || null),
     ]);
     showToast('「向かいます」を登録しました');
@@ -878,17 +1168,60 @@ const Item12Screen = ({ navigation, route }) => {
 
     const taskLabel = getTaskTypeLabel(selectedTask);
     const resultLabel = RESULT_LABELS[resultCode] || resultCode;
+    const isEvaluationTask =
+      getPatrolTaskDisplayType(selectedTask) === PATROL_TASK_DISPLAY_TYPES.EVALUATION;
+    let completionMemo = patrolMemo;
+    const groupedTaskIds =
+      isEvaluationTask && Array.isArray(selectedTask.evaluationTaskIds) && selectedTask.evaluationTaskIds.length > 1
+        ? selectedTask.evaluationTaskIds
+        : [];
+
+    if (isEvaluationTask) {
+      if (selectedEvaluationItemNames.length === 0) {
+        showToast('評価項目が設定されていません', 'error');
+        return;
+      }
+
+      if (selectedEvaluationItemNames.some((itemName) => !Number(evaluationInputs[itemName]?.score || 0))) {
+        showToast('すべての評価項目に点数を入力してください', 'error');
+        return;
+      }
+
+      completionMemo = buildEvaluationCompletionMemo({
+        itemNames: selectedEvaluationItemNames,
+        inputs: evaluationInputs,
+        summaryMemo: evaluationSummaryMemo,
+      });
+    }
 
     setIsSubmitting(true);
-    const { error } = await completePatrolTask({
-      taskId: selectedTask.id,
-      patrolUserId: user.id,
-      resultCode,
-      memo: patrolMemo,
-      taskType: selectedTask.task_type,
-      sourceTicketId: selectedTask.source_ticket_id,
-      sourceKeyLoanId: selectedTask.source_key_loan_id,
-    });
+    const { error } =
+      groupedTaskIds.length > 0
+        ? await completePatrolTaskGroup({
+            taskIds: groupedTaskIds,
+            patrolUserId: user.id,
+            resultCode,
+            memosByTaskId: selectedEvaluationItemNames.reduce((accumulator, itemName) => {
+              const taskId = selectedTask.evaluationTaskIdByItem?.[itemName];
+              if (taskId) {
+                accumulator[taskId] = buildEvaluationCompletionMemo({
+                  itemNames: [itemName],
+                  inputs: evaluationInputs,
+                  summaryMemo: evaluationSummaryMemo,
+                });
+              }
+              return accumulator;
+            }, {}),
+          })
+        : await completePatrolTask({
+            taskId: selectedTask.id,
+            patrolUserId: user.id,
+            resultCode,
+            memo: completionMemo,
+            taskType: selectedTask.task_type,
+            sourceTicketId: selectedTask.source_ticket_id,
+            sourceKeyLoanId: selectedTask.source_key_loan_id,
+          });
     setIsSubmitting(false);
 
     if (error) {
@@ -896,10 +1229,15 @@ const Item12Screen = ({ navigation, route }) => {
       return;
     }
 
-    setPatrolMemo('');
+    if (isEvaluationTask) {
+      setEvaluationInputs({});
+      setEvaluationSummaryMemo('');
+    } else {
+      setPatrolMemo('');
+    }
     await Promise.all([
       loadTasks(selectedTask.id),
-      loadTaskResults(selectedTask.id),
+      loadTaskResults(selectedTask.id, selectedTask.evaluationTaskIds || []),
       loadSourceMessages(selectedTask.source_ticket_id || null),
     ]);
     showToast(`${taskLabel}を「${resultLabel}」で完了しました`);
@@ -957,11 +1295,21 @@ const Item12Screen = ({ navigation, route }) => {
     }
 
     setIsSubmitting(true);
-    const { error } = await assignPatrolTask({
-      taskId: selectedTask.id,
-      assignedTo: null,
-      actorUserId: user.id,
-    });
+    const groupedTaskIds =
+      Array.isArray(selectedTask.evaluationTaskIds) && selectedTask.evaluationTaskIds.length > 1
+        ? selectedTask.evaluationTaskIds
+        : [];
+    const { error } =
+      groupedTaskIds.length > 0
+        ? await assignPatrolTaskGroup({
+            taskIds: groupedTaskIds,
+            assignedTo: null,
+          })
+        : await assignPatrolTask({
+            taskId: selectedTask.id,
+            assignedTo: null,
+            actorUserId: user.id,
+          });
     setIsSubmitting(false);
 
     if (error) {
@@ -1053,6 +1401,28 @@ const Item12Screen = ({ navigation, route }) => {
     refreshPatrolCheckData();
     loadMyHistory();
     loadOrganizationEvents();
+  }, [user?.id]);
+
+  useEffect(() => {
+    const loadPatrolStatus = async () => {
+      if (!user?.id) {
+        setIsOnPatrol(false);
+        return;
+      }
+
+      hasTouchedPatrolStatusRef.current = false;
+      const { profile, error } = await selectUserProfile(user.id);
+      if (error) {
+        console.error('巡回中ステータスの取得に失敗:', error);
+        return;
+      }
+
+      if (!hasTouchedPatrolStatusRef.current) {
+        setIsOnPatrol(Boolean(profile?.on_patrol));
+      }
+    };
+
+    loadPatrolStatus();
   }, [user?.id]);
 
   useEffect(() => {
@@ -1170,9 +1540,81 @@ const Item12Screen = ({ navigation, route }) => {
     return () => clearInterval(interval);
   }, []);
 
+  /**
+   * 現在のタブに表示するタスクだけが選択されるように補正する
+   */
   useEffect(() => {
-    loadTaskResults(selectedTaskId);
-  }, [selectedTaskId]);
+    if (![PATROL_TAB_TYPES.TASKS, PATROL_TAB_TYPES.EVALUATION].includes(activeTab)) {
+      return;
+    }
+
+    const visibleTasks =
+      activeTab === PATROL_TAB_TYPES.EVALUATION ? evaluationTasks : regularTasks;
+
+    if (visibleTasks.length === 0) {
+      setSelectedTaskId(null);
+      return;
+    }
+
+    if (!visibleTasks.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(visibleTasks[0].id);
+    }
+  }, [activeTab, evaluationTasks, regularTasks, selectedTaskId]);
+
+  const selectedTaskIdsKey = useMemo(() => selectedTaskIds.join(','), [selectedTaskIds]);
+
+  useEffect(() => {
+    loadTaskResults(selectedTask?.id || null, selectedTask?.evaluationTaskIds || []);
+  }, [selectedTask?.id, selectedTaskIdsKey]);
+
+  /**
+   * 評価タスクを切り替えたら入力状態を対象項目に合わせて初期化する
+   */
+  useEffect(() => {
+    if (!selectedTask || getPatrolTaskDisplayType(selectedTask) !== PATROL_TASK_DISPLAY_TYPES.EVALUATION) {
+      setEvaluationInputs({});
+      setEvaluationSummaryMemo('');
+      return;
+    }
+
+    setEvaluationInputs((previousInputs) => {
+      const nextInputs = {};
+      selectedEvaluationItemNames.forEach((itemName) => {
+        nextInputs[itemName] = {
+          score: previousInputs[itemName]?.score || '',
+          comment: previousInputs[itemName]?.comment || '',
+        };
+      });
+      return nextInputs;
+    });
+    setEvaluationSummaryMemo('');
+  }, [selectedEvaluationItemNames, selectedTask?.id]);
+
+  /**
+   * タスク一覧で選んだ項目の詳細まで自動スクロールする
+   */
+  useEffect(() => {
+    if (
+      ![PATROL_TAB_TYPES.TASKS, PATROL_TAB_TYPES.EVALUATION].includes(activeTab) ||
+      !shouldScrollToTaskDetail ||
+      !selectedTask?.id ||
+      taskDetailSectionY <= 0
+    ) {
+      return;
+    }
+
+    const timerId = setTimeout(() => {
+      patrolScrollViewRef.current?.scrollTo({
+        y: Math.max(taskDetailSectionY - 12, 0),
+        animated: true,
+      });
+      setShouldScrollToTaskDetail(false);
+    }, 60);
+
+    return () => {
+      clearTimeout(timerId);
+    };
+  }, [activeTab, selectedTask?.id, shouldScrollToTaskDetail, taskDetailSectionY]);
 
   useEffect(() => {
     loadSourceMessages(selectedTask?.source_ticket_id || null);
@@ -1198,39 +1640,6 @@ const Item12Screen = ({ navigation, route }) => {
       setActiveTab(initialTab);
     }
   }, [initialTab]);
-
-  /**
-   * 画面離脱・アプリバックグラウンド時に巡回中フラグを自動解除する
-   * isOnPatrol が true の状態で画面を閉じた場合でも本部側に残り続けないよう on_patrol = false にリセットする
-   */
-  useEffect(() => {
-    if (!user?.id) {
-      return () => {};
-    }
-
-    /** ナビゲーション離脱時にフラグをOFFにする */
-    const unsubscribeBlur = navigation?.addListener?.('blur', () => {
-      if (isOnPatrol) {
-        updatePatrolStatus(user.id, false).catch(() => {});
-        setIsOnPatrol(false);
-      }
-    }) || (() => {});
-
-    /** ネイティブ: アプリがバックグラウンドに移行したときもOFF */
-    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'background' || nextState === 'inactive') {
-        if (isOnPatrol) {
-          updatePatrolStatus(user.id, false).catch(() => {});
-          setIsOnPatrol(false);
-        }
-      }
-    });
-
-    return () => {
-      unsubscribeBlur();
-      appStateSubscription.remove();
-    };
-  }, [user?.id, navigation, isOnPatrol]);
 
   /**
    * AsyncStorage から施錠確認サマリー表示設定を読み込む
@@ -1316,6 +1725,7 @@ const Item12Screen = ({ navigation, route }) => {
       >
         {/* ── タブコンテンツ ── */}
         <ScrollView
+          ref={patrolScrollViewRef}
           style={styles.scrollView}
           contentContainerStyle={[styles.content, isMobile && styles.contentMobile]}
         >
@@ -1548,38 +1958,99 @@ const Item12Screen = ({ navigation, route }) => {
               <PatrolTaskList
                 theme={theme}
                 user={user}
-                tasks={tasks}
+                tasks={regularTasks}
                 isLoadingTasks={isLoadingTasks}
                 selectedTaskId={selectedTaskId}
-                onSelectTask={setSelectedTaskId}
+                onSelectTask={handleSelectTask}
                 onRefresh={() => loadTasks(selectedTaskId)}
               />
 
-              {selectedTask ? (
-                <PatrolTaskDetail
-                  theme={theme}
-                  user={user}
-                  selectedTask={selectedTask}
-                  resultOptions={resultOptions}
-                  resultCode={resultCode}
-                  onChangeResultCode={setResultCode}
-                  patrolMemo={patrolMemo}
-                  onChangePatrolMemo={setPatrolMemo}
-                  isSubmitting={isSubmitting}
-                  canAccept={canAccept}
-                  hasAnyActiveTask={hasAnyActiveTask}
-                  canComplete={canComplete}
-                  onAcceptTask={handleAcceptTask}
-                  onRejectTask={handleRejectTask}
-                  onCompleteTask={handleCompleteTask}
-                  onSendMemoOnly={handleSendMemoOnly}
-                  taskResults={taskResults}
-                  isLoadingTaskResults={isLoadingTaskResults}
-                  onRefreshTaskResults={() => loadTaskResults(selectedTask.id)}
-                  sourceMessages={sourceMessages}
-                  isLoadingSourceMessages={isLoadingSourceMessages}
-                  onRefreshSourceMessages={() => loadSourceMessages(selectedTask.source_ticket_id)}
-                />
+              {selectedTask && getPatrolTaskDisplayType(selectedTask) !== PATROL_TASK_DISPLAY_TYPES.EVALUATION ? (
+                <View onLayout={(event) => setTaskDetailSectionY(event.nativeEvent.layout.y)}>
+                  <PatrolTaskDetail
+                    theme={theme}
+                    user={user}
+                    selectedTask={selectedTask}
+                    resultOptions={resultOptions}
+                    resultCode={resultCode}
+                    onChangeResultCode={setResultCode}
+                    patrolMemo={patrolMemo}
+                    onChangePatrolMemo={setPatrolMemo}
+                    isSubmitting={isSubmitting}
+                    canAccept={canAccept}
+                    hasAnyActiveTask={hasAnyActiveTask}
+                    canComplete={canComplete}
+                    onAcceptTask={handleAcceptTask}
+                    onRejectTask={handleRejectTask}
+                    onCompleteTask={handleCompleteTask}
+                    onSendMemoOnly={handleSendMemoOnly}
+                    taskResults={taskResults}
+                    isLoadingTaskResults={isLoadingTaskResults}
+                    onRefreshTaskResults={() => loadTaskResults(selectedTask.id, selectedTask.evaluationTaskIds || [])}
+                    sourceMessages={sourceMessages}
+                    isLoadingSourceMessages={isLoadingSourceMessages}
+                    onRefreshSourceMessages={() => loadSourceMessages(selectedTask.source_ticket_id)}
+                    evaluationInputs={evaluationInputs}
+                    onChangeEvaluationScore={handleChangeEvaluationScore}
+                    onChangeEvaluationComment={handleChangeEvaluationComment}
+                    evaluationSummaryMemo={evaluationSummaryMemo}
+                    onChangeEvaluationSummaryMemo={setEvaluationSummaryMemo}
+                  />
+                </View>
+              ) : null}
+            </>
+          )}
+
+          {activeTab === PATROL_TAB_TYPES.EVALUATION && (
+            <>
+              <PatrolTaskList
+                theme={theme}
+                user={user}
+                tasks={evaluationTasks}
+                isLoadingTasks={isLoadingTasks}
+                selectedTaskId={selectedTaskId}
+                onSelectTask={handleSelectTask}
+                onRefresh={() => loadTasks(selectedTaskId)}
+                title="評価タスク一覧"
+                subTitle="評価対象を選んで、そのまま評価入力と登録まで進みます。"
+                searchPlaceholder="企画名・場所・評価項目で検索"
+                emptyTitle="評価タスクはありません"
+                emptyDescription="現在入力待ちの評価タスクはありません"
+                defaultHelpText="評価タスクだけをまとめて確認できます。タップすると詳細と評価入力へ進みます。"
+              />
+
+              {selectedTask && getPatrolTaskDisplayType(selectedTask) === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? (
+                <View onLayout={(event) => setTaskDetailSectionY(event.nativeEvent.layout.y)}>
+                  <PatrolTaskDetail
+                    theme={theme}
+                    user={user}
+                    selectedTask={selectedTask}
+                    resultOptions={resultOptions}
+                    resultCode={resultCode}
+                    onChangeResultCode={setResultCode}
+                    patrolMemo={patrolMemo}
+                    onChangePatrolMemo={setPatrolMemo}
+                    isSubmitting={isSubmitting}
+                    canAccept={canAccept}
+                    hasAnyActiveTask={hasAnyActiveTask}
+                    canComplete={canComplete}
+                    onAcceptTask={handleAcceptTask}
+                    onRejectTask={handleRejectTask}
+                    onCompleteTask={handleCompleteTask}
+                    onSendMemoOnly={handleSendMemoOnly}
+                    taskResults={taskResults}
+                    isLoadingTaskResults={isLoadingTaskResults}
+                    onRefreshTaskResults={() => loadTaskResults(selectedTask.id, selectedTask.evaluationTaskIds || [])}
+                    sourceMessages={sourceMessages}
+                    isLoadingSourceMessages={isLoadingSourceMessages}
+                    onRefreshSourceMessages={() => loadSourceMessages(selectedTask.source_ticket_id)}
+                    evaluationInputs={evaluationInputs}
+                    onChangeEvaluationScore={handleChangeEvaluationScore}
+                    onChangeEvaluationComment={handleChangeEvaluationComment}
+                    evaluationSummaryMemo={evaluationSummaryMemo}
+                    onChangeEvaluationSummaryMemo={setEvaluationSummaryMemo}
+                  />
+                </View>
               ) : null}
             </>
           )}

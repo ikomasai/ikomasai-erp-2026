@@ -3,8 +3,16 @@
  * タスクを種別（task_type）ごとにグループ化して表示する
  */
 
-import React, { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import {
   getEvaluationPatrolTaskItemName,
   getPatrolTaskDisplayType,
@@ -101,6 +109,13 @@ const TASK_TYPE_ORDER = [
 ];
 
 /**
+ * 入力値を検索しやすい形へ正規化する
+ * @param {string|null|undefined} value - 入力値
+ * @returns {string} 正規化済み文字列
+ */
+const normalizeText = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+
+/**
  * 巡回タスク一覧コンポーネント
  * @param {Object} props - コンポーネントプロパティ
  * @param {Object} props.theme - テーマオブジェクト
@@ -120,11 +135,21 @@ const PatrolTaskList = ({
   selectedTaskId,
   onSelectTask,
   onRefresh,
+  title = '巡回タスク一覧',
+  subTitle = '優先度の高い順に選んで、そのまま詳細確認へ進みます。',
+  searchPlaceholder = '企画名・場所・種別・鍵名で検索',
+  emptyTitle = '巡回タスクはありません',
+  emptyDescription = '現在対応が必要なタスクはありません',
+  defaultHelpText = '種別ごとに折りたたみできます。タップすると詳細へ進みます。',
 }) => {
   /** 画面幅（レスポンシブ対応用） */
   const { width: windowWidth } = useWindowDimensions();
   /** スマホ幅かどうか（768px 未満） */
   const isMobile = windowWidth < 768;
+  /** 一覧検索キーワード */
+  const [searchText, setSearchText] = useState('');
+  /** 種別ごとの折りたたみ状態 */
+  const [collapsedGroupMap, setCollapsedGroupMap] = useState({});
 
   /**
    * タスクを task_type ごとにグループ化し、優先順で並べた配列を生成
@@ -156,6 +181,79 @@ const PatrolTaskList = ({
     return orderedGroups;
   }, [tasks]);
 
+  /**
+   * タスク種別の増減に追従して折りたたみ状態を補正する
+   * 既存の開閉状態は維持しつつ、新しい種別は展開状態で追加する
+   */
+  useEffect(() => {
+    setCollapsedGroupMap((previousMap) => {
+      const nextMap = { ...previousMap };
+
+      groupedTasks.forEach(({ type }) => {
+        if (typeof nextMap[type] !== 'boolean') {
+          nextMap[type] = false;
+        }
+      });
+
+      Object.keys(nextMap).forEach((type) => {
+        if (!groupedTasks.some((group) => group.type === type)) {
+          delete nextMap[type];
+        }
+      });
+
+      return nextMap;
+    });
+  }, [groupedTasks]);
+
+  /** 検索キーワード */
+  const normalizedSearchKeyword = useMemo(() => {
+    return normalizeText(searchText);
+  }, [searchText]);
+
+  /**
+   * 検索を反映したタスクグループ
+   * 企画名・場所・種別・鍵名・評価項目・メモで部分一致させる
+   */
+  const filteredGroupedTasks = useMemo(() => {
+    if (!normalizedSearchKeyword) {
+      return groupedTasks;
+    }
+
+    return groupedTasks
+      .map((group) => {
+        const groupLabel =
+          group.type === PATROL_TASK_DISPLAY_TYPES.EVALUATION
+            ? EVALUATION_TASK_LABEL
+            : TASK_TYPE_LABELS[group.type] || group.type;
+
+        const filteredGroupTasks = group.tasks.filter((task) => {
+          const evaluationItemName = getEvaluationPatrolTaskItemName(task);
+          const searchSource = [
+            groupLabel,
+            task.task_no,
+            task.source_ticket?.ticket_no,
+            task.source_ticket?.title,
+            task.event_name,
+            task.event_location,
+            task.location_text,
+            task.notes,
+            evaluationItemName,
+          ]
+            .map(normalizeText)
+            .filter(Boolean)
+            .join(' ');
+
+          return searchSource.includes(normalizedSearchKeyword);
+        });
+
+        return {
+          ...group,
+          tasks: filteredGroupTasks,
+        };
+      })
+      .filter((group) => group.tasks.length > 0);
+  }, [groupedTasks, normalizedSearchKeyword]);
+
   /** 自分担当の進行中件数 */
   const myTaskCount = useMemo(() => {
     if (!user?.id) {
@@ -170,14 +268,19 @@ const PatrolTaskList = ({
     return tasks.filter((task) => task.task_type === PATROL_TASK_TYPES.EMERGENCY_SUPPORT).length;
   }, [tasks]);
 
+  /** 検索結果件数 */
+  const filteredTaskCount = useMemo(() => {
+    return filteredGroupedTasks.reduce((count, group) => count + group.tasks.length, 0);
+  }, [filteredGroupedTasks]);
+
   return (
     <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }, isMobile && styles.cardMobile]}>
       {/* ── ヘッダー ── */}
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>巡回タスク一覧</Text>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
           <Text style={[styles.sectionSubTitle, { color: theme.textSecondary }]}>
-            優先度の高い順に選んで、そのまま詳細確認へ進みます。
+            {subTitle}
           </Text>
         </View>
         <TouchableOpacity
@@ -228,30 +331,80 @@ const PatrolTaskList = ({
         </View>
       </View>
 
+      <View
+        style={[
+          styles.searchRow,
+          { borderColor: theme.border, backgroundColor: theme.background },
+        ]}
+      >
+        <Text style={[styles.searchIcon, { color: theme.textSecondary }]}>🔍</Text>
+        <TextInput
+          value={searchText}
+          onChangeText={setSearchText}
+          placeholder={searchPlaceholder}
+          placeholderTextColor={theme.textSecondary}
+          style={[styles.searchInput, { color: theme.text }]}
+        />
+        {searchText ? (
+          <TouchableOpacity
+            style={[styles.searchClearButton, { borderColor: theme.border }]}
+            onPress={() => setSearchText('')}
+          >
+            <Text style={[styles.searchClearButtonText, { color: theme.textSecondary }]}>クリア</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      <Text style={[styles.searchMetaText, { color: theme.textSecondary }]}>
+        {normalizedSearchKeyword
+          ? `${filteredTaskCount}件ヒット。検索中は該当グループを自動で展開します。`
+          : defaultHelpText}
+      </Text>
+
       {isLoadingTasks ? (
         <SkeletonLoader lines={3} baseColor={theme.border} />
       ) : tasks.length === 0 ? (
-        <EmptyState icon="📋" title="巡回タスクはありません" description="現在対応が必要なタスクはありません" theme={theme} />
+        <EmptyState
+          icon="📋"
+          title={emptyTitle}
+          description={emptyDescription}
+          theme={theme}
+        />
+      ) : filteredGroupedTasks.length === 0 ? (
+        <EmptyState
+          icon="🔎"
+          title="検索条件に一致するタスクはありません"
+          description="検索条件を変えるか、クリアして全件を確認してください。"
+          theme={theme}
+        />
       ) : (
         <View style={styles.groupList}>
-          {groupedTasks.map(({ type, tasks: groupTasks }) => {
+          {filteredGroupedTasks.map(({ type, tasks: groupTasks }) => {
             /** 種別アイコン */
             const icon = type === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? EVALUATION_TASK_ICON : TASK_TYPE_ICONS[type] || '📋';
             /** 種別表示ラベル */
             const label = type === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? EVALUATION_TASK_LABEL : TASK_TYPE_LABELS[type] || type;
             /** 緊急対応は強調表示 */
             const isEmergency = type === PATROL_TASK_TYPES.EMERGENCY_SUPPORT;
+            /** 検索中は自動展開する */
+            const isCollapsed = normalizedSearchKeyword ? false : Boolean(collapsedGroupMap[type]);
 
             return (
               <View key={type} style={styles.typeGroup}>
                 {/* 種別セクションヘッダー */}
-                <View
+                <Pressable
                   style={[
                     styles.typeHeader,
                     {
                       backgroundColor: type === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? EVALUATION_TASK_BG_COLOR : TASK_TYPE_BG_COLORS[type] || '#F6F8FA',
                     },
                   ]}
+                  onPress={() =>
+                    setCollapsedGroupMap((previousMap) => ({
+                      ...previousMap,
+                      [type]: !previousMap[type],
+                    }))
+                  }
                 >
                   <View style={styles.typeHeaderLead}>
                     <Text style={styles.typeHeaderIcon}>{icon}</Text>
@@ -265,128 +418,149 @@ const PatrolTaskList = ({
                         {label}
                       </Text>
                       <Text style={[styles.typeHeaderSubLabel, { color: theme.textSecondary }]}>
-                        {isEmergency ? '最優先で確認してください' : '同種別をまとめて確認できます'}
+                        {isEmergency
+                          ? '最優先で確認してください'
+                          : isCollapsed
+                          ? 'タップで展開'
+                          : 'タップで折りたたみ'}
                       </Text>
                     </View>
                   </View>
-                  <View
-                    style={[
-                      styles.countBadge,
-                      { backgroundColor: isEmergency ? theme.error : theme.primary },
-                    ]}
-                  >
-                    <Text style={styles.countBadgeText}>{groupTasks.length}件</Text>
+                  <View style={styles.typeHeaderActions}>
+                    <View
+                      style={[
+                        styles.countBadge,
+                        { backgroundColor: isEmergency ? theme.error : theme.primary },
+                      ]}
+                    >
+                      <Text style={styles.countBadgeText}>{groupTasks.length}件</Text>
+                    </View>
+                    <Text style={[styles.collapseLabel, { color: theme.textSecondary }]}>
+                      {isCollapsed ? '▶' : '▼'}
+                    </Text>
                   </View>
-                </View>
+                </Pressable>
 
                 {/* グループ内タスク一覧 */}
-                <View style={styles.ticketList}>
-                  {groupTasks.map((task) => {
-                    /** 選択中かどうか */
-                    const isActive = task.id === selectedTaskId;
-                    const evaluationItemName = getEvaluationPatrolTaskItemName(task);
-                    /** 担当者ラベル */
-                    const assigneeLabel = !task.assigned_to
-                      ? '未割当'
-                      : task.assigned_to === user?.id
-                        ? 'あなた'
-                        : '他担当';
-                    return (
-                      <Pressable
-                        key={task.id}
-                        style={[
-                          styles.ticketItem,
-                          isMobile && styles.ticketItemMobile,
-                          {
-                            borderColor: isActive ? theme.primary : theme.border,
-                            borderLeftColor:
-                              type === PATROL_TASK_DISPLAY_TYPES.EVALUATION
-                                ? EVALUATION_TASK_ACCENT_COLOR
-                                : TASK_TYPE_ACCENT_COLORS[type] || '#57606A',
-                            backgroundColor: isActive ? `${theme.primary}14` : theme.background,
-                          },
-                        ]}
-                        onPress={() => onSelectTask(task.id)}
-                      >
-                        <View style={styles.ticketHeaderRow}>
-                          <Text style={[styles.ticketTitle, { color: theme.text }]} numberOfLines={1}>
-                            {task.event_name || '企画名未設定'}
-                          </Text>
-                          {isActive ? (
+                {!isCollapsed ? (
+                  <View style={styles.ticketList}>
+                    {groupTasks.map((task) => {
+                      /** 選択中かどうか */
+                      const isActive = task.id === selectedTaskId;
+                      const evaluationItemName = getEvaluationPatrolTaskItemName(task);
+                      /** 担当者ラベル */
+                      const assigneeLabel = !task.assigned_to
+                        ? '未割当'
+                        : task.assigned_to === user?.id
+                          ? 'あなた'
+                          : '他担当';
+                      return (
+                        <Pressable
+                          key={task.id}
+                          style={[
+                            styles.ticketItem,
+                            isMobile && styles.ticketItemMobile,
+                            {
+                              borderColor: isActive ? theme.primary : theme.border,
+                              borderLeftColor:
+                                type === PATROL_TASK_DISPLAY_TYPES.EVALUATION
+                                  ? EVALUATION_TASK_ACCENT_COLOR
+                                  : TASK_TYPE_ACCENT_COLORS[type] || '#57606A',
+                              backgroundColor: isActive ? `${theme.primary}14` : theme.background,
+                            },
+                          ]}
+                          onPress={() => onSelectTask(task.id)}
+                        >
+                          <View style={styles.ticketHeaderRow}>
+                            <Text style={[styles.ticketTitle, { color: theme.text }]} numberOfLines={1}>
+                              {task.event_name || '企画名未設定'}
+                            </Text>
+                            {isActive ? (
+                              <View
+                                style={[
+                                  styles.selectedBadge,
+                                  { backgroundColor: theme.primary, borderColor: theme.primary },
+                                ]}
+                              >
+                                <Text style={styles.selectedBadgeText}>選択中</Text>
+                              </View>
+                            ) : null}
+                          </View>
+
+                          <View style={styles.badgeRow}>
                             <View
                               style={[
-                                styles.selectedBadge,
-                                { backgroundColor: theme.primary, borderColor: theme.primary },
+                                styles.metaBadge,
+                                {
+                                  borderColor: theme.border,
+                                  backgroundColor: `${theme.primary}10`,
+                                },
                               ]}
                             >
-                              <Text style={styles.selectedBadgeText}>選択中</Text>
+                              <Text style={[styles.metaBadgeText, { color: theme.primary }]}>
+                                {TASK_STATUS_LABELS[task.task_status] || task.task_status}
+                              </Text>
                             </View>
-                          ) : null}
-                        </View>
-
-                        <View style={styles.badgeRow}>
-                          <View
-                            style={[
-                              styles.metaBadge,
-                              {
-                                borderColor: theme.border,
-                                backgroundColor: `${theme.primary}10`,
-                              },
-                            ]}
-                          >
-                            <Text style={[styles.metaBadgeText, { color: theme.primary }]}>
-                              {TASK_STATUS_LABELS[task.task_status] || task.task_status}
-                            </Text>
+                            <View
+                              style={[
+                                styles.metaBadge,
+                                {
+                                  borderColor: theme.border,
+                                  backgroundColor: task.assigned_to ? theme.surface : `${theme.error}10`,
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.metaBadgeText,
+                                  { color: task.assigned_to ? theme.textSecondary : theme.error },
+                                ]}
+                              >
+                                担当: {assigneeLabel}
+                              </Text>
+                            </View>
                           </View>
-                          <View
-                            style={[
-                              styles.metaBadge,
-                              {
-                                borderColor: theme.border,
-                                backgroundColor: task.assigned_to ? theme.surface : `${theme.error}10`,
-                              },
-                            ]}
-                          >
+
+                          <Text style={[styles.ticketLocation, { color: theme.text }]} numberOfLines={1}>
+                            📍 {task.event_location || task.location_text || '場所未設定'}
+                          </Text>
+                          {evaluationItemName ? (
                             <Text
                               style={[
-                                styles.metaBadgeText,
-                                { color: task.assigned_to ? theme.textSecondary : theme.error },
+                                styles.keyLabel,
+                                {
+                                  color:
+                                    type === PATROL_TASK_DISPLAY_TYPES.EVALUATION
+                                      ? EVALUATION_TASK_ACCENT_COLOR
+                                      : theme.primary,
+                                },
                               ]}
+                              numberOfLines={1}
                             >
-                              担当: {assigneeLabel}
+                              評価項目: {evaluationItemName}
                             </Text>
-                          </View>
-                        </View>
-
-                        <Text style={[styles.ticketLocation, { color: theme.text }]} numberOfLines={1}>
-                          📍 {task.event_location || task.location_text || '場所未設定'}
-                        </Text>
-                        {evaluationItemName ? (
-                          <Text
-                            style={[
-                              styles.keyLabel,
-                              { color: type === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? EVALUATION_TASK_ACCENT_COLOR : theme.primary },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            評価項目: {evaluationItemName}
+                          ) : task.task_type === PATROL_TASK_TYPES.LOCK_CHECK && task.notes ? (
+                            /** 施錠確認タスクは notes から鍵名を抽出してインライン表示 */
+                            <Text style={[styles.keyLabel, { color: theme.primary }]} numberOfLines={1}>
+                              🔑 {task.notes.includes(':') ? task.notes.split(':').slice(1).join(':').trim() : task.notes}
+                            </Text>
+                          ) : null}
+                          <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+                            受付:{' '}
+                            {isMobile
+                              ? new Date(task.created_at).toLocaleString('ja-JP', {
+                                  month: 'numeric',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : new Date(task.created_at).toLocaleString('ja-JP')}
                           </Text>
-                        ) : task.task_type === PATROL_TASK_TYPES.LOCK_CHECK && task.notes ? (
-                          /** 施錠確認タスクは notes から鍵名を抽出してインライン表示 */
-                          <Text style={[styles.keyLabel, { color: theme.primary }]} numberOfLines={1}>
-                            🔑 {task.notes.includes(':') ? task.notes.split(':').slice(1).join(':').trim() : task.notes}
-                          </Text>
-                        ) : null}
-                        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                          受付:{' '}
-                          {isMobile
-                            ? new Date(task.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                            : new Date(task.created_at).toLocaleString('ja-JP')}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
               </View>
             );
           })}
@@ -443,6 +617,39 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  searchRow: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  searchIcon: {
+    fontSize: 15,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  searchClearButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  searchClearButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  searchMetaText: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
   summaryRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -491,6 +698,11 @@ const styles = StyleSheet.create({
     gap: 8,
     flex: 1,
   },
+  typeHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   typeHeaderTextBlock: {
     flex: 1,
   },
@@ -517,6 +729,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  collapseLabel: {
+    fontSize: 13,
+    fontWeight: '700',
   },
   ticketList: {
     gap: 8,

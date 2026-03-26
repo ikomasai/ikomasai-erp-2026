@@ -23,6 +23,8 @@ export const PATROL_TAB_TYPES = {
   DASHBOARD: 'dashboard',
   /** 巡回タスク一覧・詳細 */
   TASKS: 'tasks',
+  /** 評価タスク一覧・詳細 */
+  EVALUATION: 'evaluation',
   /** 巡回チェック記録・未巡回アラート */
   CHECK: 'check',
 };
@@ -40,9 +42,13 @@ export const PATROL_TABS = [
     icon: '📍',
   },
   {
+    key: PATROL_TAB_TYPES.EVALUATION,
+    label: '評価',
+    icon: '📝',
+  },
+  {
     key: PATROL_TAB_TYPES.DASHBOARD,
     label: 'ダッシュ',
     icon: '📊',
   },
 ];
-

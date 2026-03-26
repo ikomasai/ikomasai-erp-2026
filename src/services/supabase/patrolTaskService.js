@@ -53,8 +53,100 @@ export const PATROL_TASK_DISPLAY_TYPES = {
 
 /** 評価タスクの notes 接頭辞 */
 const EVALUATION_PATROL_TASK_NOTES_PREFIX = '評価項目:';
+/** 旧形式 notes を読むための区切り候補 */
+const EVALUATION_PATROL_TASK_LEGACY_DELIMITERS = [' / ', '／', '\n', ' | ', '｜', ', ', '，', '、'];
 
 const normalizeText = (value) => (value || '').trim();
+
+const buildEvaluationPatrolTaskPayload = (input) => {
+  if (Array.isArray(input)) {
+    return {
+      items: normalizeEvaluationPatrolTaskItems(input),
+      eventId: '',
+      organizationName: '',
+    };
+  }
+
+  if (!input || typeof input !== 'object') {
+    return {
+      items: [],
+      eventId: '',
+      organizationName: '',
+    };
+  }
+
+  return {
+    items: normalizeEvaluationPatrolTaskItems(input.items || input.evaluationItemNames || input.evaluationItems),
+    eventId: normalizeText(input.eventId),
+    organizationName: normalizeText(input.organizationName),
+  };
+};
+
+const normalizeEvaluationPatrolTaskItems = (items) => {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => normalizeText(item))
+    .filter(Boolean);
+};
+
+const extractEvaluationPatrolTaskBody = (taskOrNotes) => {
+  const notes = normalizeText(typeof taskOrNotes === 'string' ? taskOrNotes : taskOrNotes?.notes);
+  if (!notes.startsWith(EVALUATION_PATROL_TASK_NOTES_PREFIX)) {
+    return '';
+  }
+  return normalizeText(notes.slice(EVALUATION_PATROL_TASK_NOTES_PREFIX.length));
+};
+
+const parseEvaluationPatrolTaskPayload = (taskOrNotes) => {
+  const body = extractEvaluationPatrolTaskBody(taskOrNotes);
+  const emptyPayload = {
+    items: [],
+    eventId: '',
+    organizationName: '',
+  };
+
+  if (!body) {
+    return emptyPayload;
+  }
+
+  if (
+    (body.startsWith('[') && body.endsWith(']')) ||
+    (body.startsWith('{') && body.endsWith('}'))
+  ) {
+    try {
+      const parsed = JSON.parse(body);
+      if (Array.isArray(parsed)) {
+        return {
+          ...emptyPayload,
+          items: normalizeEvaluationPatrolTaskItems(parsed),
+        };
+      }
+      if (parsed && typeof parsed === 'object') {
+        return {
+          ...emptyPayload,
+          ...buildEvaluationPatrolTaskPayload(parsed),
+        };
+      }
+    } catch (error) {
+      console.warn('評価タスク notes の JSON 解析に失敗:', error);
+    }
+  }
+
+  const matchedDelimiter = EVALUATION_PATROL_TASK_LEGACY_DELIMITERS.find((delimiter) =>
+    body.includes(delimiter)
+  );
+
+  if (matchedDelimiter) {
+    return {
+      ...emptyPayload,
+      items: normalizeEvaluationPatrolTaskItems(body.split(matchedDelimiter)),
+    };
+  }
+
+  return {
+    ...emptyPayload,
+    items: [body],
+  };
+};
 
 const logNotificationError = (label, error) => {
   if (error) {
@@ -78,9 +170,31 @@ const toLockCheckStatus = (resultCode) => {
  * @param {string} evaluationItemName - 評価項目名
  * @returns {string} notes 文字列
  */
-export const buildEvaluationPatrolTaskNotes = (evaluationItemName) => {
+export const buildEvaluationPatrolTaskNotes = (evaluationItemNameOrItems) => {
+  if (evaluationItemNameOrItems && typeof evaluationItemNameOrItems === 'object' && !Array.isArray(evaluationItemNameOrItems)) {
+    const payload = buildEvaluationPatrolTaskPayload(evaluationItemNameOrItems);
+    if (payload.items.length === 0) {
+      throw new Error('evaluationItemNames が未指定です');
+    }
+
+    const serializedPayload = {
+      items: payload.items,
+      ...(payload.eventId ? { eventId: payload.eventId } : {}),
+      ...(payload.organizationName ? { organizationName: payload.organizationName } : {}),
+    };
+    return `${EVALUATION_PATROL_TASK_NOTES_PREFIX} ${JSON.stringify(serializedPayload)}`;
+  }
+
+  if (Array.isArray(evaluationItemNameOrItems)) {
+    const normalizedEvaluationItems = normalizeEvaluationPatrolTaskItems(evaluationItemNameOrItems);
+    if (normalizedEvaluationItems.length === 0) {
+      throw new Error('evaluationItemNames が未指定です');
+    }
+    return `${EVALUATION_PATROL_TASK_NOTES_PREFIX} ${JSON.stringify(normalizedEvaluationItems)}`;
+  }
+
   /** 前後空白を除去した評価項目名 */
-  const normalizedEvaluationItemName = normalizeText(evaluationItemName);
+  const normalizedEvaluationItemName = normalizeText(evaluationItemNameOrItems);
   if (!normalizedEvaluationItemName) {
     throw new Error('evaluationItemName が未指定です');
   }
@@ -93,12 +207,105 @@ export const buildEvaluationPatrolTaskNotes = (evaluationItemName) => {
  * @returns {string} 評価項目名
  */
 export const getEvaluationPatrolTaskItemName = (taskOrNotes) => {
-  /** 判定対象 notes */
-  const notes = normalizeText(typeof taskOrNotes === 'string' ? taskOrNotes : taskOrNotes?.notes);
-  if (!notes.startsWith(EVALUATION_PATROL_TASK_NOTES_PREFIX)) {
-    return '';
+  return parseEvaluationPatrolTaskPayload(taskOrNotes).items.join(' / ');
+};
+
+/**
+ * 評価タスクの評価項目一覧を取り出す
+ * @param {Object|string|null|undefined} taskOrNotes - タスクまたは notes 文字列
+ * @returns {string[]} 評価項目一覧
+ */
+export const getEvaluationPatrolTaskItemNames = (taskOrNotes) => {
+  return parseEvaluationPatrolTaskPayload(taskOrNotes).items;
+};
+
+/**
+ * 評価タスクの付帯メタ情報を取り出す
+ * @param {Object|string|null|undefined} taskOrNotes - タスクまたは notes 文字列
+ * @returns {{items: string[], eventId: string, organizationName: string}} 評価タスクのメタ情報
+ */
+export const getEvaluationPatrolTaskMeta = (taskOrNotes) => {
+  return parseEvaluationPatrolTaskPayload(taskOrNotes);
+};
+
+/**
+ * 評価タスク結果メモを解析する
+ * @param {string|null|undefined} memo - patrol_task_results.memo
+ * @returns {{itemResults: Array<{itemName: string, score: number, comment: string}>, summaryMemo: string}} 解析結果
+ */
+export const parseEvaluationPatrolTaskResultMemo = (memo) => {
+  const normalizedMemo = normalizeText(memo);
+  if (!normalizedMemo) {
+    return { itemResults: [], summaryMemo: '' };
   }
-  return normalizeText(notes.slice(EVALUATION_PATROL_TASK_NOTES_PREFIX.length));
+
+  const itemResults = [];
+  const summaryLines = [];
+  let currentItemResult = null;
+  let inSummary = false;
+
+  normalizedMemo.split(/\r?\n/).forEach((line) => {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) {
+      if (inSummary && summaryLines.length > 0 && summaryLines[summaryLines.length - 1] !== '') {
+        summaryLines.push('');
+      }
+      return;
+    }
+
+    if (trimmedLine === '評価項目') {
+      currentItemResult = null;
+      inSummary = false;
+      return;
+    }
+
+    if (trimmedLine === '総評') {
+      currentItemResult = null;
+      inSummary = true;
+      return;
+    }
+
+    const itemMatch = trimmedLine.match(/^-\s*(.+?):\s*(\d+)点$/);
+    if (itemMatch) {
+      currentItemResult = {
+        itemName: itemMatch[1].trim(),
+        score: Number(itemMatch[2] || 0),
+        comment: '',
+      };
+      if (currentItemResult.itemName) {
+        itemResults.push(currentItemResult);
+      }
+      inSummary = false;
+      return;
+    }
+
+    if (trimmedLine.startsWith('コメント:')) {
+      const commentText = trimmedLine.replace(/^コメント:\s*/, '');
+      if (currentItemResult) {
+        currentItemResult.comment = commentText;
+        return;
+      }
+    }
+
+    if (currentItemResult) {
+      currentItemResult.comment = currentItemResult.comment
+        ? `${currentItemResult.comment}\n${trimmedLine}`
+        : trimmedLine;
+      return;
+    }
+
+    if (inSummary) {
+      summaryLines.push(trimmedLine);
+      return;
+    }
+
+    summaryLines.push(trimmedLine);
+  });
+
+  return {
+    itemResults,
+    summaryMemo: summaryLines.join('\n').trim(),
+  };
 };
 
 /**
@@ -247,18 +454,32 @@ export const assignPatrolTask = async ({ taskId, assignedTo = null, actorUserId 
  * @param {string} params.taskId - タスクID
  * @returns {Promise<{data: Array, error: Error|null}>} 取得結果
  */
-export const listPatrolTaskResults = async ({ taskId }) => {
+export const listPatrolTaskResults = async ({ taskId, taskIds = [] }) => {
   try {
-    const normalizedTaskId = normalizeText(taskId);
-    if (!normalizedTaskId) {
+    const normalizedTaskIds = [
+      ...new Set(
+        [taskId, ...(Array.isArray(taskIds) ? taskIds : [])]
+          .map((value) => normalizeText(value))
+          .filter(Boolean)
+      ),
+    ];
+
+    if (normalizedTaskIds.length === 0) {
       return { data: [], error: null };
     }
 
-    const { data, error } = await getSupabaseClient()
+    let query = getSupabaseClient()
       .from(PATROL_TASK_RESULTS_TABLE)
       .select('*')
-      .eq('task_id', normalizedTaskId)
       .order('created_at', { ascending: false });
+
+    if (normalizedTaskIds.length === 1) {
+      query = query.eq('task_id', normalizedTaskIds[0]);
+    } else {
+      query = query.in('task_id', normalizedTaskIds);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('巡回タスク結果取得エラー:', error);
@@ -617,14 +838,18 @@ export const createEmergencyPatrolTask = async ({ ticket, creatorUserId = null }
  * @param {Object} input - 入力値
  * @param {string} input.eventName - 企画名
  * @param {string|null} [input.eventLocation=null] - 企画場所
- * @param {string} input.evaluationItemName - 評価項目名
+ * @param {string} [input.evaluationItemName] - 評価項目名（旧形式互換）
+ * @param {string[]} [input.evaluationItemNames] - 評価項目一覧
  * @param {string|null} [input.creatorUserId=null] - 作成者ユーザーID
  * @returns {Promise<{data: Object|null, error: Error|null}>} 作成結果
  */
 export const createEvaluationPatrolTask = async ({
   eventName,
   eventLocation = null,
-  evaluationItemName,
+  evaluationItemName = '',
+  evaluationItemNames = [],
+  eventId = null,
+  organizationName = '',
   creatorUserId = null,
 }) => {
   try {
@@ -635,7 +860,15 @@ export const createEvaluationPatrolTask = async ({
     /** 前後空白を除去した作成者ユーザーID */
     const normalizedCreatorUserId = normalizeText(creatorUserId) || null;
     /** 評価タスクの notes */
-    const taskNotes = buildEvaluationPatrolTaskNotes(evaluationItemName);
+    const taskNotes = buildEvaluationPatrolTaskNotes(
+      Array.isArray(evaluationItemNames) && evaluationItemNames.length > 0
+        ? {
+            items: evaluationItemNames,
+            eventId,
+            organizationName,
+          }
+        : evaluationItemName
+    );
 
     if (!normalizedEventName) {
       throw new Error('eventName が未指定です');
@@ -664,6 +897,164 @@ export const createEvaluationPatrolTask = async ({
   } catch (error) {
     console.error('評価巡回タスク作成時にエラー:', error);
     return { data: null, error };
+  }
+};
+
+/**
+ * 複数の巡回タスクをまとめて受諾する（旧評価タスクの統合入力向け）
+ * @param {Object} input - 入力
+ * @param {string[]} input.taskIds - 対象タスクID一覧
+ * @param {string} input.patrolUserId - 巡回ユーザーID
+ * @returns {Promise<{data: Array, error: Error|null}>} 実行結果
+ */
+export const acceptPatrolTaskGroup = async ({ taskIds, patrolUserId }) => {
+  try {
+    const normalizedTaskIds = [...new Set((Array.isArray(taskIds) ? taskIds : []).map((id) => normalizeText(id)).filter(Boolean))];
+    const normalizedUserId = normalizeText(patrolUserId);
+
+    if (normalizedTaskIds.length === 0) {
+      throw new Error('taskIds が未指定です');
+    }
+    if (!normalizedUserId) {
+      throw new Error('patrolUserId が未指定です');
+    }
+
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .update({
+        task_status: PATROL_TASK_STATUSES.ACCEPTED,
+        assigned_to: normalizedUserId,
+        accepted_at: new Date().toISOString(),
+      })
+      .in('id', normalizedTaskIds)
+      .in('task_status', [
+        PATROL_TASK_STATUSES.OPEN,
+        PATROL_TASK_STATUSES.ACCEPTED,
+        PATROL_TASK_STATUSES.EN_ROUTE,
+      ])
+      .or(`assigned_to.is.null,assigned_to.eq.${normalizedUserId}`)
+      .select('*');
+
+    if (error) {
+      console.error('巡回タスク一括受諾エラー:', error);
+      return { data: [], error };
+    }
+
+    return { data: data || [], error: null };
+  } catch (error) {
+    return { data: [], error };
+  }
+};
+
+/**
+ * 複数の巡回タスクをまとめて完了する（旧評価タスクの統合入力向け）
+ * @param {Object} input - 入力
+ * @param {string[]} input.taskIds - 対象タスクID一覧
+ * @param {string} input.patrolUserId - 巡回ユーザーID
+ * @param {string} input.resultCode - 結果コード
+ * @param {Object<string,string>} [input.memosByTaskId={}] - タスクID別メモ
+ * @returns {Promise<{data: {tasks: Array, results: Array}|null, error: Error|null}>} 実行結果
+ */
+export const completePatrolTaskGroup = async ({
+  taskIds,
+  patrolUserId,
+  resultCode,
+  memosByTaskId = {},
+}) => {
+  try {
+    const normalizedTaskIds = [...new Set((Array.isArray(taskIds) ? taskIds : []).map((id) => normalizeText(id)).filter(Boolean))];
+    const normalizedUserId = normalizeText(patrolUserId);
+    const normalizedResultCode = normalizeText(resultCode).toUpperCase() || PATROL_RESULT_CODES.OK;
+
+    if (normalizedTaskIds.length === 0) {
+      throw new Error('taskIds が未指定です');
+    }
+    if (!normalizedUserId) {
+      throw new Error('patrolUserId が未指定です');
+    }
+
+    const { data: taskData, error: taskError } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .update({
+        task_status: PATROL_TASK_STATUSES.DONE,
+        assigned_to: normalizedUserId,
+        done_at: new Date().toISOString(),
+      })
+      .in('id', normalizedTaskIds)
+      .in('task_status', [
+        PATROL_TASK_STATUSES.OPEN,
+        PATROL_TASK_STATUSES.ACCEPTED,
+        PATROL_TASK_STATUSES.EN_ROUTE,
+      ])
+      .or(`assigned_to.is.null,assigned_to.eq.${normalizedUserId}`)
+      .select('*');
+
+    if (taskError) {
+      console.error('巡回タスク一括完了エラー:', taskError);
+      return { data: null, error: taskError };
+    }
+
+    const resultRows = normalizedTaskIds.map((taskId) => ({
+      task_id: taskId,
+      result_code: normalizedResultCode,
+      memo: normalizeText(memosByTaskId[taskId]) || null,
+      created_by: normalizedUserId,
+    }));
+
+    const { data: resultData, error: resultError } = await getSupabaseClient()
+      .from(PATROL_TASK_RESULTS_TABLE)
+      .insert(resultRows)
+      .select('*');
+
+    if (resultError) {
+      console.error('巡回タスク一括結果登録エラー:', resultError);
+      return { data: null, error: resultError };
+    }
+
+    return {
+      data: {
+        tasks: taskData || [],
+        results: resultData || [],
+      },
+      error: null,
+    };
+  } catch (error) {
+    return { data: null, error };
+  }
+};
+
+/**
+ * 複数の巡回タスクの担当者をまとめて更新する（旧評価タスクの統合入力向け）
+ * @param {Object} input - 入力
+ * @param {string[]} input.taskIds - 対象タスクID一覧
+ * @param {string|null} [input.assignedTo=null] - 担当者ユーザーID
+ * @returns {Promise<{data: Array, error: Error|null}>} 更新結果
+ */
+export const assignPatrolTaskGroup = async ({ taskIds, assignedTo = null }) => {
+  try {
+    const normalizedTaskIds = [...new Set((Array.isArray(taskIds) ? taskIds : []).map((id) => normalizeText(id)).filter(Boolean))];
+    const normalizedAssignedTo = normalizeText(assignedTo) || null;
+
+    if (normalizedTaskIds.length === 0) {
+      throw new Error('taskIds が未指定です');
+    }
+
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .update({
+        assigned_to: normalizedAssignedTo,
+      })
+      .in('id', normalizedTaskIds)
+      .select('*');
+
+    if (error) {
+      console.error('巡回タスク一括担当更新エラー:', error);
+      return { data: [], error };
+    }
+
+    return { data: data || [], error: null };
+  } catch (error) {
+    return { data: [], error };
   }
 };
 

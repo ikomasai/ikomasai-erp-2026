@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import {
   getEvaluationPatrolTaskItemName,
+  getEvaluationPatrolTaskItemNames,
   getPatrolTaskDisplayType,
   PATROL_RESULT_CODES,
   PATROL_TASK_DISPLAY_TYPES,
@@ -82,6 +83,11 @@ const RESULT_LABELS = {
  * @param {Array} props.sourceMessages - 元連絡案件メッセージ配列
  * @param {boolean} props.isLoadingSourceMessages - メッセージ読み込み中フラグ
  * @param {Function} props.onRefreshSourceMessages - メッセージ更新コールバック
+ * @param {Object} [props.evaluationInputs] - 評価項目ごとの入力状態
+ * @param {Function} [props.onChangeEvaluationScore] - 評価点数変更コールバック
+ * @param {Function} [props.onChangeEvaluationComment] - 評価コメント変更コールバック
+ * @param {string} [props.evaluationSummaryMemo] - 総評メモ
+ * @param {Function} [props.onChangeEvaluationSummaryMemo] - 総評メモ変更コールバック
  * @returns {JSX.Element} タスク詳細UI
  */
 const PatrolTaskDetail = ({
@@ -107,6 +113,11 @@ const PatrolTaskDetail = ({
   sourceMessages,
   isLoadingSourceMessages,
   onRefreshSourceMessages,
+  evaluationInputs = {},
+  onChangeEvaluationScore = () => {},
+  onChangeEvaluationComment = () => {},
+  evaluationSummaryMemo = '',
+  onChangeEvaluationSummaryMemo = () => {},
 }) => {
   /** 画面幅（レスポンシブ対応用） */
   const { width: windowWidth } = useWindowDimensions();
@@ -118,6 +129,7 @@ const PatrolTaskDetail = ({
   const isAssignedToMe = selectedTask.assigned_to && selectedTask.assigned_to === user?.id;
   const evaluationItemName = getEvaluationPatrolTaskItemName(selectedTask);
   const isEvaluationTask = getPatrolTaskDisplayType(selectedTask) === PATROL_TASK_DISPLAY_TYPES.EVALUATION;
+  const evaluationItems = isEvaluationTask ? getEvaluationPatrolTaskItemNames(selectedTask) : [];
   const taskTypeLabel = isEvaluationTask ? EVALUATION_TASK_LABEL : TASK_TYPE_LABELS[selectedTask.task_type] || selectedTask.task_type;
 
   return (
@@ -197,7 +209,9 @@ const PatrolTaskDetail = ({
       >
         <Text style={[styles.label, { color: theme.text }]}>次の操作</Text>
         <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-          現地へ向かうときは先に受諾し、対応後は結果とメモを添えて完了登録してください。
+          {isEvaluationTask
+            ? '現地へ向かうときは先に受諾し、各評価項目の点数とコメントを入力して登録してください。'
+            : '現地へ向かうときは先に受諾し、対応後は結果とメモを添えて完了登録してください。'}
         </Text>
         {/* 向かいます不可バナー: 別タスク対応中で未割当タスクを受諾できない場合に表示 */}
         {!isAssignedToMe && hasAnyActiveTask && selectedTask.task_status === PATROL_TASK_STATUSES.OPEN && (
@@ -238,7 +252,9 @@ const PatrolTaskDetail = ({
             disabled={!canComplete || isSubmitting}
             onPress={onCompleteTask}
           >
-            <Text style={[styles.actionButtonText, isMobile && styles.actionButtonTextMobile]}>完了登録</Text>
+            <Text style={[styles.actionButtonText, isMobile && styles.actionButtonTextMobile]}>
+              {isEvaluationTask ? '評価登録' : '完了登録'}
+            </Text>
           </TouchableOpacity>
         </View>
         <TouchableOpacity
@@ -261,12 +277,22 @@ const PatrolTaskDetail = ({
           { backgroundColor: theme.background },
         ]}
       >
-        <Text style={[styles.label, { color: theme.text }]}>指示メモ</Text>
+        <Text style={[styles.label, { color: theme.text }]}>
+          {isEvaluationTask ? '評価項目' : '指示メモ'}
+        </Text>
         {/* 施錠確認タスクの場合は鍵名を目立つように強調表示する */}
         {isEvaluationTask && evaluationItemName ? (
           <View>
-            <Text style={[styles.requestBody, { color: theme.textSecondary }]}>評価項目</Text>
-            <Text style={[styles.keyLabelHighlight, { color: theme.text }]}>{evaluationItemName}</Text>
+            <View style={styles.evaluationItemChipList}>
+              {evaluationItems.map((item) => (
+                <View
+                  key={item}
+                  style={[styles.evaluationItemChip, { backgroundColor: `${theme.primary}12` }]}
+                >
+                  <Text style={[styles.evaluationItemChipText, { color: theme.text }]}>{item}</Text>
+                </View>
+              ))}
+            </View>
           </View>
         ) : selectedTask.task_type === PATROL_TASK_TYPES.LOCK_CHECK && selectedTask.notes ? (
           (() => {
@@ -329,22 +355,106 @@ const PatrolTaskDetail = ({
         })}
       </View>
 
-      <Text style={[styles.label, { color: theme.text }]}>巡回メモ</Text>
-      <TextInput
-        value={patrolMemo}
-        onChangeText={onChangePatrolMemo}
-        multiline
-        placeholder="現地状況・対応内容を入力してください"
-        placeholderTextColor={theme.textSecondary}
-        style={[
-          styles.memoInput,
-          {
-            borderColor: theme.border,
-            backgroundColor: theme.background,
-            color: theme.text,
-          },
-        ]}
-      />
+      {isEvaluationTask ? (
+        <>
+          <Text style={[styles.label, { color: theme.text }]}>評価入力</Text>
+          {evaluationItems.map((item) => {
+            const scoreValue = Number(evaluationInputs[item]?.score || 0);
+            const itemComment = evaluationInputs[item]?.comment || '';
+
+            return (
+              <View
+                key={item}
+                style={[
+                  styles.evaluationInputCard,
+                  { borderColor: theme.border, backgroundColor: theme.background },
+                ]}
+              >
+                <Text style={[styles.evaluationInputTitle, { color: theme.text }]}>{item}</Text>
+                <View style={styles.evaluationScoreRow}>
+                  {[1, 2, 3, 4, 5].map((score) => {
+                    const isActive = score === scoreValue;
+
+                    return (
+                      <Pressable
+                        key={`${item}-${score}`}
+                        style={[
+                          styles.evaluationScoreButton,
+                          {
+                            borderColor: isActive ? theme.primary : theme.border,
+                            backgroundColor: isActive ? theme.primary : theme.surface,
+                          },
+                        ]}
+                        onPress={() => onChangeEvaluationScore(item, score)}
+                      >
+                        <Text
+                          style={[
+                            styles.evaluationScoreButtonText,
+                            { color: isActive ? '#FFFFFF' : theme.text },
+                          ]}
+                        >
+                          {score}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <TextInput
+                  value={itemComment}
+                  onChangeText={(value) => onChangeEvaluationComment(item, value)}
+                  multiline
+                  placeholder="項目ごとのコメントを入力"
+                  placeholderTextColor={theme.textSecondary}
+                  style={[
+                    styles.evaluationCommentInput,
+                    {
+                      borderColor: theme.border,
+                      backgroundColor: theme.surface,
+                      color: theme.text,
+                    },
+                  ]}
+                />
+              </View>
+            );
+          })}
+
+          <Text style={[styles.label, { color: theme.text }]}>総評メモ</Text>
+          <TextInput
+            value={evaluationSummaryMemo}
+            onChangeText={onChangeEvaluationSummaryMemo}
+            multiline
+            placeholder="全体の印象や気づきを入力してください"
+            placeholderTextColor={theme.textSecondary}
+            style={[
+              styles.memoInput,
+              {
+                borderColor: theme.border,
+                backgroundColor: theme.background,
+                color: theme.text,
+              },
+            ]}
+          />
+        </>
+      ) : (
+        <>
+          <Text style={[styles.label, { color: theme.text }]}>巡回メモ</Text>
+          <TextInput
+            value={patrolMemo}
+            onChangeText={onChangePatrolMemo}
+            multiline
+            placeholder="現地状況・対応内容を入力してください"
+            placeholderTextColor={theme.textSecondary}
+            style={[
+              styles.memoInput,
+              {
+                borderColor: theme.border,
+                backgroundColor: theme.background,
+                color: theme.text,
+              },
+            ]}
+          />
+        </>
+      )}
 
       <View style={styles.sectionHeader}>
         <Text style={[styles.label, { color: theme.text }]}>タスク結果履歴</Text>
@@ -713,6 +823,58 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 4,
     lineHeight: 26,
+  },
+  evaluationItemChipList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  evaluationItemChip: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  evaluationItemChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  evaluationInputCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+  },
+  evaluationInputTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  evaluationScoreRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  evaluationScoreButton: {
+    minWidth: 44,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  evaluationScoreButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  evaluationCommentInput: {
+    minHeight: 72,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlignVertical: 'top',
   },
 });
 
