@@ -5,7 +5,7 @@
  * 各画面はError Boundaryでラップされ、エラー時はフォールバック表示
  */
 
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Platform, useWindowDimensions, View, PanResponder, Animated } from 'react-native';
 import { createDrawerNavigator, useDrawerStatus } from '@react-navigation/drawer';
 import { useTerminal } from '../shared/contexts/TerminalContext';
@@ -49,6 +49,9 @@ const PEEK_MAX_WIDTH = 30;
 /** ドロワーの背景色（drawerStyle と一致させる） */
 const DRAWER_BACKGROUND_COLOR = '#1a1a2e';
 
+/** ヘッダー高さ (px) — ハンバーガーメニューをオーバーレイで覆わないための除外高さ */
+const HEADER_HEIGHT = 60;
+
 /**
  * 左端スワイプでドロワーを開くオーバーレイコンポーネント
  * WebブラウザではswipeEnabledが機能しないためPanResponderで代替実装
@@ -88,6 +91,17 @@ const SwipeToOpenDrawer = ({ navigation }) => {
   const peekTranslateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
 
   /**
+   * ドロワーが開いたときにピーク値を即時リセットする
+   * openDrawer() 呼び出し後にコンポーネントが再レンダーされる前に
+   * Animated.timing が完了していない場合の残像を防ぐ
+   */
+  useEffect(() => {
+    if (isDrawerOpen) {
+      peekTranslateX.setValue(-DRAWER_WIDTH);
+    }
+  }, [isDrawerOpen, peekTranslateX]);
+
+  /**
    * パンジェスチャーハンドラー
    * 水平方向のスワイプのみ検知し、縦スクロールを妨げない
    * 右スワイプ → ピーク表示しながら開く / 左スワイプ → ドロワーを閉じる
@@ -116,20 +130,25 @@ const SwipeToOpenDrawer = ({ navigation }) => {
         }
       },
       /**
-       * 指を離したときにピークを元に戻し、距離に応じてドロワーを開閉する
+       * 指を離したとき:
+       * - 開く場合: ピークを即時リセット（アニメーション不要）してopenDrawer
+       * - 閉じる場合: closeDrawer
+       * - キャンセル: ピークを戻すアニメーション
        */
       onPanResponderRelease: (_evt, gestureState) => {
-        /** ピーク表示を非表示に戻すアニメーション */
-        Animated.timing(peekTranslateX, {
-          toValue: -DRAWER_WIDTH,
-          duration: 150,
-          useNativeDriver: true,
-        }).start();
-
         if (gestureState.dx > SWIPE_MIN_DISTANCE) {
+          /** 開く前に即時リセット（アンマウント前に確実に戻す） */
+          peekTranslateX.setValue(-DRAWER_WIDTH);
           navigationRef.current.openDrawer();
         } else if (gestureState.dx < -SWIPE_MIN_DISTANCE) {
           navigationRef.current.closeDrawer();
+        } else {
+          /** スワイプキャンセル時はアニメーションで戻す */
+          Animated.timing(peekTranslateX, {
+            toValue: -DRAWER_WIDTH,
+            duration: 150,
+            useNativeDriver: true,
+          }).start();
         }
       },
     })
@@ -140,31 +159,30 @@ const SwipeToOpenDrawer = ({ navigation }) => {
 
   return (
     <>
-      {/* ドロワーのピーク表示（ドロワーが閉じているときのみ表示） */}
-      {!isDrawerOpen && (
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: DRAWER_WIDTH,
-            backgroundColor: DRAWER_BACKGROUND_COLOR,
-            transform: [{ translateX: peekTranslateX }],
-            zIndex: 998,
-          }}
-        />
-      )}
-      {/* タッチ検知オーバーレイ */}
+      {/* ドロワーのピーク表示（常にマウント済み、translateXで表示制御） */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: DRAWER_WIDTH,
+          backgroundColor: DRAWER_BACKGROUND_COLOR,
+          transform: [{ translateX: peekTranslateX }],
+          zIndex: 998,
+        }}
+      />
+      {/* タッチ検知オーバーレイ（top: HEADER_HEIGHT でハンバーガーを除外） */}
       <View
         style={{
           position: 'absolute',
           left: isDrawerOpen ? DRAWER_WIDTH - 20 : 0,
-          top: 0,
+          top: HEADER_HEIGHT,
           bottom: 0,
           width: isDrawerOpen ? 40 : SWIPE_EDGE_WIDTH,
-          zIndex: 999,
+          /** React NavigationのスクリムよりzIndexを高くして閉じるスワイプを確実に受け取る */
+          zIndex: 9999,
         }}
         {...panResponder.panHandlers}
       />
