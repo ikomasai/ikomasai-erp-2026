@@ -3,7 +3,7 @@
  * サイドバーのUI・スタイルをカスタマイズ
  */
 
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   ScrollView,
   TouchableOpacity,
   useWindowDimensions,
+  PanResponder,
 } from 'react-native';
 import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -63,8 +64,40 @@ const DrawerItem = ({ label, isActive, onPress, theme }) => {
 const CustomDrawerContent = (props) => {
   /** 画面サイズを取得 */
   const { width } = useWindowDimensions();
+  /** モバイル判定 */
+  const isMobile = width < 768;
   /** SafeAreaのInsets */
   const insets = useSafeAreaInsets();
+
+  /**
+   * navigationをrefで保持してPanResponder内から最新状態を参照可能にする
+   */
+  const navigationRef = useRef(props.navigation);
+  navigationRef.current = props.navigation;
+
+  /**
+   * ドロワー右端の左スワイプ検知ハンドラー
+   * 左方向に50px以上スワイプするとドロワーを閉じる
+   */
+  const closePanResponder = useRef(
+    PanResponder.create({
+      /** タップは奪わない */
+      onStartShouldSetPanResponder: () => false,
+      /** 左方向の水平スワイプのみ引き受ける */
+      onMoveShouldSetPanResponder: (_evt, gestureState) => {
+        return (
+          gestureState.dx < -5 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy)
+        );
+      },
+      /** 左スワイプ距離が十分ならドロワーを閉じる */
+      onPanResponderRelease: (_evt, gestureState) => {
+        if (gestureState.dx < -50) {
+          navigationRef.current.closeDrawer();
+        }
+      },
+    })
+  ).current;
   /** 現在のルート名 */
   const currentRouteName = props.state.routeNames[props.state.index];
   /** 認証コンテキスト */
@@ -164,7 +197,11 @@ const CustomDrawerContent = (props) => {
   }).filter((item) => item.isAccessible);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}>
+    /* モバイル時のみコンテナ全体に左スワイプ検知を付与（タップは子要素が優先して受け取る） */
+    <View
+      style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}
+      {...(isMobile ? closePanResponder.panHandlers : {})}
+    >
       {/* ヘッダー */}
       <View style={[styles.header, { borderBottomColor: theme.border }]}>
         <Text style={[styles.headerTitle, { color: theme.text }]}>生駒祭 ERP</Text>
@@ -233,6 +270,15 @@ const CustomDrawerContent = (props) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  /** ドロワー全体の左スワイプ検知オーバーレイ */
+  closeSwipeOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 999,
   },
   header: {
     paddingHorizontal: 20,
