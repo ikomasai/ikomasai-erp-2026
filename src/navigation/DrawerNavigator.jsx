@@ -78,10 +78,11 @@ const SwipeToOpenDrawer = ({ navigation }) => {
   navigationRef.current = navigation;
 
   /**
-   * ドロワー開閉状態をrefで保持してPanResponder内から参照可能にする
+   * ドロワー開閉状態をrefで保持してPanResponder内（onPanResponderMove）から参照可能にする
    */
   const isDrawerOpenRef = useRef(false);
   isDrawerOpenRef.current = isDrawerOpen;
+  // 閉じるスワイプは CustomDrawerContent 右端のPanResponderが担当
 
   /**
    * ピーク表示のtranslateX
@@ -140,8 +141,6 @@ const SwipeToOpenDrawer = ({ navigation }) => {
           /** 開く前に即時リセット（アンマウント前に確実に戻す） */
           peekTranslateX.setValue(-DRAWER_WIDTH);
           navigationRef.current.openDrawer();
-        } else if (gestureState.dx < -SWIPE_MIN_DISTANCE) {
-          navigationRef.current.closeDrawer();
         } else {
           /** スワイプキャンセル時はアニメーションで戻す */
           Animated.timing(peekTranslateX, {
@@ -173,16 +172,15 @@ const SwipeToOpenDrawer = ({ navigation }) => {
           zIndex: 998,
         }}
       />
-      {/* タッチ検知オーバーレイ（top: HEADER_HEIGHT でハンバーガーを除外） */}
+      {/* タッチ検知オーバーレイ（左端固定、top: HEADER_HEIGHT でハンバーガーを除外） */}
       <View
         style={{
           position: 'absolute',
-          left: isDrawerOpen ? DRAWER_WIDTH - 20 : 0,
+          left: 0,
           top: HEADER_HEIGHT,
           bottom: 0,
-          width: isDrawerOpen ? 40 : SWIPE_EDGE_WIDTH,
-          /** React NavigationのスクリムよりzIndexを高くして閉じるスワイプを確実に受け取る */
-          zIndex: 9999,
+          width: SWIPE_EDGE_WIDTH,
+          zIndex: 999,
         }}
         {...panResponder.panHandlers}
       />
