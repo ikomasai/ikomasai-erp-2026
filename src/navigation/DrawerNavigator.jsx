@@ -5,8 +5,8 @@
  * 各画面はError Boundaryでラップされ、エラー時はフォールバック表示
  */
 
-import React from 'react';
-import { Platform, useWindowDimensions } from 'react-native';
+import React, { useRef } from 'react';
+import { Platform, useWindowDimensions, View, PanResponder } from 'react-native';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { useTerminal } from '../shared/contexts/TerminalContext';
 import CustomDrawerContent from './components/CustomDrawerContent';
@@ -37,6 +37,72 @@ import NotificationListScreen from '../features/notifications/screens/Notificati
 /** Drawerナビゲーター */
 const Drawer = createDrawerNavigator();
 
+/** スワイプ検知の左端幅 (px) */
+const SWIPE_EDGE_WIDTH = 60;
+
+/** ドロワーを開くのに必要な最低スワイプ距離 (px) */
+const SWIPE_MIN_DISTANCE = 50;
+
+/**
+ * 左端スワイプでドロワーを開くオーバーレイコンポーネント
+ * WebブラウザではswipeEnabledが機能しないためPanResponderで代替実装
+ * モバイル幅のときのみ左端に透明なタッチ領域を配置する
+ * @param {Object} props
+ * @param {Object} props.navigation - React Navigationのnavigationオブジェクト
+ * @returns {JSX.Element|null} モバイル幅時のみオーバーレイを表示
+ */
+const SwipeToOpenDrawer = ({ navigation }) => {
+  /** 画面幅 */
+  const { width } = useWindowDimensions();
+  /** モバイル判定 */
+  const isMobile = width < MOBILE_BREAKPOINT;
+
+  /**
+   * パンジェスチャーハンドラー
+   * 水平方向のスワイプのみ検知し、縦スクロールを妨げない
+   */
+  const panResponder = useRef(
+    PanResponder.create({
+      /** タップ開始時はジェスチャーを奪わない */
+      onStartShouldSetPanResponder: () => false,
+      /**
+       * 水平方向の動きが縦より大きい場合のみジェスチャーを引き受ける
+       */
+      onMoveShouldSetPanResponder: (_evt, gestureState) => {
+        return (
+          gestureState.dx > 5 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy)
+        );
+      },
+      /**
+       * スワイプ終了時に距離が十分であればドロワーを開く
+       */
+      onPanResponderRelease: (_evt, gestureState) => {
+        if (gestureState.dx > SWIPE_MIN_DISTANCE) {
+          navigation.openDrawer();
+        }
+      },
+    })
+  ).current;
+
+  /** モバイル幅でない場合は表示しない */
+  if (!isMobile) return null;
+
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: SWIPE_EDGE_WIDTH,
+        zIndex: 999,
+      }}
+      {...panResponder.panHandlers}
+    />
+  );
+};
+
 /** ブレークポイント（スマホ/PC切り替え） */
 const MOBILE_BREAKPOINT = 768;
 
@@ -57,9 +123,13 @@ const createWrappedScreen = (ScreenComponent, screenName) => {
    */
   const WrappedScreen = (props) => {
     return (
-      <ScreenErrorBoundary screenName={screenName} navigation={props.navigation}>
-        <ScreenComponent {...props} />
-      </ScreenErrorBoundary>
+      <View style={{ flex: 1 }}>
+        <ScreenErrorBoundary screenName={screenName} navigation={props.navigation}>
+          <ScreenComponent {...props} />
+        </ScreenErrorBoundary>
+        {/* Web版スマホ用：左端スワイプでドロワーを開くオーバーレイ */}
+        <SwipeToOpenDrawer navigation={props.navigation} />
+      </View>
     );
   };
 
