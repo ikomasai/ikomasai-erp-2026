@@ -29,6 +29,7 @@ import Item14Screen from '../features/item14/screens/Item14Screen';
 import Item15Screen from '../features/item15/screens/Item15Screen';
 import Item16Screen from '../features/item16/screens/Item16Screen';
 import JimuShiftScreen from '../features/jimu-shift/screens/JimuShiftScreen';
+import SettingsScreen from '../features/settings/screens/SettingsScreen';
 import SettingsThemeScreen from '../features/settings/screens/SettingsThemeScreen';
 import AdminTestNotificationScreen from '../features/admin/screens/AdminTestNotificationScreen';
 import NotificationListScreen from '../features/notifications/screens/NotificationListScreen';
@@ -82,6 +83,7 @@ const WrappedItem14Screen = createWrappedScreen(Item14Screen, '会計対応');
 const WrappedItem15Screen = createWrappedScreen(Item15Screen, '物品対応');
 const WrappedItem16Screen = createWrappedScreen(Item16Screen, '企画者サポート');
 const WrappedJimuShiftScreen = createWrappedScreen(JimuShiftScreen, '当日部員');
+const WrappedSettingsScreen = createWrappedScreen(SettingsScreen, '設定');
 const WrappedSettingsThemeScreen = createWrappedScreen(SettingsThemeScreen, 'テーマ設定');
 const WrappedAdminTestNotificationScreen = createWrappedScreen(AdminTestNotificationScreen, '通知送信（管理者）');
 const WrappedNotificationListScreen = createWrappedScreen(NotificationListScreen, '通知一覧');
@@ -139,6 +141,7 @@ const DrawerNavigator = () => {
       <Drawer.Screen name="Item15" component={WrappedItem15Screen} options={{ title: '物品対応' }} />
       <Drawer.Screen name="Item16" component={WrappedItem16Screen} options={{ title: '企画者サポート' }} />
       <Drawer.Screen name="JimuShift" component={WrappedJimuShiftScreen} options={{ title: '当日部員' }} />
+      <Drawer.Screen name="Settings" component={WrappedSettingsScreen} options={{ title: '設定' }} />
       <Drawer.Screen name="SettingsTheme" component={WrappedSettingsThemeScreen} />
       <Drawer.Screen name="AdminTestNotification" component={WrappedAdminTestNotificationScreen} />
       <Drawer.Screen name="Notifications" component={WrappedNotificationListScreen} />
