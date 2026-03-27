@@ -1,6 +1,28 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { corsHeaders, createJsonResponse } from '../_shared/cors.ts';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-notify-token',
+  'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS',
+};
+
+/**
+ * JSONレスポンスを返す
+ * push-subscription 単体で完結させ、Supabase MCP のバンドル時に sibling import で失敗しないようにする。
+ * @param {unknown} body - レスポンスボディ
+ * @param {number} status - HTTPステータス
+ * @returns {Response} JSONレスポンス
+ */
+const createJsonResponse = (body: unknown, status = 200) => {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'application/json',
+    },
+  });
+};
 
 /**
  * Supabaseサービスロールクライアントを作成する

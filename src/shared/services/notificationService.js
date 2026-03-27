@@ -323,6 +323,46 @@ export const sendNotificationToRoles = async (roleIds, title, body, metadata = {
 };
 
 /**
+ * ロール名一覧のユーザーへ通知を送信
+ * @param {string[]} roleNames
+ * @param {string} title
+ * @param {string} body
+ * @param {Object} metadata
+ * @param {string|null} senderUserId
+ * @returns {Promise<Object>} notification, recipientsCount, error
+ */
+export const sendNotificationToRoleNames = async (roleNames, title, body, metadata = {}, senderUserId = null) => {
+  try {
+    if (!Array.isArray(roleNames) || roleNames.length === 0) {
+      return { notification: null, recipientsCount: 0, error: new Error('通知先ロール名が未指定です') };
+    }
+
+    const { data, error } = await dispatchNotification({
+      targetType: 'roles',
+      roleNames,
+      title,
+      body,
+      metadata,
+      senderUserId,
+    });
+
+    if (error) {
+      return { notification: null, recipientsCount: 0, error };
+    }
+
+    emitNotificationUpdate();
+    return {
+      notification: { id: data?.notificationId ?? '' },
+      recipientsCount: data?.recipientsCount ?? 0,
+      push: data?.push ?? null,
+      error: null,
+    };
+  } catch (error) {
+    return { notification: null, recipientsCount: 0, error };
+  }
+};
+
+/**
  * 自分宛ての通知一覧を取得
  * @param {string} userId
  * @returns {Promise<Object>} items, error

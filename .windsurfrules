@@ -2,7 +2,16 @@
 
 ## 必読ドキュメント
 
-実装前に `docs/プロジェクト仕様書.md` を確認し、画面・DB・API要件に沿って変更する。
+コードを書く前に次をこの順で確認する。
+
+- `docs/AI用プロンプト/AGENTS.md`
+- `docs/アプリ理解.md`
+- `docs/管理部統合システム仕様書.md`（`item12`〜`item16` / `support` を触る場合は最優先）
+- `docs/プロジェクト仕様書.md`
+- `docs/AI用プロンプト/supabaseスキーマ参照.md`
+- `.mcp.json`
+
+現在ここで主に開発しているのは企画管理部統合システムであり、通常編集対象は `item12`〜`item16` と `src/features/support`。
 
 ## 技術スタック
 
@@ -18,7 +27,7 @@
 
 ```
 index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
-  └→ 認証済み: DrawerNavigator（Item1〜10, JimuShift, Settings, Admin, Notifications）
+  └→ 認証済み: DrawerNavigator（企画・屋台一覧, Item2〜10, Item12〜16, JimuShift, Settings, Admin, Notifications）
   └→ 未認証: LoginScreen
   └→ 初回ログイン: PasswordChangeModal
 ```
@@ -32,7 +41,7 @@ index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
 - `hooks/` — カスタムフック
 - `constants.js` — 機能固有定数
 
-機能一覧: item1〜item10, auth, jimu-shift, settings, admin, notifications
+機能一覧: 01_Events&Stalls_list, item2〜item10, item12〜item16, auth, support, jimu-shift, settings, admin, notifications
 
 ### 共有レイヤー
 

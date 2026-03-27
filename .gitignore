@@ -41,6 +41,11 @@ yarn-error.*
 /ios
 /android
 
+# セットアップスクリプト（service_role keyを含むためコミット禁止）
+scripts/
+
 # Serena MCP (自動生成キャッシュ)
 .serena/memories/
 .serena/logs/
+
+ai_tasks/

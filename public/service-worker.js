@@ -4,7 +4,7 @@
  */
 
 // キャッシュバージョン
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 // キャッシュ名
 const CACHE_NAME = `ikoma-erp-cache-${CACHE_VERSION}`;
 // プリキャッシュ対象
@@ -19,6 +19,23 @@ const PRECACHE_URLS = [
 ];
 // キャッシュ対象のリソース種別
 const ASSET_DESTINATIONS = ['style', 'script', 'image', 'font'];
+// 通知のデフォルトタイトル
+const DEFAULT_NOTIFICATION_TITLE = 'Ikoma Festival ERP 2026';
+// 通知のデフォルト本文
+const DEFAULT_NOTIFICATION_BODY = '新しい通知があります。';
+// 通知のデフォルト遷移先
+const DEFAULT_NOTIFICATION_URL = '/notifications';
+// 通知アイコン
+const DEFAULT_NOTIFICATION_ICON = '/icons/icon-192.png';
+// 通知バッジ
+const DEFAULT_NOTIFICATION_BADGE = '/icons/icon-192.png';
+// 通知アクション
+const DEFAULT_NOTIFICATION_ACTIONS = [
+  { action: 'open', title: '開く' },
+  { action: 'close', title: '閉じる' },
+];
+// 通知バイブレーション
+const DEFAULT_NOTIFICATION_VIBRATE = [160, 80, 160];
 
 /**
  * プリキャッシュを実行する
@@ -100,46 +117,94 @@ const handleAssetRequest = async (request) => {
 const getNotificationData = (event) => {
   if (!event.data) {
     return {
-      title: 'Ikoma Festival ERP 2026',
-      body: 'You have a new notification.',
-      url: '/',
+      title: DEFAULT_NOTIFICATION_TITLE,
+      body: DEFAULT_NOTIFICATION_BODY,
+      url: DEFAULT_NOTIFICATION_URL,
       navigateTo: null,
+      notificationId: null,
+      icon: DEFAULT_NOTIFICATION_ICON,
+      badge: DEFAULT_NOTIFICATION_BADGE,
+      image: null,
+      requireInteraction: true,
+      vibrate: DEFAULT_NOTIFICATION_VIBRATE,
+      actions: DEFAULT_NOTIFICATION_ACTIONS,
+      timestamp: Date.now(),
     };
   }
 
   try {
     const parsedData = event.data.json();
     return {
-      title: parsedData.title || 'Ikoma Festival ERP 2026',
-      body: parsedData.body || 'You have a new notification.',
-      url: parsedData.url || '/',
+      title: parsedData.title || DEFAULT_NOTIFICATION_TITLE,
+      body: parsedData.body || DEFAULT_NOTIFICATION_BODY,
+      url: parsedData.url || DEFAULT_NOTIFICATION_URL,
       /** 遷移先情報（{ screen: string, tab: string } または null） */
       navigateTo: parsedData.navigateTo || null,
+      /** 通知ID（重複排除タグとして使用） */
+      notificationId: parsedData.notificationId || null,
+      /** 表示オプション */
+      icon: parsedData.icon || DEFAULT_NOTIFICATION_ICON,
+      badge: parsedData.badge || DEFAULT_NOTIFICATION_BADGE,
+      image: parsedData.image || null,
+      requireInteraction: parsedData.requireInteraction !== false,
+      vibrate:
+        Array.isArray(parsedData.vibrate) && parsedData.vibrate.length > 0
+          ? parsedData.vibrate
+          : DEFAULT_NOTIFICATION_VIBRATE,
+      actions:
+        Array.isArray(parsedData.actions) && parsedData.actions.length > 0
+          ? parsedData.actions
+          : DEFAULT_NOTIFICATION_ACTIONS,
+      timestamp:
+        typeof parsedData.timestamp === 'number' && Number.isFinite(parsedData.timestamp)
+          ? parsedData.timestamp
+          : Date.now(),
     };
   } catch (error) {
     return {
-      title: 'Ikoma Festival ERP 2026',
+      title: DEFAULT_NOTIFICATION_TITLE,
       body: event.data.text(),
-      url: '/',
+      url: DEFAULT_NOTIFICATION_URL,
       navigateTo: null,
+      notificationId: null,
+      icon: DEFAULT_NOTIFICATION_ICON,
+      badge: DEFAULT_NOTIFICATION_BADGE,
+      image: null,
+      requireInteraction: true,
+      vibrate: DEFAULT_NOTIFICATION_VIBRATE,
+      actions: DEFAULT_NOTIFICATION_ACTIONS,
+      timestamp: Date.now(),
     };
   }
 };
 
 /**
  * 通知のオプションを生成する
+ * requireInteraction: true でユーザーが閉じるまでポップアップを維持する（Discord 方式）
  * @param {Object} data - 通知データ
  * @returns {NotificationOptions} 通知オプション
  */
 const buildNotificationOptions = (data) => {
   return {
     body: data.body,
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    icon: data.icon || DEFAULT_NOTIFICATION_ICON,
+    badge: data.badge || DEFAULT_NOTIFICATION_BADGE,
+    image: data.image || undefined,
+    vibrate: Array.isArray(data.vibrate) ? data.vibrate : DEFAULT_NOTIFICATION_VIBRATE,
+    actions: Array.isArray(data.actions) ? data.actions : DEFAULT_NOTIFICATION_ACTIONS,
+    timestamp: data.timestamp || Date.now(),
+    silent: false,
+    lang: 'ja',
+    /** ユーザーが操作するまでポップアップを閉じない */
+    requireInteraction: data.requireInteraction !== false,
+    /** 同じ notificationId の重複通知を排除し、新着時は再通知する */
+    tag: data.notificationId || 'ikoma-erp-notification',
+    renotify: Boolean(data.notificationId),
     data: {
       url: data.url,
       /** 遷移先情報（postMessage で使用） */
       navigateTo: data.navigateTo,
+      notificationId: data.notificationId,
     },
   };
 };
@@ -229,15 +294,27 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  const notificationData = getNotificationData(event);
-  const notificationOptions = buildNotificationOptions(notificationData);
-
   event.waitUntil(
-    self.registration.showNotification(notificationData.title, notificationOptions)
+    (async () => {
+      const notificationData = getNotificationData(event);
+      const notificationOptions = buildNotificationOptions(notificationData);
+
+      if (notificationOptions.tag) {
+        const existingNotifications = await self.registration.getNotifications({
+          tag: notificationOptions.tag,
+        });
+        existingNotifications.forEach((notification) => notification.close());
+      }
+
+      await self.registration.showNotification(notificationData.title, notificationOptions);
+    })()
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (event.action === 'close') {
+    return;
+  }
   event.waitUntil(handleNotificationClick(event));
 });

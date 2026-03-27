@@ -9,7 +9,6 @@ import { registerServiceWorker } from '../utils/serviceWorker.js';
 
 /** 通知許可案内のローカルストレージキー接頭辞 */
 const WEB_PUSH_PROMPT_KEY_PREFIX = 'ikoma_erp_web_push_prompted_';
-const SESSION_REFRESH_MARGIN_SECONDS = 60;
 
 /**
  * URL-safe Base64文字列をUint8Arrayへ変換
@@ -91,60 +90,22 @@ const requestNotificationPermissionIfNeeded = async (userId) => {
 };
 
 /**
- * セッション有効期限が近いか判定
- * @param {Object|null} session
- * @returns {boolean}
- */
-const isSessionExpiringSoon = (session) => {
-  const expiresAt = session?.expires_at;
-  if (!expiresAt) {
-    return false;
-  }
-  const nowUnixSeconds = Math.floor(Date.now() / 1000);
-  return expiresAt <= nowUnixSeconds + SESSION_REFRESH_MARGIN_SECONDS;
-};
-
-/**
  * 有効なアクセストークンを取得
- * @param {boolean} forceRefresh
+ *
+ * getSession() のみを使用し、手動 refreshSession() は一切呼ばない。
+ * refreshSession() を手動で呼ぶと autoRefreshToken との競合でリフレッシュトークンが
+ * 使用済みになり、Supabase JS クライアントが 400 を受けた際に内部でサインアウトを
+ * 発火させるため使用しない。
+ *
  * @returns {Promise<string|null>}
  */
-const getValidAccessToken = async (forceRefresh = false) => {
+const getValidAccessToken = async () => {
   const supabase = getSupabaseClient();
-
-  if (forceRefresh) {
-    const { data, error } = await supabase.auth.refreshSession();
-    if (error) {
-      throw error;
-    }
-    return data?.session?.access_token ?? null;
-  }
-
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.getSession();
-
+  const { data, error } = await supabase.auth.getSession();
   if (error) {
-    throw error;
+    return null;
   }
-
-  if (!session) {
-    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-    if (refreshError) {
-      return null;
-    }
-    return refreshData?.session?.access_token ?? null;
-  }
-
-  if (isSessionExpiringSoon(session)) {
-    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-    if (!refreshError && refreshData?.session?.access_token) {
-      return refreshData.session.access_token;
-    }
-  }
-
-  return session.access_token ?? null;
+  return data?.session?.access_token ?? null;
 };
 
 /**
@@ -218,7 +179,9 @@ const savePushSubscription = async (subscription) => {
   let { error } = await invokeSubscription(accessToken);
 
   if (error && isUnauthorizedFunctionError(error)) {
-    accessToken = await getValidAccessToken(true).catch(() => null);
+    // autoRefreshToken の完了を待ってから再試行する
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    accessToken = await getValidAccessToken();
     if (accessToken) {
       ({ error } = await invokeSubscription(accessToken));
     }

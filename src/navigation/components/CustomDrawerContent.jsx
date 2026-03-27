@@ -16,7 +16,10 @@ import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { useTheme } from '../../shared/hooks/useTheme';
-import { canAccessScreen, isAdmin } from '../../services/supabase/permissionService';
+import {
+  canAccessManagementSupportScreen,
+  canAccessScreen,
+} from '../../services/supabase/permissionService';
 
 /**
  * ドロワーアイテムコンポーネント
@@ -102,10 +105,16 @@ const CustomDrawerContent = (props) => {
     1: '企画・屋台一覧',
     3: 'チケット配布率',
     4: '落とし物検索',
+    5: '迷子検索',
     8: '臨時ヘルプ',
     9: '実長機能',
     10: '本部',
     11: '当日部員',
+    12: '巡回サポート',
+    13: '本部サポート',
+    14: '会計対応',
+    15: '物品対応',
+    16: '企画者サポート',
   };
 
   /**
@@ -127,14 +136,20 @@ const CustomDrawerContent = (props) => {
   const PERMISSION_NAME_MAP = {
     1: '企画・屋台一覧',
     4: '落とし物検索',
+    5: '迷子検索',
+    9: '実長機能',
+    10: '本部',
     11: '当日部員',
   };
 
-  const accessibleItems = Array.from({ length: 11 }, (_, index) => {
+  const accessibleItems = Array.from({ length: 16 }, (_, index) => {
     const itemNumber = index + 1;
     // カスタム権限名があればそれを使用、なければデフォルト
     const permissionName = PERMISSION_NAME_MAP[itemNumber] || `item${itemNumber}`;
-    const isAccessible = canAccessScreen(userInfo?.roles || [], permissionName);
+    const isManagementSupportScreen = ['item12', 'item13', 'item14', 'item15'].includes(permissionName);
+    const isAccessible = isManagementSupportScreen
+      ? canAccessManagementSupportScreen(userInfo?.roles || [], permissionName)
+      : canAccessScreen(userInfo?.roles || [], permissionName);
     // カスタムラベルがあればそれを使用、なければデフォルト
     const label = ITEM_LABELS[itemNumber] || `項目${itemNumber}`;
     // カスタム画面名があればそれを使用、なければデフォルト
@@ -147,8 +162,6 @@ const CustomDrawerContent = (props) => {
       isAccessible,
     };
   }).filter((item) => item.isAccessible);
-
-  const canAccessAdmin = isAdmin(userInfo?.roles || []);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}>
@@ -197,19 +210,11 @@ const CustomDrawerContent = (props) => {
         <View style={[styles.settingsSection, { borderTopColor: theme.border }]}>
           <Text style={[styles.settingsSectionTitle, { color: theme.textSecondary }]}>設定</Text>
           <DrawerItem
-            label="⚙️ テーマ設定"
-            isActive={currentRouteName === 'SettingsTheme'}
-            onPress={() => navigateTo('SettingsTheme')}
+            label="設定"
+            isActive={currentRouteName === 'Settings'}
+            onPress={() => navigateTo('Settings')}
             theme={theme}
           />
-          {canAccessAdmin && (
-            <DrawerItem
-              label="🔔 通知送信（管理者）"
-              isActive={currentRouteName === 'AdminTestNotification'}
-              onPress={() => navigateTo('AdminTestNotification')}
-              theme={theme}
-            />
-          )}
         </View>
       </ScrollView>
 

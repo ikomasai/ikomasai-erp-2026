@@ -6,6 +6,7 @@
 import React from 'react';
 import { AuthProvider } from './src/shared/contexts/AuthContext';
 import { ThemeProvider } from './src/shared/contexts/ThemeContext';
+import { TerminalProvider } from './src/shared/contexts/TerminalContext';
 import { FontLoaderProvider } from './src/shared/components';
 import AppNavigator from './src/navigation/AppNavigator';
 
@@ -17,9 +18,11 @@ export default function App() {
   return (
     <AuthProvider>
       <ThemeProvider>
-        <FontLoaderProvider>
-          <AppNavigator />
-        </FontLoaderProvider>
+        <TerminalProvider>
+          <FontLoaderProvider>
+            <AppNavigator />
+          </FontLoaderProvider>
+        </TerminalProvider>
       </ThemeProvider>
     </AuthProvider>
   );
