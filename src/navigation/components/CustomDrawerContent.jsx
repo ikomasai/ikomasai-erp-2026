@@ -19,7 +19,6 @@ import { useTheme } from '../../shared/hooks/useTheme';
 import {
   canAccessManagementSupportScreen,
   canAccessScreen,
-  isAdmin,
 } from '../../services/supabase/permissionService';
 
 /**
@@ -163,8 +162,6 @@ const CustomDrawerContent = (props) => {
     };
   }).filter((item) => item.isAccessible);
 
-  const canAccessAdmin = isAdmin(userInfo?.roles || []);
-
   return (
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}>
       {/* ヘッダー */}
@@ -208,42 +205,15 @@ const CustomDrawerContent = (props) => {
           </View>
         )}
 
-        {/* 通知セクション */}
-        <View style={[styles.settingsSection, { borderTopColor: theme.border }]}>
-          <Text style={[styles.settingsSectionTitle, { color: theme.textSecondary }]}>通知</Text>
-          <DrawerItem
-            label="通知一覧"
-            isActive={currentRouteName === 'NotificationList'}
-            onPress={() => navigateTo('NotificationList')}
-            theme={theme}
-          />
-          {isAdmin(userInfo?.roles || []) && (
-            <DrawerItem
-              label="通知送信（管理者）"
-              isActive={currentRouteName === 'AdminTestNotification'}
-              onPress={() => navigateTo('AdminTestNotification')}
-              theme={theme}
-            />
-          )}
-        </View>
-
         {/* 設定セクション */}
         <View style={[styles.settingsSection, { borderTopColor: theme.border }]}>
           <Text style={[styles.settingsSectionTitle, { color: theme.textSecondary }]}>設定</Text>
           <DrawerItem
-            label="テーマ設定"
-            isActive={currentRouteName === 'SettingsTheme'}
-            onPress={() => navigateTo('SettingsTheme')}
+            label="設定"
+            isActive={currentRouteName === 'Settings'}
+            onPress={() => navigateTo('Settings')}
             theme={theme}
           />
-          {canAccessAdmin && (
-            <DrawerItem
-              label="🔔 通知送信（管理者）"
-              isActive={currentRouteName === 'AdminTestNotification'}
-              onPress={() => navigateTo('AdminTestNotification')}
-              theme={theme}
-            />
-          )}
         </View>
       </ScrollView>
 
