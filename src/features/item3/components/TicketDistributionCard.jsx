@@ -2,9 +2,9 @@
  * 配布率カードコンポーネント
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { DISTRIBUTION_TYPES } from '../constants';
+import { DISTRIBUTION_TYPES, STATUS_COLORS } from '../constants';
 
 /**
  * 日付を日本語表示に整形する
@@ -45,20 +45,7 @@ const formatTimeLabel = (timeString) => {
  * @returns {string} 色コード
  */
 const getStatusColor = (status) => {
-  switch (status) {
-    case 'active':
-      return '#2ecc71';
-    case 'paused':
-      return '#f39c12';
-    case 'full':
-      return '#e74c3c';
-    case 'ended':
-      return '#7f8c8d';
-    case 'not_started':
-      return '#3498db';
-    default:
-      return '#95a5a6';
-  }
+  return STATUS_COLORS[status] || '#95a5a6';
 };
 
 /**
@@ -69,7 +56,12 @@ const getStatusColor = (status) => {
  */
 const SequentialInfo = ({ sequential }) => {
   return (
-    <View style={styles.infoGrid}>
+    <View>
+      <View style={styles.waitTimeBox}>
+        <Text style={styles.waitTimeLabel}>待ち時間</Text>
+        <Text style={styles.waitTimeValue}>{sequential.estimatedWaitMinutes}分</Text>
+      </View>
+      <View style={styles.infoGrid}>
       <View style={styles.infoItem}>
         <Text style={styles.infoLabel}>現在呼び出し</Text>
         <Text style={styles.infoValue}>{sequential.currentCallNumber}</Text>
@@ -79,12 +71,13 @@ const SequentialInfo = ({ sequential }) => {
         <Text style={styles.infoValue}>{sequential.lastTicketNumber}</Text>
       </View>
       <View style={styles.infoItem}>
-        <Text style={styles.infoLabel}>待ち人数</Text>
+        <Text style={styles.infoLabel}>待ち人数(人)</Text>
         <Text style={styles.infoValue}>{sequential.waitingCount}</Text>
       </View>
       <View style={styles.infoItem}>
-        <Text style={styles.infoLabel}>待ち時間(分)</Text>
-        <Text style={styles.infoValue}>{sequential.estimatedWaitMinutes}</Text>
+        <Text style={styles.infoLabel}>1番号あたり</Text>
+        <Text style={styles.infoValue}>{sequential.estimatedWaitPerNumber}分</Text>
+      </View>
       </View>
     </View>
   );
@@ -120,15 +113,15 @@ const TimeSlotInfo = ({ timeSlots }) => {
           </View>
           <View style={styles.infoGrid}>
             <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>定員</Text>
+              <Text style={styles.infoLabel}>定員(人)</Text>
               <Text style={styles.infoValue}>{slot.capacityPerSlot}</Text>
             </View>
             <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>発券済み</Text>
+              <Text style={styles.infoLabel}>発券済み(人)</Text>
               <Text style={styles.infoValue}>{slot.currentCount}</Text>
             </View>
             <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>残り枠</Text>
+              <Text style={styles.infoLabel}>残り枠(人)</Text>
               <Text style={styles.infoValue}>{slot.remainingCount}</Text>
             </View>
           </View>
@@ -150,6 +143,13 @@ const TimeSlotInfo = ({ timeSlots }) => {
 const TicketDistributionCard = ({ item }) => {
   /** 企画タイプ */
   const distributionType = item.type;
+  /** 時間枠の折りたたみ状態 */
+  const [isTimeSlotCollapsed, setIsTimeSlotCollapsed] = useState(false);
+
+  /** 時間枠一覧を開閉する */
+  const toggleTimeSlotCollapse = () => {
+    setIsTimeSlotCollapsed((prev) => !prev);
+  };
 
   return (
     <View style={styles.card}>
@@ -176,7 +176,15 @@ const TicketDistributionCard = ({ item }) => {
       {distributionType === DISTRIBUTION_TYPES.SEQUENTIAL ? (
         <SequentialInfo sequential={item.sequential} />
       ) : (
-        <TimeSlotInfo timeSlots={item.timeSlots} />
+        <View>
+          <View style={styles.timeSlotToggleRow}>
+            <Text style={styles.timeSlotToggleLabel}>時間枠一覧</Text>
+            <Text style={styles.timeSlotToggleButton} onPress={toggleTimeSlotCollapse}>
+              {isTimeSlotCollapsed ? '開く' : '閉じる'}
+            </Text>
+          </View>
+          {!isTimeSlotCollapsed && <TimeSlotInfo timeSlots={item.timeSlots} />}
+        </View>
       )}
 
       {item.updatedAt && (
@@ -258,6 +266,38 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#2c3e50',
+  },
+  waitTimeBox: {
+    backgroundColor: '#f1f8ff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  waitTimeLabel: {
+    fontSize: 12,
+    color: '#2980b9',
+    marginBottom: 6,
+  },
+  waitTimeValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#2c3e50',
+  },
+  timeSlotToggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  timeSlotToggleLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  timeSlotToggleButton: {
+    fontSize: 13,
+    color: '#007AFF',
+    fontWeight: '600',
   },
   timeSlotList: {
     gap: 12,

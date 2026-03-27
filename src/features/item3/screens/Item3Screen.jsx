@@ -71,10 +71,43 @@ const Item3Screen = ({ navigation }) => {
     refresh,
   } = useTicketDistributionData();
 
+  /** サマリー数値 */
+  const summaryData = useMemo(() => {
+    /** 案内中企画IDセット */
+    const activeEventIdSet = new Set();
+    /** 満員枠数 */
+    let fullSlotCount = 0;
+    /** 進行中枠数 */
+    let activeSlotCount = 0;
+
+    distributionList.forEach((item) => {
+      if (item.status === 'active') {
+        activeEventIdSet.add(item.eventId);
+      }
+
+      if (item.type === FILTER_TYPES.TIME_SLOT) {
+        (item.timeSlots || []).forEach((slot) => {
+          if (slot.status === 'full') {
+            fullSlotCount += 1;
+          }
+          if (slot.status === 'active') {
+            activeSlotCount += 1;
+          }
+        });
+      }
+    });
+
+    return {
+      activeEventCount: activeEventIdSet.size,
+      fullSlotCount,
+      activeSlotCount,
+    };
+  }, [distributionList]);
+
   /** フィルタ済みデータ */
   const filteredList = useMemo(() => {
-  /** 日付検索文字列 */
-  const normalizedDateQuery = dateQuery.trim();
+    /** 日付検索文字列 */
+    const normalizedDateQuery = dateQuery.trim();
     /** 開始時間検索 */
     const normalizedStartTime = selectedStartTime.trim();
 
@@ -109,6 +142,17 @@ const Item3Screen = ({ navigation }) => {
     });
   }, [distributionList, selectedFilter, dateQuery, selectedStartTime]);
 
+  /** 空状態メッセージ */
+  const emptyMessage = useMemo(() => {
+    if (selectedStartTime) {
+      return '条件をクリアしてください';
+    }
+    if (dateQuery) {
+      return '該当日付に企画がありません';
+    }
+    return '表示できるデータがありません';
+  }, [dateQuery, selectedStartTime]);
+
   /** 開始時間プルダウン候補 */
   const startTimeOptions = useMemo(() => {
     /** 開始時刻一覧 */
@@ -129,6 +173,24 @@ const Item3Screen = ({ navigation }) => {
 
     return Array.from(uniqueMap.values()).sort();
   }, [distributionList]);
+
+  /** 適用中フィルタ一覧 */
+  const activeFilters = useMemo(() => {
+    /** 適用中フィルタ配列 */
+    const filterList = [];
+
+    if (dateQuery) {
+      /** 日付ラベル */
+      const dateLabel = dateOptions.find((option) => option.value === dateQuery)?.label;
+      filterList.push(`日付: ${dateLabel || dateQuery}`);
+    }
+
+    if (selectedStartTime) {
+      filterList.push(`時間: ${selectedStartTime}`);
+    }
+
+    return filterList;
+  }, [dateQuery, selectedStartTime]);
 
   /**
    * ドロワーを開く
@@ -189,81 +251,110 @@ const Item3Screen = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       {/* ヘッダー */}
       <View style={styles.header}>
-        {isMobile && (
-          <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
-            <Text style={styles.menuButtonText}>☰</Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.headerSide}>
+          {isMobile && (
+            <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
+              <Text style={styles.menuButtonText}>☰</Text>
+            </TouchableOpacity>
+          )}
+        </View>
         <Text style={styles.headerTitle}>{SCREEN_LABELS.title}</Text>
-        {isMobile && <View style={styles.menuButton} />}
+        <TouchableOpacity style={styles.refreshIconButton} onPress={refresh}>
+          <Text style={styles.refreshIconText}>更新</Text>
+        </TouchableOpacity>
       </View>
 
       {/* コンテンツ */}
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.filterContainer}>
-          <Text style={styles.sectionTitle}>表示フィルタ</Text>
-          <View style={styles.filterButtons}>
-            {[
-              { label: SCREEN_LABELS.all, value: FILTER_TYPES.ALL },
-              { label: SCREEN_LABELS.sequential, value: FILTER_TYPES.SEQUENTIAL },
-              { label: SCREEN_LABELS.timeSlot, value: FILTER_TYPES.TIME_SLOT },
-            ].map((filter) => (
-              <TouchableOpacity
-                key={filter.value}
-                style={[
-                  styles.filterButton,
-                  selectedFilter === filter.value && styles.filterButtonActive,
-                ]}
-                onPress={() => handleFilterChange(filter.value)}
-              >
-                <Text
-                  style={[
-                    styles.filterButtonText,
-                    selectedFilter === filter.value && styles.filterButtonTextActive,
-                  ]}
-                >
-                  {filter.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
+        <View style={styles.summaryCard}>
+          <Text style={styles.sectionTitle}>{SCREEN_LABELS.summaryTitle}</Text>
+          <View style={styles.summaryGrid}>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>{SCREEN_LABELS.summaryActiveEvents}</Text>
+              <Text style={styles.summaryValue}>{summaryData.activeEventCount}</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>{SCREEN_LABELS.summaryFullSlots}</Text>
+              <Text style={styles.summaryValue}>{summaryData.fullSlotCount}</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>{SCREEN_LABELS.summaryActiveSlots}</Text>
+              <Text style={styles.summaryValue}>{summaryData.activeSlotCount}</Text>
+            </View>
           </View>
-          <View style={styles.dateFilterSection}>
-            <Text style={styles.searchLabel}>{SCREEN_LABELS.dateSearch}</Text>
-            <TouchableOpacity
-              style={styles.dropdownButton}
-              onPress={toggleDateDropdown}
-            >
-              <Text style={styles.dropdownButtonText}>
-                {dateQuery
-                  ? dateOptions.find((option) => option.value === dateQuery)?.label
-                  : SCREEN_LABELS.allDates}
-              </Text>
-              <Text style={styles.dropdownIcon}>{isDateDropdownOpen ? '▲' : '▼'}</Text>
-            </TouchableOpacity>
-            {isDateDropdownOpen && (
-              <View style={styles.dropdownMenu}>
-                <TouchableOpacity
-                  style={styles.dropdownItem}
-                  onPress={() => handleDateSelect('')}
-                >
-                  <Text style={styles.dropdownItemText}>{SCREEN_LABELS.allDates}</Text>
-                </TouchableOpacity>
-                {dateOptions.map((option) => (
+          <Text style={styles.lastUpdatedText}>
+            最終更新: {lastUpdatedAt ? lastUpdatedAt.toLocaleString('ja-JP') : '取得中'}
+          </Text>
+        </View>
+
+        <View style={styles.filterContainer}>
+          <View style={styles.filterRow}>
+            <View style={styles.filterGroup}>
+              <Text style={styles.searchLabel}>{SCREEN_LABELS.filterLabel}</Text>
+              <View style={styles.filterButtons}>
+                {[
+                  { label: SCREEN_LABELS.all, value: FILTER_TYPES.ALL },
+                  { label: SCREEN_LABELS.sequential, value: FILTER_TYPES.SEQUENTIAL },
+                  { label: SCREEN_LABELS.timeSlot, value: FILTER_TYPES.TIME_SLOT },
+                ].map((filter) => (
                   <TouchableOpacity
-                    key={option.value}
-                    style={styles.dropdownItem}
-                    onPress={() => handleDateSelect(option.value)}
+                    key={filter.value}
+                    style={[
+                      styles.filterButton,
+                      selectedFilter === filter.value && styles.filterButtonActive,
+                    ]}
+                    onPress={() => handleFilterChange(filter.value)}
                   >
-                    <Text style={styles.dropdownItemText}>
-                      {option.label}
+                    <Text
+                      style={[
+                        styles.filterButtonText,
+                        selectedFilter === filter.value && styles.filterButtonTextActive,
+                      ]}
+                    >
+                      {filter.label}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-            )}
-          </View>
-          {(selectedFilter === FILTER_TYPES.TIME_SLOT || selectedFilter === FILTER_TYPES.ALL) && (
-            <View style={styles.dateFilterSection}>
+            </View>
+
+            <View style={styles.dropdownGroup}>
+              <Text style={styles.searchLabel}>{SCREEN_LABELS.dateSearch}</Text>
+              <TouchableOpacity
+                style={styles.dropdownButton}
+                onPress={toggleDateDropdown}
+              >
+                <Text style={styles.dropdownButtonText}>
+                  {dateQuery
+                    ? dateOptions.find((option) => option.value === dateQuery)?.label
+                    : SCREEN_LABELS.allDates}
+                </Text>
+                <Text style={styles.dropdownIcon}>{isDateDropdownOpen ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
+              {isDateDropdownOpen && (
+                <View style={styles.dropdownMenu}>
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={() => handleDateSelect('')}
+                  >
+                    <Text style={styles.dropdownItemText}>{SCREEN_LABELS.allDates}</Text>
+                  </TouchableOpacity>
+                  {dateOptions.map((option) => (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={styles.dropdownItem}
+                      onPress={() => handleDateSelect(option.value)}
+                    >
+                      <Text style={styles.dropdownItemText}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            <View style={styles.dropdownGroup}>
               <Text style={styles.searchLabel}>{SCREEN_LABELS.timeSearch}</Text>
               <TouchableOpacity
                 style={styles.dropdownButton}
@@ -294,16 +385,20 @@ const Item3Screen = ({ navigation }) => {
                 </View>
               )}
             </View>
-          )}
-        </View>
+          </View>
 
-        <View style={styles.refreshRow}>
-          <Text style={styles.refreshText}>
-            最終更新: {lastUpdatedAt ? lastUpdatedAt.toLocaleString('ja-JP') : '取得中'}
-          </Text>
-          <TouchableOpacity style={styles.refreshButton} onPress={refresh}>
-            <Text style={styles.refreshButtonText}>更新</Text>
-          </TouchableOpacity>
+          {activeFilters.length > 0 && (
+            <View style={styles.activeFilterRow}>
+              <Text style={styles.activeFilterLabel}>{SCREEN_LABELS.activeFilters}</Text>
+              <View style={styles.activeFilterList}>
+                {activeFilters.map((filterText) => (
+                  <View key={filterText} style={styles.activeFilterBadge}>
+                    <Text style={styles.activeFilterText}>{filterText}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
         </View>
 
         {isLoading && (
@@ -316,23 +411,32 @@ const Item3Screen = ({ navigation }) => {
         {!isLoading && errorMessage ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{errorMessage}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={refresh}>
+              <Text style={styles.retryButtonText}>再取得</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
         {!isLoading && !errorMessage && filteredList.length === 0 && (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>表示できるデータがありません</Text>
+            <Text style={styles.emptyText}>{emptyMessage}</Text>
           </View>
         )}
 
         {!isLoading && !errorMessage && filteredList.length > 0 && (
-          <View style={styles.cardList}>
+          <View style={[styles.cardList, !isMobile && styles.cardListDesktop]}>
             {filteredList.map((item) => (
-              <TicketDistributionCard key={`${item.eventId}_${item.eventDateId}`} item={item} />
+              <View
+                key={`${item.eventId}_${item.eventDateId}`}
+                style={[styles.cardWrapper, !isMobile && styles.cardWrapperDesktop]}
+              >
+                <TicketDistributionCard item={item} />
+              </View>
             ))}
           </View>
         )}
       </ScrollView>
+
     </SafeAreaView>
   );
 };
@@ -352,6 +456,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
+  headerSide: {
+    width: 44,
+  },
   menuButton: {
     width: 44,
     height: 44,
@@ -367,6 +474,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333333',
   },
+  refreshIconButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: '#007AFF',
+  },
+  refreshIconText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   content: {
     padding: 16,
     paddingBottom: 40,
@@ -376,6 +494,45 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#2c3e50',
     marginBottom: 8,
+  },
+  summaryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  summaryItem: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 12,
+    minWidth: 120,
+    flex: 1,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginBottom: 4,
+  },
+  summaryValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2c3e50',
+  },
+  lastUpdatedText: {
+    fontSize: 11,
+    color: '#7f8c8d',
+    marginTop: 12,
+    textAlign: 'right',
   },
   filterContainer: {
     backgroundColor: '#FFFFFF',
@@ -387,6 +544,18 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 6,
     elevation: 2,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  filterGroup: {
+    minWidth: 200,
+  },
+  dropdownGroup: {
+    minWidth: 160,
   },
   filterButtons: {
     flexDirection: 'row',
@@ -409,9 +578,6 @@ const styles = StyleSheet.create({
   },
   filterButtonTextActive: {
     color: '#FFFFFF',
-  },
-  dateFilterSection: {
-    marginTop: 16,
   },
   searchLabel: {
     fontSize: 12,
@@ -445,6 +611,17 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: '#FFFFFF',
     overflow: 'hidden',
+    position: 'relative',
+    zIndex: 10,
+    elevation: 10,
+  },
+  dropdownMenuOverlay: {
+    position: 'absolute',
+    bottom: 48,
+    left: 0,
+    right: 0,
+    marginTop: 0,
+    zIndex: 10,
   },
   dropdownItem: {
     paddingHorizontal: 12,
@@ -456,27 +633,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#2c3e50',
   },
-  refreshRow: {
+  activeFilterRow: {
+    marginTop: 12,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    gap: 8,
+    flexWrap: 'wrap',
   },
-  refreshText: {
+  activeFilterLabel: {
     fontSize: 12,
     color: '#7f8c8d',
+    fontWeight: '600',
   },
-  refreshButton: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: '#007AFF',
+  activeFilterList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
   },
-  refreshButtonText: {
-    color: '#007AFF',
-    fontSize: 12,
+  activeFilterBadge: {
+    backgroundColor: '#eef3ff',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  activeFilterText: {
+    fontSize: 11,
+    color: '#2c3e50',
     fontWeight: '600',
   },
   loadingContainer: {
@@ -499,6 +681,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  retryButton: {
+    alignSelf: 'center',
+    marginTop: 12,
+    backgroundColor: '#007AFF',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   emptyBox: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -511,6 +706,17 @@ const styles = StyleSheet.create({
   },
   cardList: {
     gap: 12,
+  },
+  cardListDesktop: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  cardWrapper: {
+    width: '100%',
+  },
+  cardWrapperDesktop: {
+    width: '48%',
   },
 });
 
