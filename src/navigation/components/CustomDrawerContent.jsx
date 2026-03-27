@@ -197,14 +197,11 @@ const CustomDrawerContent = (props) => {
   }).filter((item) => item.isAccessible);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}>
-      {/* モバイル時のみ右端に左スワイプ検知オーバーレイを配置してドロワーを閉じる */}
-      {isMobile && (
-        <View
-          style={styles.closeSwipeOverlay}
-          {...closePanResponder.panHandlers}
-        />
-      )}
+    /* モバイル時のみコンテナ全体に左スワイプ検知を付与（タップは子要素が優先して受け取る） */
+    <View
+      style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}
+      {...(isMobile ? closePanResponder.panHandlers : {})}
+    >
       {/* ヘッダー */}
       <View style={[styles.header, { borderBottomColor: theme.border }]}>
         <Text style={[styles.headerTitle, { color: theme.text }]}>生駒祭 ERP</Text>
@@ -274,13 +271,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  /** ドロワー右端の左スワイプ検知オーバーレイ（40px幅、全高） */
+  /** ドロワー全体の左スワイプ検知オーバーレイ */
   closeSwipeOverlay: {
     position: 'absolute',
+    left: 0,
     right: 0,
     top: 0,
     bottom: 0,
-    width: 40,
     zIndex: 999,
   },
   header: {
