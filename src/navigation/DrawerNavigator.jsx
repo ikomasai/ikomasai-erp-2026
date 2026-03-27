@@ -6,8 +6,8 @@
  */
 
 import React, { useRef } from 'react';
-import { Platform, useWindowDimensions, View, PanResponder } from 'react-native';
-import { createDrawerNavigator } from '@react-navigation/drawer';
+import { Platform, useWindowDimensions, View, PanResponder, Animated } from 'react-native';
+import { createDrawerNavigator, useDrawerStatus } from '@react-navigation/drawer';
 import { useTerminal } from '../shared/contexts/TerminalContext';
 import CustomDrawerContent from './components/CustomDrawerContent';
 import ScreenErrorBoundary from '../shared/components/ScreenErrorBoundary';
@@ -43,6 +43,12 @@ const SWIPE_EDGE_WIDTH = 60;
 /** ドロワーを開くのに必要な最低スワイプ距離 (px) */
 const SWIPE_MIN_DISTANCE = 50;
 
+/** スワイプ中にドロワーがピークする最大幅 (px) */
+const PEEK_MAX_WIDTH = 30;
+
+/** ドロワーの背景色（drawerStyle と一致させる） */
+const DRAWER_BACKGROUND_COLOR = '#1a1a2e';
+
 /**
  * 左端スワイプでドロワーを開くオーバーレイコンポーネント
  * WebブラウザではswipeEnabledが機能しないためPanResponderで代替実装
@@ -56,10 +62,35 @@ const SwipeToOpenDrawer = ({ navigation }) => {
   const { width } = useWindowDimensions();
   /** モバイル判定 */
   const isMobile = width < MOBILE_BREAKPOINT;
+  /** ドロワーの開閉状態 */
+  const drawerStatus = useDrawerStatus();
+  /** ドロワーが開いているかどうか */
+  const isDrawerOpen = drawerStatus === 'open';
+
+  /**
+   * navigationをrefで保持してPanResponder内から最新状態を参照可能にする
+   * （PanResponderはuseRefで一度だけ生成するため、クロージャ内に直接navigationを含めると古くなる恐れがある）
+   */
+  const navigationRef = useRef(navigation);
+  navigationRef.current = navigation;
+
+  /**
+   * ドロワー開閉状態をrefで保持してPanResponder内から参照可能にする
+   */
+  const isDrawerOpenRef = useRef(false);
+  isDrawerOpenRef.current = isDrawerOpen;
+
+  /**
+   * ピーク表示のtranslateX
+   * -DRAWER_WIDTH = 完全に画面外（非表示）
+   * -DRAWER_WIDTH + PEEK_MAX_WIDTH = 少しはみ出した状態
+   */
+  const peekTranslateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
 
   /**
    * パンジェスチャーハンドラー
    * 水平方向のスワイプのみ検知し、縦スクロールを妨げない
+   * 右スワイプ → ピーク表示しながら開く / 左スワイプ → ドロワーを閉じる
    */
   const panResponder = useRef(
     PanResponder.create({
@@ -70,16 +101,35 @@ const SwipeToOpenDrawer = ({ navigation }) => {
        */
       onMoveShouldSetPanResponder: (_evt, gestureState) => {
         return (
-          gestureState.dx > 5 &&
+          Math.abs(gestureState.dx) > 5 &&
           Math.abs(gestureState.dx) > Math.abs(gestureState.dy)
         );
       },
       /**
-       * スワイプ終了時に距離が十分であればドロワーを開く
+       * 指が動いている間、右スワイプ中のみピーク表示を更新する
+       * dx に比例してドロワーを少しだけ出す（PEEK_MAX_WIDTH でキャップ）
+       */
+      onPanResponderMove: (_evt, gestureState) => {
+        if (!isDrawerOpenRef.current && gestureState.dx > 0) {
+          const peekAmount = Math.min(gestureState.dx * 0.3, PEEK_MAX_WIDTH);
+          peekTranslateX.setValue(-DRAWER_WIDTH + peekAmount);
+        }
+      },
+      /**
+       * 指を離したときにピークを元に戻し、距離に応じてドロワーを開閉する
        */
       onPanResponderRelease: (_evt, gestureState) => {
+        /** ピーク表示を非表示に戻すアニメーション */
+        Animated.timing(peekTranslateX, {
+          toValue: -DRAWER_WIDTH,
+          duration: 150,
+          useNativeDriver: true,
+        }).start();
+
         if (gestureState.dx > SWIPE_MIN_DISTANCE) {
-          navigation.openDrawer();
+          navigationRef.current.openDrawer();
+        } else if (gestureState.dx < -SWIPE_MIN_DISTANCE) {
+          navigationRef.current.closeDrawer();
         }
       },
     })
@@ -89,17 +139,36 @@ const SwipeToOpenDrawer = ({ navigation }) => {
   if (!isMobile) return null;
 
   return (
-    <View
-      style={{
-        position: 'absolute',
-        left: 0,
-        top: 0,
-        bottom: 0,
-        width: SWIPE_EDGE_WIDTH,
-        zIndex: 999,
-      }}
-      {...panResponder.panHandlers}
-    />
+    <>
+      {/* ドロワーのピーク表示（ドロワーが閉じているときのみ表示） */}
+      {!isDrawerOpen && (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: DRAWER_WIDTH,
+            backgroundColor: DRAWER_BACKGROUND_COLOR,
+            transform: [{ translateX: peekTranslateX }],
+            zIndex: 998,
+          }}
+        />
+      )}
+      {/* タッチ検知オーバーレイ */}
+      <View
+        style={{
+          position: 'absolute',
+          left: isDrawerOpen ? DRAWER_WIDTH - 20 : 0,
+          top: 0,
+          bottom: 0,
+          width: isDrawerOpen ? 40 : SWIPE_EDGE_WIDTH,
+          zIndex: 999,
+        }}
+        {...panResponder.panHandlers}
+      />
+    </>
   );
 };
 
