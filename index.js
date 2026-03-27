@@ -1,3 +1,6 @@
+// react-native-gesture-handlerはエントリーポイントの最上部でインポートが必要
+// （Web含む全プラットフォームでジェスチャー機能を有効化するため）
+import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';
 
 import App from './App';

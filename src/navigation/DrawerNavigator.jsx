@@ -122,6 +122,8 @@ const DrawerNavigator = () => {
         },
         overlayColor: 'rgba(0, 0, 0, 0.5)',
         swipeEnabled: isMobile,
+        /** スワイプ開始を認識する左端の幅（デフォルト32pxより広く設定してスワイプしやすくする） */
+        swipeEdgeWidth: 60,
       }}
     >
       {/* 項目1〜10、事務シフト（Error Boundaryでラップ済み） */}
