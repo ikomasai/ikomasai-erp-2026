@@ -80,9 +80,10 @@ const formatShiftDate = (dateString) => {
  * シフト変更申請履歴画面コンポーネント（祭実長・部長向け）
  * @param {Object} props - コンポーネントプロパティ
  * @param {string} props.userId - ログインユーザーID
+ * @param {number} [props.refreshTrigger] - 親からの強制リロードトリガー（値が変わるたびにリロード）
  * @returns {JSX.Element} 申請履歴画面
  */
-const ShiftChangeHistoryScreen = ({ userId }) => {
+const ShiftChangeHistoryScreen = ({ userId, refreshTrigger }) => {
   /** テーマ */
   const { theme } = useTheme();
   /** 申請一覧 */
@@ -114,7 +115,7 @@ const ShiftChangeHistoryScreen = ({ userId }) => {
 
   useEffect(() => {
     loadRequests();
-  }, [loadRequests]);
+  }, [loadRequests, refreshTrigger]);
 
   /**
    * フィルター適用後の申請一覧
@@ -250,10 +251,6 @@ const ShiftChangeHistoryScreen = ({ userId }) => {
             </Text>
           </TouchableOpacity>
         ))}
-        {/* 更新ボタン */}
-        <TouchableOpacity style={styles.refreshButton} onPress={loadRequests}>
-          <Text style={[styles.refreshButtonText, { color: theme.primary }]}>↺</Text>
-        </TouchableOpacity>
       </View>
 
       {/* ローディング */}
@@ -326,14 +323,6 @@ const styles = StyleSheet.create({
   filterButtonText: {
     fontSize: 13,
     fontWeight: '500',
-  },
-  refreshButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  refreshButtonText: {
-    fontSize: 20,
-    fontWeight: '600',
   },
   centerContainer: {
     alignItems: 'center',

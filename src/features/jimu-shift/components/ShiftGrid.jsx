@@ -294,7 +294,7 @@ const ShiftGrid = ({
                   key={`header-${index}`}
                   style={[styles.headerCell, { backgroundColor: theme.surface, borderColor: theme.border }]}
                 >
-                  <Text style={[styles.headerText, { color: theme.textSecondary }]} numberOfLines={1}>
+                  <Text style={[styles.headerText, { color: theme.text }]} numberOfLines={1}>
                     {timeSlot}
                   </Text>
                 </View>
