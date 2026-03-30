@@ -64,8 +64,8 @@ const DRAWER_WIDTH = 280;
 const createWrappedScreen = (ScreenComponent, screenName) => {
   /**
    * Error Boundaryでラップされた画面
-   * スワイプでドロワーを開く機能をラッパーViewに直接付与する
-   * （オーバーレイViewを使わずラッパーにpanHandlersを付けることで画面内タッチを妨げない）
+   * スワイプでドロワーを開く機能をdocumentのtouch/mouseイベントとして登録する
+   * （ラッパーView自体にはpanHandlersを付けず、画面左端エリアでのスワイプをグローバルリスナーで検知する）
    * @param {Object} props - React Navigationから渡されるprops
    * @returns {JSX.Element} ラップされた画面
    */
