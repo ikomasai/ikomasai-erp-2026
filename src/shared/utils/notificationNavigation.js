@@ -42,21 +42,13 @@ const NAVIGATION_TARGET_BY_TYPE = {
 };
 
 /**
- * support_contact_update（返信・ステータス変更）の遷移先を
- * metadata の notify_target から解決する
- * - accounting → Item14（会計対応）
- * - property   → Item15（物品対応）
- * - その他     → Item16（企画者サポート）
- * @param {string|undefined} notifyTarget - metadata.notify_target の値
+ * support_contact_update（返信・ステータス変更）の遷移先を返す
+ * この通知は連絡案件の作成者（企画者）に送られるため、
+ * 常に企画者サポート（Item16）の質問タブへ遷移する
  * @returns {{ screen: string, tab: string }}
  */
-const getSupportContactUpdateTarget = (notifyTarget) => {
-  if (notifyTarget === 'accounting') {
-    return { screen: 'Item14', tab: 'tickets' };
-  }
-  if (notifyTarget === 'property') {
-    return { screen: 'Item15', tab: 'tickets' };
-  }
+const getSupportContactUpdateTarget = () => {
+  // 企画者（チケット作成者）への通知なので常に企画者サポートへ遷移する
   return { screen: 'Item16', tab: 'question' };
 };
 
@@ -72,9 +64,9 @@ export const getNavigationTargetByType = (type, metadata = {}) => {
     return null;
   }
 
-  /** 企画者への返信・ステータス変更通知は notify_target で振り分け */
+  /** 企画者への返信・ステータス変更通知は常に企画者サポートへ */
   if (type === 'support_contact_update') {
-    return getSupportContactUpdateTarget(metadata?.notify_target);
+    return getSupportContactUpdateTarget();
   }
 
   return NAVIGATION_TARGET_BY_TYPE[type] ?? null;
@@ -114,13 +106,9 @@ export const getNavigationButtonLabel = (type, metadata = {}) => {
       return '物品対応を確認する';
     case 'patrol_task_assigned':
       return '巡回タスクを確認する';
-    case 'support_contact_update': {
-      /** notify_target によってラベルを変える */
-      const notifyTarget = metadata?.notify_target;
-      if (notifyTarget === 'accounting') return '会計対応を確認する';
-      if (notifyTarget === 'property') return '物品対応を確認する';
+    case 'support_contact_update':
+      // 企画者サポートへの遷移なので固定ラベル
       return '連絡案件を確認する';
-    }
     default:
       return '確認する';
   }

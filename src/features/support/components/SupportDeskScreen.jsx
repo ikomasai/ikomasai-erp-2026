@@ -974,8 +974,8 @@ const SupportDeskScreen = ({
   const shouldShowDepartmentTicketSections = !isAccountingRole || isAccountingTicketsTab;
   /** 会計の景品配布基準タブUIを表示する */
   const shouldShowAccountingPrizeSection = isAccountingRole && isAccountingPrizesTab;
-  /** 案件詳細の添付表示を出すかどうか（会計/物品向け以外は表示） */
-  const shouldShowTicketAttachments = !isDepartmentRole;
+  /** 案件詳細の添付表示を出すかどうか（全ロールで表示） */
+  const shouldShowTicketAttachments = true;
   /** 部署向け説明カードを表示するかどうか */
   const shouldShowDepartmentDescription = Boolean(screenDescription);
   const departmentTicketStatusFilters = isAccountingRole
@@ -6080,6 +6080,9 @@ const SupportDeskScreen = ({
                       </Text>
                     </View>
                     <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+                      {ticket.organizations?.name || '-'} / 受付 {ticket.ticket_no || '-'}
+                    </Text>
+                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
                       {ticket.event_name} / {ticket.event_location}
                     </Text>
                     <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
@@ -6123,12 +6126,15 @@ const SupportDeskScreen = ({
             {isDepartmentTicketDetailExpanded ? (
               <>
                 <Text style={[styles.ticketDetailTitle, { color: theme.text }]}>{selectedTicket.title}</Text>
-                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>受付番号: {selectedTicket.ticket_no || '-'}</Text>
-                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}> 
+                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+                  団体: {selectedTicket.organizations?.name || '-'} / 受付番号: {selectedTicket.ticket_no || '-'}
+                </Text>
+                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                   種別: {TICKET_TYPE_LABELS[selectedTicket.ticket_type] || selectedTicket.ticket_type} / 状態:{' '}
                   {getTicketStatusLabelForRole(selectedTicket, roleType)}
+                  {selectedTicket.priority ? ` / 優先度: ${selectedTicket.priority === 'high' ? '高' : '中'}` : null}
                 </Text>
-                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}> 
+                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                   企画: {selectedTicket.event_name}（{selectedTicket.event_location}）
                 </Text>
                 {isEventStatusTicket ? (
