@@ -40,6 +40,7 @@ import {
 } from '../../../services/supabase/supportTicketService';
 import { KEY_BUILDINGS, KEY_CATALOG } from '../data/keyCatalog';
 import { ensureKeysSeededFromCatalog } from '../../../services/supabase/keyMasterService';
+import { KEY_LOAN_STATUSES, listKeyLoans } from '../../../services/supabase/keyLoanService';
 import {
   selectAllUserProfiles,
   updateExhibitorEventProfile,
@@ -70,6 +71,9 @@ const REQUESTED_AT_TIME_PATTERN = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
 /** 希望時刻パターン（YYYY-MM-DD HH:mm） */
 const REQUESTED_AT_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})\s+([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** 鍵貸出状況の確認時に取得する最大件数 */
+const KEY_LOAN_FETCH_LIMIT = KEY_CATALOG.length + 50;
 
 /** タブごとに表示する最新案件の種別 */
 const VISIBLE_TICKET_TYPES_BY_TAB = {
@@ -333,6 +337,10 @@ const Item16Screen = ({ navigation, route }) => {
   const [selectedKeyBorrowerOrganization, setSelectedKeyBorrowerOrganization] = useState(null);
   /** 鍵事前申請: 選択中借受人 */
   const [selectedKeyBorrowerUser, setSelectedKeyBorrowerUser] = useState(null);
+  /** 鍵事前申請: 貸出中の鍵ID一覧 */
+  const [loanedKeyIds, setLoanedKeyIds] = useState([]);
+  /** 鍵事前申請: 貸出中鍵の読込中 */
+  const [isLoadingLoanedKeys, setIsLoadingLoanedKeys] = useState(false);
   const [keyBuilding, setKeyBuilding] = useState(ALL_BUILDINGS_VALUE);
   const [keySelectedId, setKeySelectedId] = useState('');
   const [selectedKeyIds, setSelectedKeyIds] = useState([]);
@@ -365,6 +373,30 @@ const Item16Screen = ({ navigation, route }) => {
     }
     Alert.alert(title, message);
   };
+
+  /**
+   * 貸出中の鍵一覧を読み込む
+   * @returns {Promise<{loanedKeyIds: string[], error: Error|null}>} 読込結果
+   */
+  const loadLoanedKeys = useCallback(async () => {
+    setIsLoadingLoanedKeys(true);
+    const { data, error } = await listKeyLoans({
+      status: KEY_LOAN_STATUSES.LOANED,
+      limit: KEY_LOAN_FETCH_LIMIT,
+    });
+    setIsLoadingLoanedKeys(false);
+
+    if (error) {
+      console.error('鍵事前申請の貸出中鍵取得に失敗:', error);
+      return { loanedKeyIds: [], error };
+    }
+
+    const nextLoanedKeyIds = Array.from(
+      new Set((data || []).map((row) => normalizeText(row?.key_code)).filter(Boolean))
+    );
+    setLoanedKeyIds(nextLoanedKeyIds);
+    return { loanedKeyIds: nextLoanedKeyIds, error: null };
+  }, []);
 
   /**
    * 連絡案件一覧を読み込む
@@ -659,6 +691,16 @@ const Item16Screen = ({ navigation, route }) => {
   }, [user?.id]);
 
   /**
+   * 鍵申請タブ表示時に貸出中の鍵一覧を更新
+   */
+  useEffect(() => {
+    if (activeTab !== SUPPORT_TAB_TYPES.KEY_PREAPPLY) {
+      return;
+    }
+    loadLoanedKeys();
+  }, [activeTab, loadLoanedKeys]);
+
+  /**
    * 企画情報をローカルストレージへ保存（ユーザー別）
    */
   useEffect(() => {
@@ -913,6 +955,20 @@ const Item16Screen = ({ navigation, route }) => {
   }, [keyBuilding]);
 
   /**
+   * 貸出中鍵の参照用セット
+   */
+  const loanedKeyIdSet = useMemo(() => {
+    return new Set(loanedKeyIds);
+  }, [loanedKeyIds]);
+
+  /**
+   * 現在の棟フィルタで選択可能な鍵候補
+   */
+  const selectableFilteredKeyCatalog = useMemo(() => {
+    return filteredKeyCatalog.filter((item) => !loanedKeyIdSet.has(item.id));
+  }, [filteredKeyCatalog, loanedKeyIdSet]);
+
+  /**
    * 複数追加済みの鍵一覧
    */
   const selectedKeyItems = useMemo(() => {
@@ -928,19 +984,41 @@ const Item16Screen = ({ navigation, route }) => {
   const keyBorrowerOrgName = normalizeText(selectedKeyBorrowerOrganization?.name);
   /** 鍵事前申請で選択中の団体ID */
   const keyBorrowerOrgId = normalizeText(selectedKeyBorrowerOrganization?.id);
+  /** 現在選択中の鍵が貸出中かどうか */
+  const isSelectedKeyLoaned = Boolean(keySelectedId && loanedKeyIdSet.has(keySelectedId));
 
   /**
    * 棟切替時に選択中の鍵が候補外になった場合は先頭へ戻す
    */
   useEffect(() => {
-    if (filteredKeyCatalog.length === 0) {
+    if (selectableFilteredKeyCatalog.length === 0) {
       setKeySelectedId('');
       return;
     }
-    if (!filteredKeyCatalog.some((item) => item.id === keySelectedId)) {
-      setKeySelectedId(filteredKeyCatalog[0].id);
+    if (!selectableFilteredKeyCatalog.some((item) => item.id === keySelectedId)) {
+      setKeySelectedId(selectableFilteredKeyCatalog[0].id);
     }
-  }, [filteredKeyCatalog, keySelectedId]);
+  }, [keySelectedId, selectableFilteredKeyCatalog]);
+
+  /**
+   * 鍵候補の選択値を更新
+   * 貸出中の鍵は選択状態として保持しない
+   * @param {string} value - 選択した鍵ID
+   * @returns {void}
+   */
+  const handleChangeKeySelectedId = (value) => {
+    const normalizedValue = normalizeText(value);
+    if (!normalizedValue) {
+      setKeySelectedId('');
+      return;
+    }
+    if (loanedKeyIdSet.has(normalizedValue)) {
+      setKeySelectedId(selectableFilteredKeyCatalog[0]?.id || '');
+      showMessage('選択不可', '貸出中の鍵は事前申請で選択できません。');
+      return;
+    }
+    setKeySelectedId(normalizedValue);
+  };
 
   /**
    * プルダウン選択中の鍵を複数選択リストへ追加
@@ -952,6 +1030,10 @@ const Item16Screen = ({ navigation, route }) => {
     }
     if (selectedKeyIds.includes(keySelectedId)) {
       showMessage('確認', 'その鍵はすでに追加済みです。');
+      return;
+    }
+    if (loanedKeyIdSet.has(keySelectedId)) {
+      showMessage('選択不可', '貸出中の鍵は事前申請で追加できません。');
       return;
     }
     setSelectedKeyIds((prev) => [...prev, keySelectedId]);
@@ -1167,7 +1249,7 @@ const Item16Screen = ({ navigation, route }) => {
    * 仮送信処理
    * @returns {void}
    */
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validateCommonFields()) {
       return;
     }
@@ -1178,6 +1260,22 @@ const Item16Screen = ({ navigation, route }) => {
       }
       if (!keyBorrowerUserId || !keyBorrowerPersonName) {
         showMessage('入力不足', '借受人を選択してください。');
+        return;
+      }
+      if (selectedKeyItems.length === 0) {
+        showMessage('入力不足', '申請する鍵を追加してください。');
+        return;
+      }
+      const { loanedKeyIds: latestLoanedKeyIds, error: loanedKeyError } = await loadLoanedKeys();
+      if (loanedKeyError) {
+        showMessage('鍵情報エラー', '貸出中の鍵確認に失敗しました。時間を空けて再度お試しください。');
+        return;
+      }
+      const latestLoanedKeyIdSet = new Set(latestLoanedKeyIds);
+      const loanedSelectedKeys = selectedKeyItems.filter((item) => latestLoanedKeyIdSet.has(item.id));
+      if (loanedSelectedKeys.length > 0) {
+        const loanedKeyNames = loanedSelectedKeys.map((item) => item.name).join('、');
+        showMessage('選択不可', `貸出中の鍵は申請できません: ${loanedKeyNames}`);
         return;
       }
     }
@@ -1431,14 +1529,17 @@ const Item16Screen = ({ navigation, route }) => {
           onChangeBorrowerUser={setSelectedKeyBorrowerUser}
           selectedBorrowerUser={selectedKeyBorrowerUser}
           isLoadingBorrowerOptions={isLoadingKeyBorrowerOptions}
+          loanedKeyIds={loanedKeyIds}
+          isLoadingLoanedKeys={isLoadingLoanedKeys}
           keyBuilding={keyBuilding}
           onChangeKeyBuilding={setKeyBuilding}
           keySelectedId={keySelectedId}
-          onChangeKeySelectedId={setKeySelectedId}
+          onChangeKeySelectedId={handleChangeKeySelectedId}
           onAddSelectedKey={addSelectedKey}
           onRemoveSelectedKey={removeSelectedKey}
           selectedKeyItems={selectedKeyItems}
           filteredKeyCatalog={filteredKeyCatalog}
+          isSelectedKeyLoaned={isSelectedKeyLoaned}
           keyBuildings={KEY_BUILDINGS}
           allBuildingsValue={ALL_BUILDINGS_VALUE}
         />

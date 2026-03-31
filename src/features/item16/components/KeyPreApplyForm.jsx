@@ -202,6 +202,8 @@ const KeyPreApplyForm = ({
   onChangeBorrowerUser,
   selectedBorrowerUser,
   isLoadingBorrowerOptions,
+  loanedKeyIds,
+  isLoadingLoanedKeys,
   keyBuilding,
   onChangeKeyBuilding,
   keySelectedId,
@@ -210,9 +212,17 @@ const KeyPreApplyForm = ({
   onRemoveSelectedKey,
   selectedKeyItems,
   filteredKeyCatalog,
+  isSelectedKeyLoaned,
   keyBuildings,
   allBuildingsValue,
 }) => {
+  const loanedKeyIdSet = useMemo(() => new Set(Array.isArray(loanedKeyIds) ? loanedKeyIds : []), [loanedKeyIds]);
+  const hasSelectableKeys = useMemo(
+    () => filteredKeyCatalog.some((item) => !loanedKeyIdSet.has(item.id)),
+    [filteredKeyCatalog, loanedKeyIdSet]
+  );
+  const isAddDisabled = !keySelectedId || isSelectedKeyLoaned || isLoadingLoanedKeys || !hasSelectableKeys;
+
   return (
     <View style={styles.formSection}>
       {/* 借受人選択 */}
@@ -276,6 +286,13 @@ const KeyPreApplyForm = ({
       </View>
 
       <Text style={[styles.label, { color: theme.text }]}>鍵を選択</Text>
+      <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+        {isLoadingLoanedKeys
+          ? '貸出中の鍵を確認中...'
+          : hasSelectableKeys
+            ? '貸出中の鍵は選択できません。'
+            : 'この条件では選択できる鍵がありません。'}
+      </Text>
       <View
         style={[
           styles.pickerContainer,
@@ -296,13 +313,22 @@ const KeyPreApplyForm = ({
           itemStyle={{ color: theme.text }}
           dropdownIconColor={theme.text}
         >
-          {filteredKeyCatalog.length === 0 ? (
-            <Picker.Item label="選択できる鍵がありません" value="" color={theme.text} />
-          ) : (
+          {filteredKeyCatalog.length === 0 || !hasSelectableKeys ? (
+            <Picker.Item
+              label={
+                filteredKeyCatalog.length === 0
+                  ? '選択できる鍵がありません'
+                  : '貸出中のため選択できる鍵がありません'
+              }
+              value=""
+              color={theme.text}
+            />
+          ) : null}
+          {filteredKeyCatalog.length === 0 ? null : (
             filteredKeyCatalog.map((item) => (
               <Picker.Item
                 key={item.id}
-                label={`${item.building} / ${item.name}`}
+                label={`${item.building} / ${item.name}${loanedKeyIdSet.has(item.id) ? '（貸出中）' : ''}`}
                 value={item.id}
                 color={theme.text}
               />
@@ -311,9 +337,20 @@ const KeyPreApplyForm = ({
         </Picker>
       </View>
 
+      {isSelectedKeyLoaned ? (
+        <Text style={[styles.helpText, { color: theme.error }]}>
+          選択中の鍵は現在貸出中です。別の鍵を選択してください。
+        </Text>
+      ) : null}
+
       <TouchableOpacity
-        style={[styles.addKeyButton, { borderColor: theme.border, backgroundColor: theme.background }]}
+        style={[
+          styles.addKeyButton,
+          { borderColor: theme.border, backgroundColor: theme.background },
+          isAddDisabled ? styles.addKeyButtonDisabled : null,
+        ]}
         onPress={onAddSelectedKey}
+        disabled={isAddDisabled}
       >
         <Text style={[styles.addKeyButtonText, { color: theme.textSecondary }]}>この鍵を追加</Text>
       </TouchableOpacity>
@@ -385,6 +422,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 10,
     alignItems: 'center',
+  },
+  addKeyButtonDisabled: {
+    opacity: 0.45,
   },
   addKeyButtonText: {
     fontSize: 13,
