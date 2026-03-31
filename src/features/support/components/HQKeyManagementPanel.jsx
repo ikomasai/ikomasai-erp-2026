@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  createLockCheckTaskForReturnedLoan,
   createKeyLoan,
   listKeyLoans,
   returnKeyAndCreateLockTask,
@@ -445,6 +446,40 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
     }
     await loadKeyLoans();
     onLoanReturned?.();
+  };
+
+  /**
+   * 返却済みだが未確認の鍵に施錠確認タスクを補完する
+   * @param {string} loanId - 鍵貸出ID
+   * @returns {Promise<void>} 実行結果
+   */
+  const handleCreateLockCheckTask = async (loanId) => {
+    if (!user?.id) {
+      showMessage('操作エラー', 'ログイン情報が取得できません');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const { data, error } = await createLockCheckTaskForReturnedLoan({
+      loanId,
+      creatorUserId: user.id,
+      optionalAssignee: null,
+    });
+    setIsSubmitting(false);
+
+    if (error) {
+      showMessage('施錠確認依頼エラー', error.message || '施錠確認タスクの作成に失敗しました');
+      return;
+    }
+
+    await loadKeyLoans();
+
+    if (data?.reused) {
+      showMessage('施錠確認依頼', '既存の施錠確認タスクをそのまま利用します');
+      return;
+    }
+
+    showMessage('施錠確認依頼', '施錠確認タスクを作成しました');
   };
 
   /**
@@ -1044,6 +1079,8 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
             const isReloaned = loanedKeyLabelSet.has(loan.key_label);
             /** 未施錠の場合は赤背景で強調 */
             const isUnlocked = loan.lock_check_status === 'unlocked';
+            /** 未確認だが巡回依頼済みかどうか */
+            const hasLockTaskRequest = Boolean(loan.lock_task_id);
             return (
               <View
                 key={loan.id}
@@ -1095,6 +1132,25 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
                     </View>
                   )}
                 </View>
+                {!checkInfo && !hasLockTaskRequest ? (
+                  <View style={styles.lockCheckActionRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.subActionButton,
+                        { borderColor: '#3B5BDB', backgroundColor: '#EEF2FF' },
+                      ]}
+                      onPress={() => handleCreateLockCheckTask(loan.id)}
+                      disabled={isSubmitting}
+                    >
+                      <Text style={[styles.subActionText, { color: '#3B5BDB' }]}>
+                        施錠確認タスクを作成
+                      </Text>
+                    </TouchableOpacity>
+                    <Text style={[styles.lockCheckPendingText, { color: theme.textSecondary }]}>
+                      既存の未確認データにも巡回依頼を追加できます
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             );
           })}
@@ -1610,6 +1666,17 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
     marginTop: 4,
+  },
+  lockCheckActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+  },
+  lockCheckPendingText: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   /** 施錠確認ステータスバッジ / 再貸出バッジ共通 */
   lockBadge: {

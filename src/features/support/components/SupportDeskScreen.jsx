@@ -367,10 +367,20 @@ const OVERVIEW_REPORT_TYPE_FILTERS = [
 
 /** 概況ダッシュボード: 企画報告セクションのステータスフィルター */
 const OVERVIEW_STATUS_FILTERS = [
-  { key: 'active', label: '対応中' },
   { key: 'all', label: 'すべて' },
+  { key: 'active', label: '対応中' },
   { key: 'done', label: '完了済み' },
 ];
+
+/** 概況ダッシュボード: 企画報告の状態並び順 */
+const OVERVIEW_REPORT_STATUS_ORDER = {
+  [SUPPORT_TICKET_STATUSES.NEW]: 0,
+  [SUPPORT_TICKET_STATUSES.ACKNOWLEDGED]: 1,
+  [SUPPORT_TICKET_STATUSES.IN_PROGRESS]: 2,
+  [SUPPORT_TICKET_STATUSES.WAITING_EXTERNAL]: 3,
+  [SUPPORT_TICKET_STATUSES.RESOLVED]: 4,
+  [SUPPORT_TICKET_STATUSES.CLOSED]: 5,
+};
 
 /** 概況ダッシュボード: 施錠確認セクションの担当フィルター */
 const OVERVIEW_LOCK_ASSIGNEE_FILTERS = [
@@ -910,6 +920,8 @@ const SupportDeskScreen = ({
   const [overviewLockAssigneeFilter, setOverviewLockAssigneeFilter] = useState('all');
   /** 概況ダッシュボード: 施錠確認の確認状況フィルター */
   const [overviewLockConfirmationFilter, setOverviewLockConfirmationFilter] = useState('all');
+  /** 概況ダッシュボード: 選択中の施錠確認タスクID */
+  const [selectedOverviewLockTaskId, setSelectedOverviewLockTaskId] = useState(null);
 
   /** 団体別企画一覧（events ベースの統一企画マスタ）- HQ向け */
   const [hqOrganizationEvents, setHqOrganizationEvents] = useState([]);
@@ -1406,8 +1418,12 @@ const SupportDeskScreen = ({
   }, [prizeDistributions, selectedPrizeDistributionId]);
 
   const selectedTicket = useMemo(() => {
+    /** 概況確認では開始/終了報告も扱うため tickets 全体から選択する */
+    if (isHQRole && activeTab === 'overview') {
+      return tickets.find((ticket) => ticket.id === selectedTicketId) || null;
+    }
     return filteredTickets.find((ticket) => ticket.id === selectedTicketId) || null;
-  }, [filteredTickets, selectedTicketId]);
+  }, [activeTab, filteredTickets, isHQRole, selectedTicketId, tickets]);
 
   /**
    * HQ が回答できるticket_type（rule_question / layout_change）の案件を選択中かどうか
@@ -1644,15 +1660,54 @@ const SupportDeskScreen = ({
       return true;
     });
     /** 種別フィルター */
-    if (overviewReportTypeFilter === 'all') {
-      return statusFiltered;
-    }
-    const reportTicketTypeMap = {
-      confirm_start: 'start_report',
-      confirm_end: 'end_report',
-    };
-    return statusFiltered.filter((ticket) => ticket.ticket_type === reportTicketTypeMap[overviewReportTypeFilter]);
+    const reportTypeFiltered =
+      overviewReportTypeFilter === 'all'
+        ? statusFiltered
+        : statusFiltered.filter((ticket) => {
+            const reportTicketTypeMap = {
+              confirm_start: 'start_report',
+              confirm_end: 'end_report',
+            };
+            return ticket.ticket_type === reportTicketTypeMap[overviewReportTypeFilter];
+          });
+
+    return reportTypeFiltered.slice().sort((left, right) => {
+      /** 状態順を優先し、同じ状態なら新しい報告を先頭に並べる */
+      const leftOrder = OVERVIEW_REPORT_STATUS_ORDER[left.ticket_status] ?? 99;
+      const rightOrder = OVERVIEW_REPORT_STATUS_ORDER[right.ticket_status] ?? 99;
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+      const leftTime = new Date(left.created_at || 0).getTime();
+      const rightTime = new Date(right.created_at || 0).getTime();
+      return rightTime - leftTime;
+    });
   }, [overviewReportTypeFilter, overviewStatusFilter, tickets]);
+
+  /** 概況確認で選択中の企画報告案件 */
+  const selectedOverviewReportTicket = useMemo(() => {
+    return overviewReportTickets.find((ticket) => ticket.id === selectedTicketId) || null;
+  }, [overviewReportTickets, selectedTicketId]);
+
+  /** 概況確認で選択中の企画報告に紐づく未完了巡回タスク */
+  const selectedOverviewReportPatrolTask = useMemo(() => {
+    if (!selectedOverviewReportTicket?.id) {
+      return null;
+    }
+    /** 連絡案件種別に応じて対応する巡回タスク種別を決める */
+    const expectedTaskType =
+      selectedOverviewReportTicket.ticket_type === 'start_report'
+        ? PATROL_TASK_TYPES.CONFIRM_START
+        : PATROL_TASK_TYPES.CONFIRM_END;
+
+    return (
+      hqPatrolTasks.find(
+        (task) =>
+          task.source_ticket_id === selectedOverviewReportTicket.id &&
+          task.task_type === expectedTaskType
+      ) || null
+    );
+  }, [hqPatrolTasks, selectedOverviewReportTicket]);
 
   /**
    * 概況ダッシュボード: 担当・確認状況フィルター適用後の施錠確認タスク
@@ -1686,6 +1741,11 @@ const SupportDeskScreen = ({
       return true;
     });
   }, [overviewLockAllTasks, overviewLockAssigneeFilter, overviewLockConfirmationFilter]);
+
+  /** 概況確認で選択中の施錠確認タスク */
+  const selectedOverviewLockTask = useMemo(() => {
+    return overviewLockTasks.find((task) => task.id === selectedOverviewLockTaskId) || null;
+  }, [overviewLockTasks, selectedOverviewLockTaskId]);
 
   /**
    * AsyncStorageから最終閲覧時刻を読み込む
@@ -3568,6 +3628,7 @@ const SupportDeskScreen = ({
       () => {
         /** patrol_tasks に変更があった瞬間にHQ向け一覧を再取得 */
         loadHqPatrolTasks();
+        loadOverviewLockTasks();
       }
     );
 
@@ -3590,6 +3651,7 @@ const SupportDeskScreen = ({
     /** フォーカス復帰時の再取得ハンドラ */
     const handlePatrolFocus = () => {
       loadHqPatrolTasks();
+      loadOverviewLockTasks();
     };
 
     /** ナビゲーションフォーカスイベント */
@@ -3600,6 +3662,7 @@ const SupportDeskScreen = ({
       const handleVisibilityChange = () => {
         if (!document.hidden) {
           loadHqPatrolTasks();
+          loadOverviewLockTasks();
         }
       };
       window.addEventListener('focus', handlePatrolFocus);
@@ -3615,6 +3678,7 @@ const SupportDeskScreen = ({
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
         loadHqPatrolTasks();
+        loadOverviewLockTasks();
       }
     });
 
@@ -3635,6 +3699,7 @@ const SupportDeskScreen = ({
     }
     const interval = setInterval(() => {
       loadHqPatrolTasks();
+      loadOverviewLockTasks();
     }, 60 * 1000);
     return () => clearInterval(interval);
   }, [isHQRole]);
@@ -3685,14 +3750,26 @@ const SupportDeskScreen = ({
 
   useEffect(() => {
     if (filteredTickets.length === 0) {
-      setSelectedTicketId(null);
+      if (!isHQRole || activeTab !== 'overview' || overviewReportTickets.length === 0) {
+        setSelectedTicketId(null);
+      }
+      return;
+    }
+
+    /** 概況確認では企画報告カードの選択も維持する */
+    if (isHQRole && activeTab === 'overview') {
+      const hasFilteredTicket = filteredTickets.some((ticket) => ticket.id === selectedTicketId);
+      const hasOverviewReportTicket = overviewReportTickets.some((ticket) => ticket.id === selectedTicketId);
+      if (!selectedTicketId || (!hasFilteredTicket && !hasOverviewReportTicket)) {
+        setSelectedTicketId(overviewReportTickets[0]?.id || filteredTickets[0].id);
+      }
       return;
     }
 
     if (!selectedTicketId || !filteredTickets.some((ticket) => ticket.id === selectedTicketId)) {
       setSelectedTicketId(filteredTickets[0].id);
     }
-  }, [filteredTickets, selectedTicketId]);
+  }, [activeTab, filteredTickets, isHQRole, overviewReportTickets, selectedTicketId]);
 
   /**
    * 企画報告確認セクションの折りたたみ状態を切り替える
@@ -3738,6 +3815,46 @@ const SupportDeskScreen = ({
     setSelectedTicketId(ticketId);
     setIsDepartmentTicketDetailExpanded(true);
     setShouldScrollToDepartmentDetail(true);
+  };
+
+  /**
+   * 概況確認の企画報告カードを選択する
+   * @param {string} ticketId - 企画報告案件ID
+   * @returns {void}
+   */
+  const handleSelectOverviewReportTicket = (ticketId) => {
+    if (!ticketId) {
+      return;
+    }
+    setSelectedTicketId(ticketId);
+    setIsDepartmentTicketDetailExpanded(true);
+  };
+
+  /**
+   * 概況確認から巡回タブへ移動し、対象タスクの割当画面を開く
+   * @param {string} taskId - 巡回タスクID
+   * @returns {void}
+   */
+  const handleOpenPatrolTaskFromOverview = (taskId) => {
+    if (!taskId) {
+      return;
+    }
+    setActiveTab('patrol');
+    handleSelectPatrolTask(taskId);
+    loadHqPatrolTasks();
+    loadPatrolAssignees();
+  };
+
+  /**
+   * 概況確認の施錠確認カードを選択する
+   * @param {string} taskId - 施錠確認タスクID
+   * @returns {void}
+   */
+  const handleSelectOverviewLockTask = (taskId) => {
+    if (!taskId) {
+      return;
+    }
+    setSelectedOverviewLockTaskId(taskId);
   };
 
   /**
@@ -4458,17 +4575,20 @@ const SupportDeskScreen = ({
                       const typeLabel = ticket.ticket_type === 'start_report' ? '開始報告' : '終了報告';
                       /** 状態ラベル */
                       const statusLabel = STATUS_LABELS[ticket.ticket_status] || ticket.ticket_status;
+                      /** 選択中カードかどうか */
+                      const isSelected = ticket.id === selectedOverviewReportTicket?.id;
                       return (
-                        <View
+                        <Pressable
                           key={ticket.id}
                           style={[
                             styles.overviewTaskCard,
                             {
-                              borderColor: theme.border,
-                              backgroundColor: theme.background,
+                              borderColor: isSelected ? theme.primary : theme.border,
+                              backgroundColor: isSelected ? `${theme.primary}10` : theme.background,
                               borderLeftColor: statusColor,
                             },
                           ]}
+                          onPress={() => handleSelectOverviewReportTicket(ticket.id)}
                         >
                           <View style={styles.overviewTaskHeader}>
                             <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
@@ -4486,10 +4606,108 @@ const SupportDeskScreen = ({
                           <Text style={[styles.messageDate, { color: theme.textSecondary }]}>
                             団体: {ticket.organizations?.name || '-'} / {new Date(ticket.created_at).toLocaleString('ja-JP')}
                           </Text>
-                        </View>
+                        </Pressable>
                       );
                     })
                   )}
+
+                  {selectedOverviewReportTicket ? (
+                    <View
+                      style={[
+                        styles.overviewDetailCard,
+                        { borderColor: theme.border, backgroundColor: theme.background },
+                      ]}
+                    >
+                      <Text style={[styles.sectionTitle, { color: theme.text }]}>選択中の企画報告</Text>
+                      <Text style={[styles.ticketDetailTitle, { color: theme.text }]}>
+                        {selectedOverviewReportTicket.title}
+                      </Text>
+                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+                        種別:{' '}
+                        {TICKET_TYPE_LABELS[selectedOverviewReportTicket.ticket_type] ||
+                          selectedOverviewReportTicket.ticket_type}
+                        {' / '}状態: {getTicketStatusLabelForRole(selectedOverviewReportTicket, roleType)}
+                      </Text>
+                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+                        企画: {selectedOverviewReportTicket.event_name || '-'}（
+                        {selectedOverviewReportTicket.event_location || '-'}）
+                      </Text>
+                      <Text
+                        style={[
+                          styles.requestBody,
+                          { color: theme.text, borderColor: theme.border, backgroundColor: theme.surface },
+                        ]}
+                      >
+                        {selectedOverviewReportTicket.description}
+                      </Text>
+                      <View style={styles.overviewActionRow}>
+                        {selectedOverviewReportPatrolTask ? (
+                          <TouchableOpacity
+                            style={[styles.statusButton, { borderColor: theme.primary, backgroundColor: `${theme.primary}14` }]}
+                            onPress={() => handleOpenPatrolTaskFromOverview(selectedOverviewReportPatrolTask.id)}
+                          >
+                            <Text style={[styles.statusButtonText, { color: theme.primary }]}>関連巡回タスクを開く</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <View
+                            style={[
+                              styles.overviewInfoPill,
+                              { borderColor: theme.border, backgroundColor: theme.surface },
+                            ]}
+                          >
+                            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                              対応中の巡回タスクは見つかりません
+                            </Text>
+                          </View>
+                        )}
+                        <TouchableOpacity
+                          style={[styles.statusButton, { borderColor: theme.border, backgroundColor: theme.surface }]}
+                          onPress={() => loadMessages(selectedOverviewReportTicket.id)}
+                        >
+                          <Text style={[styles.statusButtonText, { color: theme.textSecondary }]}>メッセージ更新</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={[styles.label, { color: theme.text }]}>対応メッセージ</Text>
+                      {isLoadingMessages ? (
+                        <SkeletonLoader lines={3} baseColor={theme.border} />
+                      ) : messages.length === 0 ? (
+                        <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                          まだ対応メッセージはありません。
+                        </Text>
+                      ) : (
+                        <View style={styles.messageList}>
+                          {messages.map((message) => {
+                            /** 自分のメッセージかどうか */
+                            const isMine = message.author_id === user?.id;
+                            /** メッセージ左帯の色 */
+                            const roleColor = isMine ? MESSAGE_ROLE_COLORS.self : MESSAGE_ROLE_COLORS.other;
+                            return (
+                              <View
+                                key={message.id}
+                                style={[
+                                  styles.messageItem,
+                                  {
+                                    borderColor: isMine ? theme.primary : theme.border,
+                                    backgroundColor: isMine ? `${theme.primary}14` : theme.surface,
+                                    borderLeftWidth: 3,
+                                    borderLeftColor: roleColor,
+                                  },
+                                ]}
+                              >
+                                <Text style={[styles.messageAuthor, { color: roleColor }]}>
+                                  {isMine ? 'あなた' : '相手'}
+                                </Text>
+                                <Text style={[styles.messageBody, { color: theme.text }]}>{message.body}</Text>
+                                <Text style={[styles.messageDate, { color: theme.textSecondary }]}>
+                                  {new Date(message.created_at).toLocaleString('ja-JP')}
+                                </Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </View>
+                  ) : null}
                 </>
               )}
             </View>
@@ -4602,17 +4820,20 @@ const SupportDeskScreen = ({
                       const statusColor = PATROL_STATUS_BADGE_COLORS[task.task_status] || '#57606A';
                       /** 時刻文字列 */
                       const timeStr = formatOverviewTaskTime(task);
+                      /** 選択中カードかどうか */
+                      const isSelected = task.id === selectedOverviewLockTask?.id;
                       return (
-                        <View
+                        <Pressable
                           key={task.id}
                           style={[
                             styles.overviewTaskCard,
                             {
-                              borderColor: theme.border,
-                              backgroundColor: theme.background,
+                              borderColor: isSelected ? theme.primary : theme.border,
+                              backgroundColor: isSelected ? `${theme.primary}10` : theme.background,
                               borderLeftColor: statusColor,
                             },
                           ]}
+                          onPress={() => handleSelectOverviewLockTask(task.id)}
                         >
                           <View style={styles.overviewTaskHeader}>
                             <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
@@ -4634,10 +4855,62 @@ const SupportDeskScreen = ({
                           <Text style={[styles.messageDate, { color: theme.textSecondary }]}>
                             担当: {assigneeName} / {timeStr}
                           </Text>
-                        </View>
+                        </Pressable>
                       );
                     })
                   )}
+
+                  {selectedOverviewLockTask ? (
+                    <View
+                      style={[
+                        styles.overviewDetailCard,
+                        { borderColor: theme.border, backgroundColor: theme.background },
+                      ]}
+                    >
+                      <Text style={[styles.sectionTitle, { color: theme.text }]}>選択中の施錠確認</Text>
+                      <Text style={[styles.ticketDetailTitle, { color: theme.text }]}>
+                        {selectedOverviewLockTask.notes || '施錠確認'}
+                      </Text>
+                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+                        状態: {PATROL_TASK_STATUS_LABELS[selectedOverviewLockTask.task_status] || selectedOverviewLockTask.task_status}
+                      </Text>
+                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+                        企画: {selectedOverviewLockTask.event_name || '-'}（
+                        {selectedOverviewLockTask.event_location || selectedOverviewLockTask.location_text || '-'}）
+                      </Text>
+                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+                        担当:{' '}
+                        {overviewProfileMap[selectedOverviewLockTask.assigned_to] ||
+                          (selectedOverviewLockTask.assigned_to ? '読込中...' : '未割当')}
+                      </Text>
+                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+                        受付: {formatOverviewTaskTime(selectedOverviewLockTask)}
+                      </Text>
+                      <View style={styles.overviewActionRow}>
+                        {[PATROL_TASK_STATUSES.OPEN, PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(
+                          selectedOverviewLockTask.task_status
+                        ) ? (
+                          <TouchableOpacity
+                            style={[styles.statusButton, { borderColor: theme.primary, backgroundColor: `${theme.primary}14` }]}
+                            onPress={() => handleOpenPatrolTaskFromOverview(selectedOverviewLockTask.id)}
+                          >
+                            <Text style={[styles.statusButtonText, { color: theme.primary }]}>巡回タスク割当を開く</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <View
+                            style={[
+                              styles.overviewInfoPill,
+                              { borderColor: theme.border, backgroundColor: theme.surface },
+                            ]}
+                          >
+                            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                              この施錠確認は完了または取消済みです
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  ) : null}
                 </>
               )}
             </View>
@@ -8133,6 +8406,28 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     marginBottom: 8,
+  },
+  /** 概況確認カードの詳細表示 */
+  overviewDetailCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 8,
+    gap: 8,
+  },
+  /** 概況確認カード内の導線ボタン行 */
+  overviewActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  /** 概況確認カード内の補足表示ピル */
+  overviewInfoPill: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexGrow: 1,
   },
   /** 概況タスクカード上段: タスク種別・ステータスバッジを横並び */
   overviewTaskHeader: {
