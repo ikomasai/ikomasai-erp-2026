@@ -798,6 +798,63 @@ export const createDispatchPatrolTask = async ({
 };
 
 /**
+ * 独自タスクを作成して巡回者に割り当てる
+ * task_type は OTHER を使用し、source_ticket_id は持たない
+ * @param {Object} input - 入力
+ * @param {string} input.notes - タスク内容（必須）
+ * @param {string|null} [input.assignedTo] - 担当巡回ユーザーID（未割当可）
+ * @param {string|null} [input.creatorUserId] - タスク作成者ユーザーID
+ * @returns {Promise<{data: Object|null, error: Error|null}>} 作成結果
+ */
+export const createCustomPatrolTask = async ({ notes, assignedTo = null, creatorUserId = null }) => {
+  try {
+    /** 正規化済みタスク内容 */
+    const normalizedNotes = normalizeText(notes);
+    /** 正規化済み担当者ID */
+    const normalizedAssignedTo = normalizeText(assignedTo) || null;
+    /** 正規化済み作成者ID */
+    const normalizedCreatorUserId = normalizeText(creatorUserId) || null;
+
+    if (!normalizedNotes) {
+      throw new Error('タスク内容が未入力です');
+    }
+
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .insert({
+        task_type: PATROL_TASK_TYPES.OTHER,
+        task_status: PATROL_TASK_STATUSES.OPEN,
+        notes: normalizedNotes,
+        assigned_to: normalizedAssignedTo,
+        created_by: normalizedCreatorUserId,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('独自タスク作成エラー:', error);
+      return { data: null, error };
+    }
+
+    /** 担当者が指定されている場合は割当通知を送信 */
+    if (normalizedAssignedTo && normalizedCreatorUserId) {
+      const { error: assignNotifyError } = await notifyPatrolTaskAssigned({
+        task: data,
+        senderUserId: normalizedCreatorUserId,
+      });
+      if (assignNotifyError) {
+        console.warn('独自タスク割当通知エラー:', assignNotifyError);
+      }
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error('独自タスク作成処理でエラー:', error);
+    return { data: null, error };
+  }
+};
+
+/**
  * emergency 連絡案件から emergency_support 巡回タスクを自動生成する
  * @param {Object} input - 入力
  * @param {Object} input.ticket - 元となる emergency 連絡案件オブジェクト

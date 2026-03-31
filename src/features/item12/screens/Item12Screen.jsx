@@ -1363,9 +1363,9 @@ const Item12Screen = ({ navigation, route }) => {
     if (!isActiveStatus) {
       return false;
     }
-    /** 自分が担当者の場合は向かいます可能 */
+    /** 自分が担当者の場合でも他にアクティブタスクがあれば受諾不可 */
     if (selectedTask.assigned_to === user?.id) {
-      return true;
+      return !hasAnyActiveTask;
     }
     /** 未割当の場合は種別問わずアクティブタスクがなければ受諾可 */
     if (!selectedTask.assigned_to) {
@@ -1375,15 +1375,20 @@ const Item12Screen = ({ navigation, route }) => {
     return false;
   }, [selectedTask, user?.id, hasAnyActiveTask]);
 
-  /** 完了可能かどうか（自分担当または未割当のアクティブタスクのみ） */
+  /**
+   * 完了可能かどうか（自分担当または未割当のアクティブタスクのみ）
+   * 他にアクティブタスクを持っている場合は、選択中タスクがOPEN状態であれば操作不可
+   * （ACCEPTED/EN_ROUTE の場合は hasAnyActiveTask がそのタスクを除外するため影響なし）
+   */
   const canComplete = useMemo(
     () =>
       selectedTask != null &&
       isMineOrUnassigned &&
+      !hasAnyActiveTask &&
       [PATROL_TASK_STATUSES.OPEN, PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(
         selectedTask.task_status
       ),
-    [selectedTask, isMineOrUnassigned]
+    [selectedTask, isMineOrUnassigned, hasAnyActiveTask]
   );
 
   /** ダッシュボードに表示する直近履歴 */
