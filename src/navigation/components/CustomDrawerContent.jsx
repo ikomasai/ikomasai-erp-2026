@@ -226,15 +226,27 @@ const CustomDrawerContent = (props) => {
       >
         {/* アクセス可能な項目のみ表示 */}
         {accessibleItems.length > 0 ? (
-          accessibleItems.map((item) => (
-            <DrawerItem
-              key={item.screenName}
-              label={item.label}
-              isActive={currentRouteName === item.screenName}
-              onPress={() => navigateTo(item.screenName)}
-              theme={theme}
-            />
-          ))
+          <>
+            {accessibleItems.map((item) => (
+              <React.Fragment key={item.screenName}>
+                <DrawerItem
+                  label={item.label}
+                  isActive={currentRouteName === item.screenName}
+                  onPress={() => navigateTo(item.screenName)}
+                  theme={theme}
+                />
+
+                {item.screenName === '01_Events&Stalls_list' && (
+                  <DrawerItem
+                    label="タイムスケジュール"
+                    isActive={currentRouteName === 'TimeSchedule'}
+                    onPress={() => navigateTo('TimeSchedule')}
+                    theme={theme}
+                  />
+                )}
+              </React.Fragment>
+            ))}
+          </>
         ) : (
           <View style={styles.noAccessContainer}>
             <Text style={[styles.noAccessText, { color: theme.textSecondary }]}>

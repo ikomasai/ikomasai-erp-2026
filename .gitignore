@@ -48,4 +48,5 @@ scripts/
 .serena/memories/
 .serena/logs/
 
+# AI一次生成doc
 ai_tasks/

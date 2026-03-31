@@ -179,25 +179,23 @@ const dispatchNotification = async (payload) => {
       return { data: null, error: new Error('ログインセッションが見つかりません。再ログインしてください。') };
     }
 
-    const invokeDispatch = async (token) =>
+    const invokeDispatch = async () =>
       getSupabaseClient().functions.invoke('dispatch-notification', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
         body: payload,
       });
 
-    let { data, error } = await invokeDispatch(accessToken);
-    /** 401復旧エラー */
-    let recoveryError = null;
+
+    let { data, error } = await invokeDispatch();
 
     if (error && isUnauthorizedFunctionError(error)) {
-      /** 再発行結果 */
-      const recoveryResult = await recoverEdgeFunctionAccessToken();
-      recoveryError = recoveryResult.error;
-      if (recoveryResult.accessToken) {
-        const newToken = recoveryResult.accessToken;
-        ({ data, error } = await invokeDispatch(newToken));
+      // アクセストークンが期限切れの場合、autoRefreshToken の完了を待ってから再試行する。
+      // refreshSession() を手動で呼ぶとリフレッシュトークンのローテーション競合が発生して
+      // ユーザーがサインアウトされるため、待機後に getSession() で最新トークンを取得する。
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const newToken = await getValidAccessToken();
+      if (newToken) {
+        ({ data, error } = await invokeDispatch());
+
       }
     }
 

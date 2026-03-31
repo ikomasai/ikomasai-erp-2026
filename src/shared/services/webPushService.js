@@ -132,17 +132,14 @@ const savePushSubscription = async (subscription) => {
     throw new Error('ログインセッションが見つかりません。再ログインしてください。');
   }
 
-  const invokeSubscription = async (token) =>
+  const invokeSubscription = async () =>
     getSupabaseClient().functions.invoke('push-subscription', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
       body: {
         subscription: serialized,
       },
     });
 
-  let { error } = await invokeSubscription(accessToken);
+  let { error } = await invokeSubscription();
 
   if (error && isUnauthorizedFunctionError(error)) {
     /** セッション再発行結果 */
@@ -153,7 +150,7 @@ const savePushSubscription = async (subscription) => {
 
     accessToken = recoveryResult.accessToken;
     if (accessToken) {
-      ({ error } = await invokeSubscription(accessToken));
+      ({ error } = await invokeSubscription());
     }
   }
 
