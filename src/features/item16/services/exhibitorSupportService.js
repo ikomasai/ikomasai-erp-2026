@@ -566,7 +566,12 @@ const createKeyPreapply = async (input) => {
 
     const reservationResult = await createKeyReservations({
       requestedBy: normalizeText(input.createdBy),
-      orgId: borrowerOrgId || input.orgId || null,
+      /**
+       * key_reservations.org_id は organizations テーブルへの FK のため、
+       * selectAllOrganizations() が返す roles.id は渡せない。
+       * 借受団体情報は metadata.borrower_org_id / borrower_org_name に保持済みのため null を設定する。
+       */
+      orgId: null,
       ticketId: result.data.id,
       eventName: borrowerOrgName || normalizeText(input.eventName),
       eventLocation: normalizeText(input.eventLocation),
