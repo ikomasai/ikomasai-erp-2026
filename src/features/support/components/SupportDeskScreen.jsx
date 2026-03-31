@@ -46,6 +46,7 @@ import {
   createCustomPatrolTask,
   createDispatchPatrolTask,
   createEvaluationPatrolTask,
+  deletePatrolTask,
   getEvaluationPatrolTaskItemName,
   getEvaluationPatrolTaskItemNames,
   getEvaluationPatrolTaskMeta,
@@ -591,6 +592,35 @@ const formatDashboardPatrolTaskTime = (task) => {
 };
 
 /**
+ * 指定ユーザーが担当している未完了巡回タスク一覧を返す
+ * @param {Array} tasks - 巡回タスク一覧
+ * @param {string|null|undefined} userId - 担当者ユーザーID
+ * @param {string|null|undefined} [excludedTaskId] - 除外するタスクID
+ * @returns {Array} 未完了巡回タスク一覧
+ */
+const getAssignedActivePatrolTasks = (tasks, userId, excludedTaskId = null) => {
+  const normalizedUserId = normalizeText(userId);
+  const normalizedExcludedTaskId = normalizeText(excludedTaskId);
+
+  if (!normalizedUserId) {
+    return [];
+  }
+
+  return (Array.isArray(tasks) ? tasks : []).filter((task) => {
+    if (task.assigned_to !== normalizedUserId) {
+      return false;
+    }
+    if (!ACTIVE_PATROL_TASK_STATUSES.includes(task.task_status)) {
+      return false;
+    }
+    if (normalizedExcludedTaskId && task.id === normalizedExcludedTaskId) {
+      return false;
+    }
+    return true;
+  });
+};
+
+/**
  * 巡回タスクの種別表示名を返す
  * @param {Object|null|undefined} task - 巡回タスク
  * @returns {string} 表示用種別名
@@ -813,6 +843,7 @@ const SupportDeskScreen = ({
   const [isLoadingPatrolAssignees, setIsLoadingPatrolAssignees] = useState(false);
   const [selectedPatrolAssigneeId, setSelectedPatrolAssigneeId] = useState('');
   const [isAssigningPatrolTask, setIsAssigningPatrolTask] = useState(false);
+  const [isDeletingPatrolTask, setIsDeletingPatrolTask] = useState(false);
   /** 巡回タスクメモ編集中テキスト */
   const [patrolTaskNoteDraft, setPatrolTaskNoteDraft] = useState('');
   /** メモ保存中フラグ */
@@ -1405,6 +1436,16 @@ const SupportDeskScreen = ({
   const selectedPatrolTask = useMemo(() => {
     return hqPatrolTasks.find((task) => task.id === selectedPatrolTaskId) || null;
   }, [hqPatrolTasks, selectedPatrolTaskId]);
+
+  /** 現在選択中タスクの担当者ID */
+  const currentPatrolAssigneeId = useMemo(() => {
+    return normalizeText(selectedPatrolTask?.assigned_to);
+  }, [selectedPatrolTask?.assigned_to]);
+
+  /** 担当更新内容が現状から変化しているか */
+  const hasPatrolAssignmentChanged = useMemo(() => {
+    return (normalizeText(selectedPatrolAssigneeId) || '') !== currentPatrolAssigneeId;
+  }, [currentPatrolAssigneeId, selectedPatrolAssigneeId]);
 
   /** 現在未完了の評価タスク一覧 */
   const activeEvaluationTasks = useMemo(() => {
@@ -2564,6 +2605,10 @@ const SupportDeskScreen = ({
       showMessage('更新エラー', '巡回タスクを選択してください');
       return;
     }
+    if (!hasPatrolAssignmentChanged) {
+      showMessage('更新不要', '巡回担当は変更されていません');
+      return;
+    }
 
     setIsAssigningPatrolTask(true);
     const { error } = await assignPatrolTask({
@@ -2580,6 +2625,52 @@ const SupportDeskScreen = ({
 
     await loadHqPatrolTasks();
     showMessage('更新完了', selectedPatrolAssigneeId ? '巡回担当を更新しました' : '未割当に戻しました');
+  };
+
+  /**
+   * 選択中の巡回タスクを削除する
+   * @returns {void}
+   */
+  const handleDeletePatrolTask = () => {
+    if (!selectedPatrolTask) {
+      showMessage('削除エラー', '巡回タスクを選択してください');
+      return;
+    }
+
+    /** 削除実行処理 */
+    const executeDelete = async () => {
+      setIsDeletingPatrolTask(true);
+      const { error } = await deletePatrolTask({ taskId: selectedPatrolTask.id });
+      setIsDeletingPatrolTask(false);
+
+      if (error) {
+        showMessage('削除エラー', error.message || '巡回タスクの削除に失敗しました');
+        return;
+      }
+
+      await loadHqPatrolTasks();
+      await loadTaskStats();
+      showMessage('削除完了', '巡回タスクを削除しました');
+    };
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (!window.confirm('選択中の巡回タスクを削除しますか？\n関連する結果も削除されます。')) {
+        return;
+      }
+      executeDelete();
+      return;
+    }
+
+    Alert.alert('巡回タスクを削除しますか？', '関連する結果も削除されます。', [
+      { text: 'キャンセル', style: 'cancel' },
+      {
+        text: '削除',
+        style: 'destructive',
+        onPress: () => {
+          executeDelete();
+        },
+      },
+    ]);
   };
 
   /**
@@ -4997,20 +5088,46 @@ const SupportDeskScreen = ({
                     </Pressable>
                     {patrolAssignees.map((candidate) => {
                       const isActive = candidate.userId === selectedPatrolAssigneeId;
+                      const blockingTasks = getAssignedActivePatrolTasks(
+                        hqPatrolTasks,
+                        candidate.userId,
+                        selectedPatrolTask?.id
+                      );
+                      const hasBlockingTask = blockingTasks.length > 0;
+                      const blockingTaskLabel = hasBlockingTask
+                        ? PATROL_TASK_TYPE_LABELS[getPatrolTaskDisplayType(blockingTasks[0])] || '担当中'
+                        : '';
+                      const isDisabled = hasBlockingTask && candidate.userId !== currentPatrolAssigneeId;
                       return (
                         <Pressable
                           key={candidate.userId}
                           style={[
                             styles.filterChip,
                             {
-                              borderColor: isActive ? theme.primary : theme.border,
-                              backgroundColor: isActive ? theme.primary : theme.background,
+                              borderColor: isDisabled ? '#D1242F' : isActive ? theme.primary : theme.border,
+                              backgroundColor: isDisabled
+                                ? '#FFF0F0'
+                                : isActive
+                                  ? theme.primary
+                                  : theme.background,
                             },
                           ]}
-                          onPress={() => setSelectedPatrolAssigneeId(candidate.userId)}
+                          onPress={() => {
+                            if (isDisabled) {
+                              return;
+                            }
+                            setSelectedPatrolAssigneeId(candidate.userId);
+                          }}
+                          disabled={isDisabled}
                         >
-                          <Text style={[styles.filterChipText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}> 
+                          <Text
+                            style={[
+                              styles.filterChipText,
+                              { color: isDisabled ? '#D1242F' : isActive ? '#FFFFFF' : theme.textSecondary },
+                            ]}
+                          >
                             {candidate.name}
+                            {hasBlockingTask ? `（担当中: ${blockingTaskLabel}）` : ''}
                           </Text>
                         </Pressable>
                       );
@@ -5019,9 +5136,15 @@ const SupportDeskScreen = ({
                 )}
 
                 <TouchableOpacity
-                  style={[styles.sendButton, { backgroundColor: theme.primary }]}
+                  style={[
+                    styles.sendButton,
+                    {
+                      backgroundColor: theme.primary,
+                      opacity: (isAssigningPatrolTask || !hasPatrolAssignmentChanged) ? 0.6 : 1,
+                    },
+                  ]}
                   onPress={handleAssignPatrolTask}
-                  disabled={isAssigningPatrolTask}
+                  disabled={isAssigningPatrolTask || !hasPatrolAssignmentChanged}
                 >
                   <Text style={styles.sendButtonText}>
                     {isAssigningPatrolTask ? '更新中...' : '巡回担当を更新'}
@@ -5061,6 +5184,22 @@ const SupportDeskScreen = ({
                 >
                   <Text style={styles.sendButtonText}>
                     {isSavingPatrolTaskNote ? '保存中...' : 'メモを保存'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.sendButton,
+                    {
+                      backgroundColor: isDeletingPatrolTask ? theme.border : (theme.danger || '#D1242F'),
+                      marginTop: 8,
+                    },
+                  ]}
+                  onPress={handleDeletePatrolTask}
+                  disabled={isDeletingPatrolTask}
+                >
+                  <Text style={styles.sendButtonText}>
+                    {isDeletingPatrolTask ? '削除中...' : 'この巡回タスクを削除'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -6971,11 +7110,7 @@ const SupportDeskScreen = ({
                   /** 選択中かどうか */
                   const isSelected = customTaskAssigneeId === candidate.userId;
                   /** アクティブタスク（稼働中）を持つかどうか */
-                  const activeTasks = hqPatrolTasks.filter(
-                    (t) =>
-                      t.assigned_to === candidate.userId &&
-                      [PATROL_TASK_STATUSES.OPEN, PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(t.task_status)
-                  );
+                  const activeTasks = getAssignedActivePatrolTasks(hqPatrolTasks, candidate.userId);
                   /** アクティブタスクのラベル */
                   const activeTaskLabel =
                     activeTasks.length > 0
@@ -6997,7 +7132,13 @@ const SupportDeskScreen = ({
                               : theme.background,
                         },
                       ]}
-                      onPress={() => setCustomTaskAssigneeId(candidate.userId)}
+                      onPress={() => {
+                        if (hasActiveTask) {
+                          return;
+                        }
+                        setCustomTaskAssigneeId(candidate.userId);
+                      }}
+                      disabled={hasActiveTask}
                     >
                       <Text
                         style={[
@@ -7221,10 +7362,7 @@ const SupportDeskScreen = ({
                   /** このメンバーが選択中かどうか */
                   const isSelected = candidate.userId === dispatchAssigneeId;
                   /** 対応中タスク一覧 */
-                  const activeTasks = hqPatrolTasks.filter((task) =>
-                    task.assigned_to === candidate.userId &&
-                    [PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(task.task_status)
-                  );
+                  const activeTasks = getAssignedActivePatrolTasks(hqPatrolTasks, candidate.userId);
                   /** 対応中タスクがあるかどうか */
                   const hasActiveTask = activeTasks.length > 0;
                   /** 対応中タスク表示ラベル */

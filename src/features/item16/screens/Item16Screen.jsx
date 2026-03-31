@@ -496,7 +496,7 @@ const Item16Screen = ({ navigation, route }) => {
     }
 
     if (activeTab === SUPPORT_TAB_TYPES.EMERGENCY) {
-      return '本部・警備部に連絡案件を送信しました。';
+      return '企画管理部に連絡案件を送信しました。';
     }
 
     return '本部に連絡案件を送信しました。';

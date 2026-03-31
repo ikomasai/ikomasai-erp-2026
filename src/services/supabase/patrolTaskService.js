@@ -14,6 +14,7 @@ import { notifyPatrolTaskAssigned, notifyDispatchTaskCreated } from './supportNo
 
 const PATROL_TASKS_TABLE = 'patrol_tasks';
 const PATROL_TASK_RESULTS_TABLE = 'patrol_task_results';
+const EVALUATION_CHECKS_TABLE = 'evaluation_checks';
 const KEY_LOANS_TABLE = 'key_loans';
 
 /** 巡回タスク種別 */
@@ -37,6 +38,12 @@ export const PATROL_TASK_STATUSES = {
 
 /** 完了登録を許可する巡回タスク状態 */
 const COMPLETABLE_PATROL_TASK_STATUSES = [PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE];
+/** 新規割当を止める巡回タスク状態 */
+const ASSIGNMENT_BLOCKING_PATROL_TASK_STATUSES = [
+  PATROL_TASK_STATUSES.OPEN,
+  PATROL_TASK_STATUSES.ACCEPTED,
+  PATROL_TASK_STATUSES.EN_ROUTE,
+];
 
 /** 巡回結果コード */
 export const PATROL_RESULT_CODES = {
@@ -60,6 +67,51 @@ const EVALUATION_PATROL_TASK_NOTES_PREFIX = '評価項目:';
 const EVALUATION_PATROL_TASK_LEGACY_DELIMITERS = [' / ', '／', '\n', ' | ', '｜', ', ', '，', '、'];
 
 const normalizeText = (value) => (value || '').trim();
+
+/**
+ * 担当者がすでに未完了タスクを持っていないか確認する
+ * @param {Object} input - 確認条件
+ * @param {string|null|undefined} input.assignedTo - 確認対象ユーザーID
+ * @param {string|null|undefined} [input.excludeTaskId] - 判定対象から除外するタスクID
+ * @returns {Promise<{error: Error|null}>} 確認結果
+ */
+const ensurePatrolAssigneeAvailable = async ({ assignedTo, excludeTaskId = null }) => {
+  const normalizedAssignedTo = normalizeText(assignedTo);
+  const normalizedExcludeTaskId = normalizeText(excludeTaskId);
+
+  if (!normalizedAssignedTo) {
+    return { error: null };
+  }
+
+  /** 対象ユーザーが現在担当している未完了タスク候補を取得する */
+  let query = getSupabaseClient()
+    .from(PATROL_TASKS_TABLE)
+    .select('id, task_no')
+    .eq('assigned_to', normalizedAssignedTo)
+    .in('task_status', ASSIGNMENT_BLOCKING_PATROL_TASK_STATUSES)
+    .limit(1);
+
+  if (normalizedExcludeTaskId) {
+    query = query.neq('id', normalizedExcludeTaskId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('巡回担当の可用性確認エラー:', error);
+    return { error };
+  }
+
+  const blockingTask = Array.isArray(data) ? data[0] : null;
+  if (!blockingTask) {
+    return { error: null };
+  }
+
+  const taskSuffix = normalizeText(blockingTask.task_no) ? `（${blockingTask.task_no}）` : '';
+  return {
+    error: new Error(`選択した担当者はすでに未完了タスク${taskSuffix}を担当しています`),
+  };
+};
 
 const buildEvaluationPatrolTaskPayload = (input) => {
   if (Array.isArray(input)) {
@@ -423,6 +475,14 @@ export const assignPatrolTask = async ({ taskId, assignedTo = null, actorUserId 
       throw new Error('taskId が未指定です');
     }
 
+    const { error: assigneeAvailabilityError } = await ensurePatrolAssigneeAvailable({
+      assignedTo: normalizedAssignedTo,
+      excludeTaskId: normalizedTaskId,
+    });
+    if (assigneeAvailabilityError) {
+      return { data: null, error: assigneeAvailabilityError };
+    }
+
     const { data, error } = await getSupabaseClient()
       .from(PATROL_TASKS_TABLE)
       .update({
@@ -755,6 +815,13 @@ export const createDispatchPatrolTask = async ({
       throw new Error('ticket.id が未指定です');
     }
 
+    const { error: assigneeAvailabilityError } = await ensurePatrolAssigneeAvailable({
+      assignedTo: normalizedAssignedTo,
+    });
+    if (assigneeAvailabilityError) {
+      return { data: null, error: assigneeAvailabilityError };
+    }
+
     /** notes に「[種別]: [件名]」形式で格納することで振り分けタスクと識別可能にする */
     /** 依頼内容も含めた振り分けタスク用メモ */
     const nextTaskNoteLines = [`${ticketTypeLabel || '連絡案件'}: ${ticket.title || ''}`];
@@ -832,6 +899,13 @@ export const createCustomPatrolTask = async ({ notes, assignedTo = null, creator
 
     if (!normalizedNotes) {
       throw new Error('タスク内容が未入力です');
+    }
+
+    const { error: assigneeAvailabilityError } = await ensurePatrolAssigneeAvailable({
+      assignedTo: normalizedAssignedTo,
+    });
+    if (assigneeAvailabilityError) {
+      return { data: null, error: assigneeAvailabilityError };
     }
 
     const { data, error } = await getSupabaseClient()
@@ -1133,6 +1207,90 @@ export const assignPatrolTaskGroup = async ({ taskIds, assignedTo = null }) => {
     return { data: data || [], error: null };
   } catch (error) {
     return { data: [], error };
+  }
+};
+
+/**
+ * 巡回タスクを削除する
+ * 関連する結果・旧評価参照・施錠確認参照もあわせて掃除する
+ * @param {Object} input - 入力
+ * @param {string} input.taskId - 削除対象タスクID
+ * @returns {Promise<{data: Object|null, error: Error|null}>} 削除結果
+ */
+export const deletePatrolTask = async ({ taskId }) => {
+  try {
+    const normalizedTaskId = normalizeText(taskId);
+
+    if (!normalizedTaskId) {
+      throw new Error('taskId が未指定です');
+    }
+
+    /** 削除対象タスクの存在確認 */
+    const { data: taskRows, error: taskFetchError } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .select('id, task_no, source_key_loan_id')
+      .eq('id', normalizedTaskId)
+      .limit(1);
+
+    if (taskFetchError) {
+      console.error('巡回タスク削除前取得エラー:', taskFetchError);
+      return { data: null, error: taskFetchError };
+    }
+
+    const targetTask = Array.isArray(taskRows) ? taskRows[0] || null : null;
+    if (!targetTask) {
+      return { data: null, error: new Error('削除対象の巡回タスクが見つかりません') };
+    }
+
+    const { error: resultDeleteError } = await getSupabaseClient()
+      .from(PATROL_TASK_RESULTS_TABLE)
+      .delete()
+      .eq('task_id', normalizedTaskId);
+
+    if (resultDeleteError) {
+      console.error('巡回タスク結果削除エラー:', resultDeleteError);
+      return { data: null, error: resultDeleteError };
+    }
+
+    const { error: evaluationDeleteError } = await getSupabaseClient()
+      .from(EVALUATION_CHECKS_TABLE)
+      .delete()
+      .eq('task_id', normalizedTaskId);
+
+    if (evaluationDeleteError) {
+      console.error('評価参照削除エラー:', evaluationDeleteError);
+      return { data: null, error: evaluationDeleteError };
+    }
+
+    const { error: keyLoanUpdateError } = await getSupabaseClient()
+      .from(KEY_LOANS_TABLE)
+      .update({
+        lock_task_id: null,
+        lock_task_requested: false,
+        lock_check_status: null,
+        lock_checked_at: null,
+      })
+      .eq('lock_task_id', normalizedTaskId);
+
+    if (keyLoanUpdateError) {
+      console.error('鍵貸出参照解除エラー:', keyLoanUpdateError);
+      return { data: null, error: keyLoanUpdateError };
+    }
+
+    const { error: taskDeleteError } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .delete()
+      .eq('id', normalizedTaskId);
+
+    if (taskDeleteError) {
+      console.error('巡回タスク削除エラー:', taskDeleteError);
+      return { data: null, error: taskDeleteError };
+    }
+
+    return { data: targetTask, error: null };
+  } catch (error) {
+    console.error('巡回タスク削除処理でエラー:', error);
+    return { data: null, error };
   }
 };
 
