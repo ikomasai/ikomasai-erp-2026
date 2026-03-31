@@ -46,4 +46,28 @@ export const TAB_TYPES = {
   ROLE: 'role',
   /** 項目別タブ */
   SCREEN: 'screen',
+  /** ユーザ管理タブ */
+  USER: 'user',
 };
+
+/**
+ * 機密ロール定義
+ * これらのロールの付与/解除時には確認モーダルを表示する
+ * @type {Array<{roleName: string, addMessage: string, removeMessage: string}>}
+ */
+export const SENSITIVE_ROLES = [
+  {
+    roleName: '管理者',
+    addMessage:
+      '「管理者」ロールを付与すると、このユーザーはアクセス権限制御画面にアクセスでき、全ロールの管理が可能になります。付与しますか？',
+    removeMessage:
+      '「管理者」ロールを解除すると、このユーザーはアクセス権限制御画面にアクセスできなくなります。解除しますか？',
+  },
+  {
+    roleName: 'システム部',
+    addMessage:
+      '「システム部」ロールを付与すると、このユーザーはアクセス権限制御画面にアクセスでき、全ロールの管理が可能になります。付与しますか？',
+    removeMessage:
+      '「システム部」ロールを解除すると、このユーザーはアクセス権限制御画面にアクセスできなくなります。解除しますか？',
+  },
+];

@@ -8,6 +8,9 @@ import {
   selectAllRoles,
   updateRoleScreens,
   updateMultipleRoleScreens,
+  insertRole,
+  selectRoleUserCount,
+  deleteRole,
 } from '../services/permissionManageService.js';
 import { MANAGED_SCREENS, PROTECTED_PERMISSIONS, TAB_TYPES } from '../constants.js';
 
@@ -601,6 +604,89 @@ const usePermissionManage = () => {
     return isProtectedPermission(roleName, permissionName);
   }, []);
 
+  // ==================== ロール作成・削除 ====================
+
+  /**
+   * 新規ロールを作成する
+   * @param {string} name - ロール名（内部識別名）
+   * @param {string} displayName - 表示名
+   * @param {Array<string>} initialScreens - 初期アクセス権限
+   * @param {string|null} description - ロール説明（任意）
+   * @returns {Promise<{success: boolean, error: string|null}>}
+   */
+  const createRole = useCallback(async (name, displayName, initialScreens, description = null) => {
+    setIsSaving(true);
+    setErrorMessage(null);
+
+    const { data, error } = await insertRole(name, displayName, initialScreens, description);
+
+    if (error) {
+      const message = error.code === '23505'
+        ? '同じ名前のロールが既に存在します'
+        : 'ロールの作成に失敗しました';
+      setErrorMessage(message);
+      setIsSaving(false);
+      return { success: false, error: message };
+    }
+
+    /** ロール一覧に追加 */
+    setRoles((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+    setIsSaving(false);
+
+    return { success: true, error: null };
+  }, []);
+
+  /**
+   * ロールを削除する（確認用のユーザー数取得 → 削除実行）
+   * @param {string} roleId - 削除対象ロールのID
+   * @returns {Promise<{success: boolean, error: string|null}>}
+   */
+  const removeRole = useCallback(async (roleId) => {
+    /** 保護対象ロールの削除を拒否 */
+    const role = roles.find((r) => r.id === roleId);
+    if (!role) {
+      return { success: false, error: 'ロールが見つかりません' };
+    }
+    const isProtectedRole = PROTECTED_PERMISSIONS.some((p) => p.roleName === role.name);
+    if (isProtectedRole) {
+      return { success: false, error: `「${role.display_name || role.name}」は保護対象のため削除できません` };
+    }
+
+    setIsSaving(true);
+    setErrorMessage(null);
+
+    const { success, error } = await deleteRole(roleId);
+
+    if (!success) {
+      setErrorMessage('ロールの削除に失敗しました');
+      setIsSaving(false);
+      return { success: false, error: 'ロールの削除に失敗しました' };
+    }
+
+    /** ローカルの一覧から削除 */
+    setRoles((prev) => prev.filter((r) => r.id !== roleId));
+    /** 選択中のロールが削除された場合はクリア */
+    if (selectedRoleId === roleId) {
+      setSelectedRoleId(null);
+    }
+    setIsSaving(false);
+
+    return { success: true, error: null };
+  }, [roles, selectedRoleId]);
+
+  /**
+   * 指定ロールを所持しているユーザー数を取得する
+   * @param {string} roleId - 対象ロールのID
+   * @returns {Promise<{count: number, error: string|null}>}
+   */
+  const getRoleUserCount = useCallback(async (roleId) => {
+    const { count, error } = await selectRoleUserCount(roleId);
+    if (error) {
+      return { count: 0, error: 'ユーザー数の取得に失敗しました' };
+    }
+    return { count, error: null };
+  }, []);
+
   return {
     /** 状態 */
     roles,
@@ -637,6 +723,9 @@ const usePermissionManage = () => {
     resetScreenRoles,
     fetchRoles,
     checkIsProtected,
+    createRole,
+    removeRole,
+    getRoleUserCount,
   };
 };
 
