@@ -854,6 +854,8 @@ const SupportDeskScreen = ({
   const [selectedPatrolAssigneeId, setSelectedPatrolAssigneeId] = useState('');
   const [isAssigningPatrolTask, setIsAssigningPatrolTask] = useState(false);
   const [isDeletingPatrolTask, setIsDeletingPatrolTask] = useState(false);
+  /** 評価タスク一括削除中フラグ */
+  const [isDeletingEvaluationTasks, setIsDeletingEvaluationTasks] = useState(false);
   /** 巡回タスクメモ編集中テキスト */
   const [patrolTaskNoteDraft, setPatrolTaskNoteDraft] = useState('');
   /** メモ保存中フラグ */
@@ -2731,6 +2733,66 @@ const SupportDeskScreen = ({
         },
       },
     ]);
+  };
+
+  /**
+   * 未完了の評価タスクを全件削除する
+   * 評価タスク生成のブロックを解除したい場合などに使用する
+   * @returns {void}
+   */
+  const handleDeleteAllEvaluationTasks = () => {
+    if (activeEvaluationTasks.length === 0) {
+      showMessage('削除対象なし', '未完了の評価タスクはありません');
+      return;
+    }
+
+    /** 削除実行処理 */
+    const executeDelete = async () => {
+      setIsDeletingEvaluationTasks(true);
+
+      /** 評価タスクを1件ずつ順番に削除する */
+      let failCount = 0;
+      for (const task of activeEvaluationTasks) {
+        const { error } = await deletePatrolTask({ taskId: task.id });
+        if (error) {
+          console.error('評価タスク削除エラー:', task.id, error);
+          failCount++;
+        }
+      }
+
+      setIsDeletingEvaluationTasks(false);
+      await loadHqPatrolTasks();
+
+      if (failCount > 0) {
+        showMessage(
+          '削除エラー',
+          `${activeEvaluationTasks.length}件中 ${failCount}件の削除に失敗しました。権限が不足している可能性があります。`
+        );
+      } else {
+        showMessage('削除完了', `評価タスクを${activeEvaluationTasks.length}件削除しました`);
+      }
+    };
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (
+        !window.confirm(
+          `未完了の評価タスク${activeEvaluationTasks.length}件を全て削除しますか？\n関連する結果も削除されます。`
+        )
+      ) {
+        return;
+      }
+      executeDelete();
+      return;
+    }
+
+    Alert.alert(
+      '評価タスクを全削除しますか？',
+      `未完了の評価タスク${activeEvaluationTasks.length}件と関連する結果を全て削除します。`,
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        { text: '削除', style: 'destructive', onPress: () => { executeDelete(); } },
+      ]
+    );
   };
 
   /**
@@ -5516,8 +5578,8 @@ const SupportDeskScreen = ({
               </Text>
             ) : null}
             {activeEvaluationTasks.length > 0 ? (
-              <View style={[styles.patrolCheckSummaryRow, { borderColor: theme.border, backgroundColor: '#FFF4E5' }]}>
-                <View style={{ flex: 1 }}>
+              <View style={[styles.patrolCheckSummaryRow, { borderColor: theme.border, backgroundColor: '#FFF4E5', flexWrap: 'wrap', gap: 8 }]}>
+                <View style={{ flex: 1, minWidth: 180 }}>
                   <Text style={[styles.patrolCheckSummaryLabel, { color: '#BF6A02' }]}>
                     未完了の評価タスクがあります
                   </Text>
@@ -5525,9 +5587,32 @@ const SupportDeskScreen = ({
                     1件でも残っている間は、新しい評価タスクを生成できません。
                   </Text>
                 </View>
-                <Text style={[styles.patrolCheckSummaryCount, { color: '#BF6A02' }]}>
-                  {activeEvaluationTasks.length}件
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={[styles.patrolCheckSummaryCount, { color: '#BF6A02' }]}>
+                    {activeEvaluationTasks.length}件
+                  </Text>
+                  {/* 評価タスク一括削除ボタン */}
+                  <TouchableOpacity
+                    style={[
+                      styles.inlineActionButton,
+                      {
+                        borderColor: isDeletingEvaluationTasks ? theme.border : (theme.danger || '#D1242F'),
+                        backgroundColor: isDeletingEvaluationTasks ? theme.border : `${theme.danger || '#D1242F'}18`,
+                      },
+                    ]}
+                    onPress={handleDeleteAllEvaluationTasks}
+                    disabled={isDeletingEvaluationTasks}
+                  >
+                    <Text
+                      style={[
+                        styles.inlineActionButtonText,
+                        { color: isDeletingEvaluationTasks ? theme.textSecondary : (theme.danger || '#D1242F') },
+                      ]}
+                    >
+                      {isDeletingEvaluationTasks ? '削除中...' : '全削除'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : null}
 

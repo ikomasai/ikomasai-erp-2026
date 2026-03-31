@@ -1287,6 +1287,26 @@ export const deletePatrolTask = async ({ taskId }) => {
       return { data: null, error: taskDeleteError };
     }
 
+    /**
+     * RLS により DELETE が無音でブロックされる場合がある。
+     * 削除後に同IDのタスクが残っていないか確認し、残存する場合はエラーとして返す。
+     */
+    const { data: remainingRows } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .select('id')
+      .eq('id', normalizedTaskId)
+      .limit(1);
+
+    if (Array.isArray(remainingRows) && remainingRows.length > 0) {
+      console.error('巡回タスク削除後も行が残存 — RLS による削除拒否の可能性:', normalizedTaskId);
+      return {
+        data: null,
+        error: new Error(
+          '巡回タスクを削除できませんでした。権限が不足している可能性があります（RLSポリシー）。Supabase ダッシュボードで patrol_tasks の DELETE ポリシーを確認してください。'
+        ),
+      };
+    }
+
     return { data: targetTask, error: null };
   } catch (error) {
     console.error('巡回タスク削除処理でエラー:', error);
