@@ -23,7 +23,9 @@ const NAVIGATION_TARGET_BY_TYPE = {
   shift_change_rejected: { screen: 'JimuShift', tab: 'requestHistory' },
   /** シフトリマインド（マイシフトタブへ） */
   shift_reminder: { screen: 'JimuShift', tab: 'myShift' },
-  /** 鍵の事前申請（本部サポートの鍵管理タブへ） */
+  /** 迷子通知（実長・渉外部向け：迷子管理タブへ） */
+  missing_child: { screen: 'Item5', tab: 'manage' },
+  /** 鍵の事前申請（本部向け：本部サポートの鍵管理タブへ） */
   key_preapply: { screen: 'Item13', tab: 'keys' },
   /** 企画ルール変更・配置図変更（本部サポートへ） */
   rule_question: { screen: 'Item13', tab: 'tickets' },
@@ -92,6 +94,8 @@ export const getNavigationButtonLabel = (type, metadata = {}) => {
       return '申請履歴を確認する';
     case 'shift_reminder':
       return 'マイシフトを確認する';
+    case 'missing_child':
+      return '申請を確認する';
     case 'key_preapply':
       return '鍵申請を確認する';
     case 'rule_question':

@@ -16,6 +16,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { useAuth } from '../../../shared/contexts/AuthContext.js';
 import { useTheme } from '../../../shared/hooks/useTheme';
@@ -89,9 +90,10 @@ const buildTransferList = (sourceCells, destCells) => {
  * @param {Date} props.selectedDate - 選択中の日付（親コンポーネントで保持）
  * @param {Function} props.onDateChange - 日付変更コールバック
  * @param {number} props.refreshTrigger - リロードトリガー（インクリメントで再取得を実行）
+ * @param {Function} [props.onNavigateToHistory] - 申請履歴タブへの遷移コールバック
  * @returns {JSX.Element} シフト変更申請画面
  */
-const ShiftChangeRequestScreen = ({ selectedDate, onDateChange, refreshTrigger }) => {
+const ShiftChangeRequestScreen = ({ selectedDate, onDateChange, refreshTrigger, onNavigateToHistory }) => {
   /** 認証コンテキストからユーザー情報を取得 */
   const { userInfo, user } = useAuth();
   /** テーマを取得 */
@@ -109,6 +111,9 @@ const ShiftChangeRequestScreen = ({ selectedDate, onDateChange, refreshTrigger }
   /** ===== 申請モード ===== */
   /** true: 人ごと移送モード, false: 通常申請モード */
   const [isBulkMode, setIsBulkMode] = useState(false);
+
+  /** 申請完了モーダルの表示状態 */
+  const [isSuccessModalVisible, setIsSuccessModalVisible] = useState(false);
 
   /** ===== 人ごと移送モード用の状態 ===== */
   /** 移送元メンバー情報 { memberName, cells } */
@@ -454,6 +459,15 @@ const ShiftChangeRequestScreen = ({ selectedDate, onDateChange, refreshTrigger }
   const currentErrorMessage = isBulkMode ? bulkErrorMessage : errorMessage;
 
   /**
+   * 成功メッセージが設定されたら完了モーダルを表示する
+   */
+  useEffect(() => {
+    if (currentSuccessMessage !== '') {
+      setIsSuccessModalVisible(true);
+    }
+  }, [currentSuccessMessage]);
+
+  /**
    * 人ごと移送モードの移送コマ一覧
    */
   const bulkTransferList = useMemo(() => {
@@ -556,12 +570,46 @@ const ShiftChangeRequestScreen = ({ selectedDate, onDateChange, refreshTrigger }
         </TouchableOpacity>
       )}
 
-      {/* 成功メッセージ */}
-      {currentSuccessMessage !== '' && (
-        <View style={[styles.messageContainer, styles.successContainer]}>
-          <Text style={styles.successText}>{currentSuccessMessage}</Text>
+      {/* 申請完了モーダル */}
+      <Modal
+        visible={isSuccessModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsSuccessModalVisible(false)}
+      >
+        <View style={styles.successModalOverlay}>
+          <View style={[styles.successModalContainer, { backgroundColor: theme.surface }]}>
+            {/* アイコン */}
+            <Text style={styles.successModalIcon}>✅</Text>
+            {/* タイトル */}
+            <Text style={[styles.successModalTitle, { color: theme.text }]}>申請完了</Text>
+            {/* メッセージ */}
+            <Text style={[styles.successModalMessage, { color: theme.textSecondary }]}>
+              {currentSuccessMessage}
+            </Text>
+            {/* ボタン */}
+            <TouchableOpacity
+              style={[styles.successModalHistoryButton, { backgroundColor: theme.primary }]}
+              onPress={() => {
+                setIsSuccessModalVisible(false);
+                if (onNavigateToHistory) {
+                  onNavigateToHistory();
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.successModalHistoryButtonText}>申請履歴を表示する</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.successModalCloseButton, { borderColor: theme.border }]}
+              onPress={() => setIsSuccessModalVisible(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.successModalCloseButtonText, { color: theme.textSecondary }]}>閉じる</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      )}
+      </Modal>
 
       {/* エラーメッセージ */}
       {currentErrorMessage !== '' && (
@@ -765,19 +813,64 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.85)',
   },
+  /* 申請完了モーダル */
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  successModalContainer: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 16,
+    padding: 28,
+    alignItems: 'center',
+  },
+  successModalIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  successModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  successModalMessage: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  successModalHistoryButton: {
+    width: '100%',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  successModalHistoryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  successModalCloseButton: {
+    width: '100%',
+    paddingVertical: 13,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  successModalCloseButtonText: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
   /* メッセージ */
   messageContainer: {
     padding: 12,
     borderRadius: 8,
     marginBottom: 12,
-  },
-  successContainer: {
-    backgroundColor: '#E8F5E9',
-  },
-  successText: {
-    color: '#2E7D32',
-    fontSize: 14,
-    fontWeight: '500',
   },
   errorContainer: {
     backgroundColor: 'rgba(198, 40, 40, 0.08)',

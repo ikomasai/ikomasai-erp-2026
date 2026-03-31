@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from './src/shared/contexts/AuthContext';
 import { ThemeProvider } from './src/shared/contexts/ThemeContext';
 import { TerminalProvider } from './src/shared/contexts/TerminalContext';
@@ -16,14 +17,16 @@ import AppNavigator from './src/navigation/AppNavigator';
  */
 export default function App() {
   return (
-    <AuthProvider>
-      <ThemeProvider>
-        <TerminalProvider>
-          <FontLoaderProvider>
-            <AppNavigator />
-          </FontLoaderProvider>
-        </TerminalProvider>
-      </ThemeProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <ThemeProvider>
+          <TerminalProvider>
+            <FontLoaderProvider>
+              <AppNavigator />
+            </FontLoaderProvider>
+          </TerminalProvider>
+        </ThemeProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -3,7 +3,7 @@
  * 募集カードの描画、管理者操作ボタン、ステータス表示を担当する。
  */
 import React from 'react';
-import { View, Text, StyleSheet, FlatList, Button } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Button, Pressable } from 'react-native';
 import { OPTIONAL_FIELD_DEFAULTS, RINJI_STATUS, RINJI_CLOSE_REASON } from '../constants.js';
 import { useTheme } from '../../../shared/hooks/useTheme';
 
@@ -169,6 +169,24 @@ const formatAppliedAt = (value) => {
 };
 
 /**
+ * 作成日時を「YYYY-MM-DD HH:mm」形式へ変換する。
+ *
+ * @param {string | null | undefined} value
+ * @returns {string}
+ */
+const formatCreatedDate = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d} ${hh}:${mm}`;
+};
+
+/**
  * 募集カード内の情報行を描画する。
  *
  * @param {{
@@ -213,6 +231,7 @@ const RecruitCard = ({
   onCancelApply,
   onEdit,
   onClose,
+  onDelete,
   onReopen,
   onFinalizeAutoClose,
   onToggleApplicants,
@@ -227,6 +246,7 @@ const RecruitCard = ({
   applicantsLoading = false,
   showApplicantsToggle = false,
   showAutoClosedBadge = false,
+  currentUserId = null,
 }) => {
   const optional = formatOptional(recruit);
   const text = parseTitleAndDescription(recruit.description);
@@ -237,6 +257,9 @@ const RecruitCard = ({
   const isAutoClosedByDate =
     recruit.status === RINJI_STATUS.CLOSED &&
     recruit.close_reason === RINJI_CLOSE_REASON.AUTO_DATE_PASSED;
+  const canManageRecruit = Boolean(currentUserId) && recruit.head_user_id === currentUserId;
+  const canDelete = Boolean(onDelete) && canManageRecruit;
+  const createdDate = formatCreatedDate(recruit.created_at);
 
   return (
     <View
@@ -370,20 +393,40 @@ const RecruitCard = ({
         <View style={styles.actions}>
           {isManager ? (
             <>
-              <Button title="編集" color={theme.primary} onPress={() => onEdit?.(recruit)} />
-              {recruit.status === RINJI_STATUS.OPEN ? (
-                <Button title="終了" color={theme.error} onPress={() => onClose?.(recruit.id)} />
-              ) : isAutoClosedByCapacity && onFinalizeAutoClose ? (
-                <Button title="募集を終了" color={theme.error} onPress={() => onFinalizeAutoClose?.(recruit.id)} />
-              ) : (
-                <Button title="再開" color={theme.success} onPress={() => onReopen?.(recruit.id)} />
-              )}
+              {canManageRecruit ? (
+                <Button title="編集" color={theme.primary} onPress={() => onEdit?.(recruit)} />
+              ) : null}
+              {canManageRecruit ? (
+                recruit.status === RINJI_STATUS.OPEN ? (
+                  <Button title="終了" color={theme.error} onPress={() => onClose?.(recruit.id)} />
+                ) : isAutoClosedByCapacity && onFinalizeAutoClose ? (
+                  <Button title="募集を終了" color={theme.error} onPress={() => onFinalizeAutoClose?.(recruit.id)} />
+                ) : (
+                  <Button title="再開" color={theme.success} onPress={() => onReopen?.(recruit.id)} />
+                )
+              ) : null}
               {showApplicantsToggle ? (
                 <Button
                   title={isApplicantsOpen ? '応募者一覧を閉じる' : '応募者一覧を開く'}
                   color={theme.textSecondary}
                   onPress={() => onToggleApplicants?.(recruit.id)}
                 />
+              ) : null}
+              {canDelete ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.deleteInline,
+                    {
+                      borderColor: theme.error,
+                      backgroundColor: pressed ? withAlpha(theme.error, '1A') : 'transparent',
+                      borderRadius: theme.borderRadius,
+                    },
+                  ]}
+                  onPress={() => onDelete?.(recruit)}
+                  hitSlop={8}
+                >
+                  <Text style={[styles.deleteInlineText, { color: theme.error }]}>削除</Text>
+                </Pressable>
               ) : null}
             </>
           ) : (
@@ -438,6 +481,9 @@ const RecruitCard = ({
             ))}
         </View>
       ) : null}
+      {createdDate ? (
+        <Text style={[styles.createdAt, { color: theme.textSecondary }]}>{createdDate}</Text>
+      ) : null}
     </View>
   );
 };
@@ -455,6 +501,7 @@ export const RecruitList = ({
   onCancelApply,
   onEdit,
   onClose,
+  onDelete,
   onReopen,
   onFinalizeAutoClose,
   onToggleApplicants,
@@ -470,6 +517,7 @@ export const RecruitList = ({
   loadingApplicantsByRecruitId = {},
   showApplicantsToggle = false,
   showAutoClosedBadge = false,
+  currentUserId = null,
 }) => {
   const { theme, themeMode } = useTheme();
 
@@ -488,6 +536,7 @@ export const RecruitList = ({
           onCancelApply={onCancelApply}
           onEdit={onEdit}
           onClose={onClose}
+          onDelete={onDelete}
           onReopen={onReopen}
           onFinalizeAutoClose={onFinalizeAutoClose}
           onToggleApplicants={onToggleApplicants}
@@ -502,6 +551,7 @@ export const RecruitList = ({
           applicantsLoading={Boolean(loadingApplicantsByRecruitId[item.id])}
           showApplicantsToggle={showApplicantsToggle}
           showAutoClosedBadge={showAutoClosedBadge}
+          currentUserId={currentUserId}
         />
       )}
     />
@@ -601,7 +651,18 @@ const styles = StyleSheet.create({
   actions: {
     marginTop: 4,
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
+  },
+  deleteInline: {
+    marginLeft: 'auto',
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  deleteInlineText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   applicantsBox: {
     marginTop: 8,
@@ -615,6 +676,11 @@ const styles = StyleSheet.create({
   applicantsRow: {
     fontSize: 13,
     lineHeight: 18,
+  },
+  createdAt: {
+    marginTop: 6,
+    fontSize: 12,
+    alignSelf: 'flex-end',
   },
   empty: {
     textAlign: 'center',

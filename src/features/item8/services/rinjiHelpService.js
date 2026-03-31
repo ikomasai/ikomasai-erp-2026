@@ -9,6 +9,7 @@ import { RINJI_STATUS, RINJI_CLOSE_REASON, OPTIONAL_FIELD_DEFAULTS } from '../co
 const supabase = getSupabaseClient();
 const IMMEDIATE_TIME_LABEL = '現在時刻';
 const LEGACY_IMMEDIATE_TIME_LABEL = 'いますぐ';
+const DELETED_RECRUIT_MARKER = '\n\n::DELETED::\n\n1';
 const RECRUIT_MUTABLE_FIELDS = [
   'head_user_id',
   'department_id',
@@ -115,6 +116,38 @@ const pickRecruitMutableFields = (payload = {}) =>
     }
     return acc;
   }, {});
+
+/**
+ * 募集 description に論理削除マーカーが付与されているか判定する。
+ *
+ * @param {string | null | undefined} description
+ * @returns {boolean}
+ */
+const isDeletedRecruitDescription = (description) =>
+  typeof description === 'string' && description.includes(DELETED_RECRUIT_MARKER);
+
+/**
+ * 募集配列から論理削除済み募集を除外する。
+ *
+ * @param {Array<Record<string, any>> | null | undefined} recruits
+ * @returns {Array<Record<string, any>>}
+ */
+const excludeDeletedRecruits = (recruits) =>
+  (recruits || []).filter((recruit) => !isDeletedRecruitDescription(recruit?.description));
+
+/**
+ * description に論理削除マーカーを付与する。
+ *
+ * @param {string | null | undefined} description
+ * @returns {string}
+ */
+const appendDeletedMarker = (description) => {
+  const base = typeof description === 'string' ? description : '';
+  if (isDeletedRecruitDescription(base)) {
+    return base;
+  }
+  return `${base}${DELETED_RECRUIT_MARKER}`;
+};
 
 /**
  * 募集配列に応募人数（applicant_count）を付与する。
@@ -461,14 +494,16 @@ export const fetchRecruits = async ({ includeClosed = false, includeAutoFullClos
         if (!isMissingCloseReasonColumnError(autoClosedError)) {
           return { data: null, error: autoClosedError };
         }
-        return enrichRecruits(openRows || []);
+        return enrichRecruits(excludeDeletedRecruits(openRows || []));
       }
 
-      const merged = [...(openRows || []), ...(autoClosedRows || [])].sort((a, b) => {
-        const at = new Date(a.updated_at || 0).getTime();
-        const bt = new Date(b.updated_at || 0).getTime();
-        return bt - at;
-      });
+      const merged = [...(openRows || []), ...(autoClosedRows || [])]
+        .filter((recruit) => !isDeletedRecruitDescription(recruit?.description))
+        .sort((a, b) => {
+          const at = new Date(a.updated_at || 0).getTime();
+          const bt = new Date(b.updated_at || 0).getTime();
+          return bt - at;
+        });
       return enrichRecruits(merged);
     }
 
@@ -480,7 +515,7 @@ export const fetchRecruits = async ({ includeClosed = false, includeAutoFullClos
   if (error) {
     return { data, error };
   }
-  return enrichRecruits(data || []);
+  return enrichRecruits(excludeDeletedRecruits(data || []));
 };
 
 /**
@@ -601,6 +636,50 @@ export const reopenRecruit = async (id) => {
   const fallback = await supabase
     .from('rinji_help_recruits')
     .update({ status: RINJI_STATUS.OPEN, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  return fallback;
+};
+
+/**
+ * 募集を論理削除する（description に削除マーカーを付与し、一覧から非表示にする）。
+ *
+ * @param {string} id
+ * @returns {Promise<{ data: any, error: any }>}
+ */
+export const logicalDeleteRecruit = async (id) => {
+  const { data: current, error: currentError } = await supabase
+    .from('rinji_help_recruits')
+    .select('id, description')
+    .eq('id', id)
+    .single();
+
+  if (currentError) {
+    return { data: null, error: currentError };
+  }
+
+  const payload = {
+    status: RINJI_STATUS.CLOSED,
+    close_reason: RINJI_CLOSE_REASON.MANUAL,
+    description: appendDeletedMarker(current?.description),
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from('rinji_help_recruits')
+    .update(payload)
+    .eq('id', id);
+
+  if (!error || !isMissingCloseReasonColumnError(error)) {
+    return { data, error };
+  }
+
+  // close_reason 列が未反映の環境向けフォールバック
+  const fallback = await supabase
+    .from('rinji_help_recruits')
+    .update({
+      status: RINJI_STATUS.CLOSED,
+      description: appendDeletedMarker(current?.description),
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', id);
   return fallback;
 };
@@ -758,7 +837,7 @@ export const fetchAppliedRecruits = async (applicantUserId) => {
   if (error) {
     return { data: null, error };
   }
-  const { data: enrichedRecruits, error: enrichError } = await enrichRecruits(recruits || []);
+  const { data: enrichedRecruits, error: enrichError } = await enrichRecruits(excludeDeletedRecruits(recruits || []));
   if (enrichError) {
     return { data: null, error: enrichError };
   }
