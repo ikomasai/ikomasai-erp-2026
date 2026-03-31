@@ -394,6 +394,13 @@ const PATROL_STATUS_BADGE_COLORS = {
   canceled: '#8C8C8C',
 };
 
+/** ダッシュボード上で「巡回対応中」とみなす巡回タスクステータス */
+const ACTIVE_PATROL_TASK_STATUSES = [
+  PATROL_TASK_STATUSES.OPEN,
+  PATROL_TASK_STATUSES.ACCEPTED,
+  PATROL_TASK_STATUSES.EN_ROUTE,
+];
+
 /**
  * 部署案件ステータスの色を返す
  * @param {string|null|undefined} status - 連絡案件ステータス
@@ -506,6 +513,82 @@ const getElapsedAlertInfo = (createdAt, ticketStatus) => {
 };
 
 const normalizeText = (value) => (value || '').trim();
+
+/**
+ * 巡回タスクの進行優先度を返す
+ * @param {string|null|undefined} status - 巡回タスクステータス
+ * @returns {number} 並び替え用優先度
+ */
+const getDashboardPatrolTaskPriority = (status) => {
+  if (status === PATROL_TASK_STATUSES.EN_ROUTE) {
+    return 0;
+  }
+  if (status === PATROL_TASK_STATUSES.ACCEPTED) {
+    return 1;
+  }
+  if (status === PATROL_TASK_STATUSES.OPEN) {
+    return 2;
+  }
+  return 9;
+};
+
+/**
+ * ダッシュボード向けの巡回タスク活動ラベルを返す
+ * @param {Object|null|undefined} task - 巡回タスク
+ * @returns {string} 活動ラベル
+ */
+const getDashboardPatrolActivityLabel = (task) => {
+  if (task?.task_status === PATROL_TASK_STATUSES.EN_ROUTE) {
+    return '移動中';
+  }
+  if (task?.task_status === PATROL_TASK_STATUSES.ACCEPTED) {
+    return '向かい中';
+  }
+  if (task?.task_status === PATROL_TASK_STATUSES.OPEN) {
+    return '割当済み';
+  }
+  return PATROL_TASK_STATUS_LABELS[task?.task_status] || task?.task_status || '対応中';
+};
+
+/**
+ * ダッシュボード向けの巡回タスク要約文を返す
+ * @param {Object|null|undefined} task - 巡回タスク
+ * @returns {string} 要約文
+ */
+const getDashboardPatrolTaskSummary = (task) => {
+  const sourceTitle = normalizeText(task?.source_ticket?.title);
+  if (sourceTitle) {
+    return sourceTitle;
+  }
+
+  const sourceDescription = normalizeText(task?.source_ticket?.description);
+  if (sourceDescription) {
+    return sourceDescription;
+  }
+
+  return normalizeText(task?.notes);
+};
+
+/**
+ * ダッシュボード向けの巡回タスク時刻表示を返す
+ * @param {Object|null|undefined} task - 巡回タスク
+ * @returns {string} 時刻表示
+ */
+const formatDashboardPatrolTaskTime = (task) => {
+  /** 月日と時刻を併記する */
+  const timeOptions = { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' };
+  const acceptedAt = task?.accepted_at ? new Date(task.accepted_at).getTime() : NaN;
+  if (Number.isFinite(acceptedAt) && ACTIVE_PATROL_TASK_STATUSES.includes(task?.task_status)) {
+    return `受諾 ${new Date(task.accepted_at).toLocaleString('ja-JP', timeOptions)}`;
+  }
+
+  const createdAt = task?.created_at ? new Date(task.created_at).getTime() : NaN;
+  if (Number.isFinite(createdAt)) {
+    return `作成 ${new Date(task.created_at).toLocaleString('ja-JP', timeOptions)}`;
+  }
+
+  return '時刻未設定';
+};
 
 /**
  * 巡回タスクの種別表示名を返す
@@ -1436,9 +1519,7 @@ const SupportDeskScreen = ({
     }).length;
 
     const activePatrolTasks = hqPatrolTasks.filter((task) =>
-      [PATROL_TASK_STATUSES.OPEN, PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(
-        task.task_status
-      )
+      ACTIVE_PATROL_TASK_STATUSES.includes(task.task_status)
     ).length;
 
     const recentRadioLogs = radioLogs.filter((log) => {
@@ -1453,6 +1534,46 @@ const SupportDeskScreen = ({
       recentRadioLogs,
     };
   }, [hqPatrolTasks, radioLogs, tickets]);
+
+  /**
+   * ダッシュボード向け: 巡回中スタッフごとの担当タスク情報
+   * on_patrol=true のスタッフに対し、未完了タスクを紐付けて表示用に整形する
+   */
+  const dashboardPatrollingStaffItems = useMemo(() => {
+    return (Array.isArray(patrollingUsers) ? patrollingUsers : [])
+      .map((patrolUser) => {
+        /** このスタッフに割り当てられている未完了タスク一覧 */
+        const activeTasks = hqPatrolTasks
+          .filter(
+            (task) =>
+              task.assigned_to === patrolUser.user_id &&
+              ACTIVE_PATROL_TASK_STATUSES.includes(task.task_status)
+          )
+          .sort((left, right) => {
+            const priorityDiff =
+              getDashboardPatrolTaskPriority(left.task_status) -
+              getDashboardPatrolTaskPriority(right.task_status);
+            if (priorityDiff !== 0) {
+              return priorityDiff;
+            }
+
+            const leftTime = new Date(left.accepted_at || left.created_at || 0).getTime();
+            const rightTime = new Date(right.accepted_at || right.created_at || 0).getTime();
+            return rightTime - leftTime;
+          });
+
+        return {
+          ...patrolUser,
+          activeTasks,
+        };
+      })
+      .sort((left, right) => {
+        if (right.activeTasks.length !== left.activeTasks.length) {
+          return right.activeTasks.length - left.activeTasks.length;
+        }
+        return (left.name || '').localeCompare(right.name || '', 'ja');
+      });
+  }, [hqPatrolTasks, patrollingUsers]);
 
   /**
    * 概況ダッシュボード: ステータスフィルター適用後の企画報告案件（開始/終了報告）
@@ -4029,59 +4150,109 @@ const SupportDeskScreen = ({
               ) : patrollingUsers.length === 0 ? (
                 <Text style={[styles.helpText, { color: theme.textSecondary }]}>巡回中のスタッフはいません</Text>
               ) : (
-                patrollingUsers.map((patrolUser) => {
-                  /** このスタッフが担当している進行中タスク（割当済みOPENも含む） */
-                  const userActiveTasks = hqPatrolTasks.filter(
-                    (task) =>
-                      task.assigned_to === patrolUser.user_id &&
-                      [PATROL_TASK_STATUSES.OPEN, PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(task.task_status)
-                  );
-                  /** 直近の進行中タスク（最初の1件） */
-                  const latestTask = userActiveTasks[0] || null;
+                dashboardPatrollingStaffItems.map((patrolUser) => {
+                  /** このスタッフが担当している未完了タスク一覧 */
+                  const activeTasks = patrolUser.activeTasks || [];
+                  /** タスク件数表示ラベル */
+                  const countLabel = activeTasks.length > 0 ? `対応中 ${activeTasks.length}件` : '待機中';
 
                   return (
                     <View
                       key={patrolUser.user_id}
                       style={[styles.dashboardPatrolRow, { borderColor: theme.border, backgroundColor: theme.background }]}
                     >
-                      {/* スタッフ名・所属 */}
-                      <View style={styles.dashboardPatrolUserInfo}>
-                        <Text style={[styles.dashboardPatrolName, { color: theme.text }]}>
-                          {patrolUser.name || '（名前未設定）'}
-                        </Text>
-                        {patrolUser.organization ? (
-                          <Text style={[styles.dashboardPatrolOrg, { color: theme.textSecondary }]}>
-                            {patrolUser.organization}
+                      <View style={styles.dashboardPatrolRowHeader}>
+                        <View style={styles.dashboardPatrolUserInfo}>
+                          <Text style={[styles.dashboardPatrolName, { color: theme.text }]}>
+                            {patrolUser.name || '（名前未設定）'}
                           </Text>
-                        ) : null}
+                          {patrolUser.organization ? (
+                            <Text style={[styles.dashboardPatrolOrg, { color: theme.textSecondary }]}>
+                              {patrolUser.organization}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        <View
+                          style={[
+                            styles.dashboardPatrolTaskBadge,
+                            {
+                              backgroundColor: activeTasks.length > 0 ? '#EAF8ED' : `${theme.border}30`,
+                              borderColor: activeTasks.length > 0 ? '#1A7F37' : theme.border,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.dashboardPatrolTaskType,
+                              { color: activeTasks.length > 0 ? '#1A7F37' : theme.textSecondary },
+                            ]}
+                          >
+                            {countLabel}
+                          </Text>
+                        </View>
                       </View>
 
-                      {/* 担当中タスク */}
-                      {latestTask ? (
-                        <View style={[styles.dashboardPatrolTaskBadge, {
-                          backgroundColor: `${PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary}18`,
-                          borderColor: PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary,
-                        }]}>
-                          <Text style={[styles.dashboardPatrolTaskType, {
-                            color: PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary,
-                          }]}>
-                            {getPatrolTaskTypeLabel(latestTask)}
-                          </Text>
-                          <Text style={[styles.dashboardPatrolTaskEvent, {
-                            color: PATROL_STATUS_BADGE_COLORS[latestTask.task_status] || theme.primary,
-                          }]} numberOfLines={1}>
-                            {latestTask.event_name || latestTask.location_text || ''}
-                          </Text>
+                      {activeTasks.length > 0 ? (
+                        <View style={styles.dashboardPatrolTaskList}>
+                          {activeTasks.map((task) => {
+                            /** ステータス表示色 */
+                            const statusColor = PATROL_STATUS_BADGE_COLORS[task.task_status] || theme.primary;
+                            /** 現在の活動内容 */
+                            const activityLabel = getDashboardPatrolActivityLabel(task);
+                            /** 場所表示 */
+                            const locationLabel = [
+                              normalizeText(task.event_name),
+                              normalizeText(task.event_location || task.location_text),
+                            ]
+                              .filter(Boolean)
+                              .join(' / ') || '場所未設定';
+                            /** タスク内容要約 */
+                            const summaryText = getDashboardPatrolTaskSummary(task);
+                            /** 時刻表示 */
+                            const timeLabel = formatDashboardPatrolTaskTime(task);
+
+                            return (
+                              <View
+                                key={task.id}
+                                style={[
+                                  styles.dashboardPatrolTaskCard,
+                                  {
+                                    borderColor: `${statusColor}40`,
+                                    backgroundColor: `${statusColor}12`,
+                                  },
+                                ]}
+                              >
+                                <View style={styles.dashboardPatrolTaskHeader}>
+                                  <View style={[styles.dashboardPatrolTaskStatusBadge, { backgroundColor: statusColor }]}>
+                                    <Text style={styles.dashboardPatrolTaskStatusText}>{activityLabel}</Text>
+                                  </View>
+                                  <Text style={[styles.dashboardPatrolTaskType, { color: theme.text }]} numberOfLines={1}>
+                                    {getPatrolTaskTypeLabel(task)}
+                                  </Text>
+                                </View>
+
+                                <Text style={[styles.dashboardPatrolTaskEvent, { color: theme.textSecondary }]} numberOfLines={1}>
+                                  {locationLabel}
+                                </Text>
+
+                                {summaryText ? (
+                                  <Text style={[styles.dashboardPatrolTaskSummary, { color: theme.text }]} numberOfLines={2}>
+                                    {summaryText}
+                                  </Text>
+                                ) : null}
+
+                                <Text style={[styles.dashboardPatrolTaskMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+                                  {timeLabel} / {task.task_no || 'タスク番号なし'}
+                                </Text>
+                              </View>
+                            );
+                          })}
                         </View>
                       ) : (
-                        <View style={[styles.dashboardPatrolTaskBadge, {
-                          backgroundColor: `${theme.border}30`,
-                          borderColor: theme.border,
-                        }]}>
-                          <Text style={[styles.dashboardPatrolTaskType, { color: theme.textSecondary }]}>
-                            待機中
-                          </Text>
-                        </View>
+                        <Text style={[styles.dashboardPatrolIdleText, { color: theme.textSecondary }]}>
+                          現在は巡回中ですが、未完了タスクはありません。
+                        </Text>
                       )}
                     </View>
                   );
@@ -7333,14 +7504,18 @@ const styles = StyleSheet.create({
   },
   /** ダッシュボード: 巡回中スタッフ行 */
   dashboardPatrolRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
+    gap: 10,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
+  },
+  /** ダッシュボード: 巡回中スタッフ行ヘッダー */
+  dashboardPatrolRowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   /** ダッシュボード: 巡回スタッフ名・所属のコンテナ */
   dashboardPatrolUserInfo: {
@@ -7362,8 +7537,37 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    alignItems: 'flex-end',
-    maxWidth: 140,
+    alignItems: 'center',
+  },
+  /** ダッシュボード: 巡回タスク一覧 */
+  dashboardPatrolTaskList: {
+    gap: 8,
+  },
+  /** ダッシュボード: 巡回タスクカード */
+  dashboardPatrolTaskCard: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 4,
+  },
+  /** ダッシュボード: 巡回タスクカード上段 */
+  dashboardPatrolTaskHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  /** ダッシュボード: 巡回タスク活動ステータスバッジ */
+  dashboardPatrolTaskStatusBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  /** ダッシュボード: 巡回タスク活動ステータス文字 */
+  dashboardPatrolTaskStatusText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   /** ダッシュボード: 担当タスク種別テキスト */
   dashboardPatrolTaskType: {
@@ -7372,8 +7576,21 @@ const styles = StyleSheet.create({
   },
   /** ダッシュボード: 担当タスクの企画名テキスト */
   dashboardPatrolTaskEvent: {
+    fontSize: 11,
+  },
+  /** ダッシュボード: 巡回タスク内容要約 */
+  dashboardPatrolTaskSummary: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  /** ダッシュボード: 巡回タスク補足メタ */
+  dashboardPatrolTaskMeta: {
     fontSize: 10,
-    marginTop: 1,
+  },
+  /** ダッシュボード: 巡回中だがタスク未所持の説明 */
+  dashboardPatrolIdleText: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   /** 振り分けセクション（案件詳細内） */
   dispatchSection: {

@@ -35,6 +35,9 @@ export const PATROL_TASK_STATUSES = {
   CANCELED: 'canceled',
 };
 
+/** 完了登録を許可する巡回タスク状態 */
+const COMPLETABLE_PATROL_TASK_STATUSES = [PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE];
+
 /** 巡回結果コード */
 export const PATROL_RESULT_CODES = {
   OK: 'OK',
@@ -586,6 +589,22 @@ export const completePatrolTask = async (input) => {
       throw new Error('patrolUserId が未指定です');
     }
 
+    /** 完了前の巡回タスク状態を確認する */
+    const { data: currentTask, error: currentTaskError } = await getSupabaseClient()
+      .from(PATROL_TASKS_TABLE)
+      .select('id, task_status, assigned_to')
+      .eq('id', normalizedTaskId)
+      .single();
+
+    if (currentTaskError) {
+      console.error('巡回タスク完了前確認エラー:', currentTaskError);
+      return { data: null, error: currentTaskError };
+    }
+
+    if (!COMPLETABLE_PATROL_TASK_STATUSES.includes(normalizeText(currentTask?.task_status))) {
+      return { data: null, error: new Error('先に「向かいます」を登録してください') };
+    }
+
     const rpcPayload = {
       patrol_user_id: normalizedUserId,
       result_code: normalizedResultCode,
@@ -615,11 +634,7 @@ export const completePatrolTask = async (input) => {
         done_at: new Date().toISOString(),
       })
       .eq('id', normalizedTaskId)
-      .in('task_status', [
-        PATROL_TASK_STATUSES.OPEN,
-        PATROL_TASK_STATUSES.ACCEPTED,
-        PATROL_TASK_STATUSES.EN_ROUTE,
-      ])
+      .in('task_status', COMPLETABLE_PATROL_TASK_STATUSES)
       .or(`assigned_to.is.null,assigned_to.eq.${normalizedUserId}`)
       .select('*')
       .single();

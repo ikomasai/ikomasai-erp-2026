@@ -112,6 +112,12 @@ const GO_MESSAGES = {
   [PATROL_TASK_TYPES.OTHER]: '巡回担当が現地へ向かいます。',
 };
 
+/** 完了登録を許可する巡回タスクステータス */
+const COMPLETABLE_PATROL_TASK_STATUSES = [
+  PATROL_TASK_STATUSES.ACCEPTED,
+  PATROL_TASK_STATUSES.EN_ROUTE,
+];
+
 /** 結果コードごとの表示名 */
 const RESULT_LABELS = {
   [PATROL_RESULT_CODES.OK]: '問題なし',
@@ -1161,6 +1167,10 @@ const Item12Screen = ({ navigation, route }) => {
       showToast('タスクまたはログイン情報が不足しています', 'error');
       return;
     }
+    if (!COMPLETABLE_PATROL_TASK_STATUSES.includes(selectedTask.task_status)) {
+      showToast('先に「向かいます」を登録してください', 'error');
+      return;
+    }
     if (!resultCode) {
       showToast('結果を選択してください', 'error');
       return;
@@ -1373,17 +1383,15 @@ const Item12Screen = ({ navigation, route }) => {
 
   /**
    * 完了可能かどうか（自分担当または未割当のアクティブタスクのみ）
-   * 他にアクティブタスクを持っている場合は、選択中タスクがOPEN状態であれば操作不可
-   * （ACCEPTED/EN_ROUTE の場合は hasAnyActiveTask がそのタスクを除外するため影響なし）
+   * 「向かいます」押下後の ACCEPTED / EN_ROUTE のみ完了可能とする
+   * 他にアクティブタスクを持っている場合は、選択中タスク以外を除外した結果で判定する
    */
   const canComplete = useMemo(
     () =>
       selectedTask != null &&
       isMineOrUnassigned &&
       !hasAnyActiveTask &&
-      [PATROL_TASK_STATUSES.OPEN, PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(
-        selectedTask.task_status
-      ),
+      COMPLETABLE_PATROL_TASK_STATUSES.includes(selectedTask.task_status),
     [selectedTask, isMineOrUnassigned, hasAnyActiveTask]
   );
 
