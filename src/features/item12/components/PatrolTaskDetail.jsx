@@ -201,6 +201,20 @@ const PatrolTaskDetail = ({
         ) : null}
       </View>
 
+      {selectedTask.source_ticket?.description ? (
+        <View
+          style={[
+            styles.sourceTicketDescriptionBox,
+            { borderColor: theme.border, backgroundColor: theme.background },
+          ]}
+        >
+          <Text style={[styles.label, { color: theme.text, marginTop: 0 }]}>依頼内容</Text>
+          <Text style={[styles.sourceTicketDescriptionText, { color: theme.text }]}>
+            {selectedTask.source_ticket.description}
+          </Text>
+        </View>
+      ) : null}
+
       <View
         style={[
           styles.actionPanel,
@@ -636,6 +650,19 @@ const styles = StyleSheet.create({
   focusBadgeText: {
     fontSize: 11,
     fontWeight: '700',
+  },
+  sourceTicketDescriptionBox: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: -2,
+    marginBottom: 2,
+    gap: 6,
+  },
+  sourceTicketDescriptionText: {
+    fontSize: 13,
+    lineHeight: 20,
   },
   ticketDetailTitle: {
     fontSize: 20,

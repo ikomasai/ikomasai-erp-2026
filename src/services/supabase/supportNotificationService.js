@@ -527,7 +527,7 @@ const notifyUserOrOrganization = async ({
  * @returns {Promise<{error: Error|null, data?: Object}>} 送信結果
  */
 export const notifySupportTicketMessageCreated = async ({ ticket, authorId, body }) => {
-  /** 正規化済み作成者ID */
+  /** 正規化済み投稿者ID */
   const normalizedAuthorId = normalizeText(authorId);
   /** 連絡案件作成者ID */
   const ticketCreatorId = normalizeText(ticket?.created_by);
@@ -538,6 +538,10 @@ export const notifySupportTicketMessageCreated = async ({ ticket, authorId, body
 
   /** 本文プレビュー */
   const previewText = buildPreviewText(body);
+  /** 依頼者向け返信プレビュー */
+  const replyPreview = normalizeText(body).slice(0, 160);
+  /** 依頼者向け返信タイトルプレビュー */
+  const replyShortPreview = normalizeText(body).slice(0, 40);
   /** 通知文脈 */
   const context = await resolveTicketContext(ticket, normalizedAuthorId);
   if (normalizedAuthorId === ticketCreatorId) {
@@ -563,10 +567,13 @@ export const notifySupportTicketMessageCreated = async ({ ticket, authorId, body
     ticket,
     recipientUserId: requesterRecipientUserId,
     allowOrganizationFallback: false,
-    title: `${buildDepartmentLabel(ticket)}から回答: ${buildTicketContextHeadline(context)}`,
+    title: `${buildDepartmentLabel(ticket)}から回答: ${replyShortPreview}`,
     body: buildNotificationBody([
-      ...buildTicketContextLines(context, '対応者'),
-      `内容: ${previewText}`,
+      replyPreview,
+      '─',
+      `件名: ${context.ticketTitle}`,
+      `団体: ${context.organizationName} / 企画: ${context.eventName}`,
+      context.actorName ? `対応者: ${context.actorName}` : '',
     ]),
     metadata: buildTicketMetadata(ticket, {
       type: 'support_contact_update',

@@ -356,6 +356,7 @@ export const listPatrolTasks = async ({
             id,
             ticket_no,
             title,
+            description,
             event_id,
             event_name,
             event_location
@@ -740,7 +741,12 @@ export const createDispatchPatrolTask = async ({
     }
 
     /** notes に「[種別]: [件名]」形式で格納することで振り分けタスクと識別可能にする */
-    const taskNotes = `${ticketTypeLabel || '連絡案件'}: ${ticket.title || ''}`.trim();
+    /** 依頼内容も含めた振り分けタスク用メモ */
+    const nextTaskNoteLines = [`${ticketTypeLabel || '連絡案件'}: ${ticket.title || ''}`];
+    if (ticket.description && ticket.description.trim()) {
+      nextTaskNoteLines.push(`依頼内容: ${ticket.description.trim()}`);
+    }
+    const nextTaskNotes = nextTaskNoteLines.join('\n').trim();
 
     const { data, error } = await getSupabaseClient()
       .from(PATROL_TASKS_TABLE)
@@ -750,7 +756,7 @@ export const createDispatchPatrolTask = async ({
         event_name: ticket.event_name || null,
         event_location: ticket.event_location || null,
         location_text: ticket.event_location || null,
-        notes: taskNotes,
+        notes: nextTaskNotes,
         source_ticket_id: ticket.id,
         assigned_to: normalizedAssignedTo,
         created_by: normalizedCreatorUserId,
