@@ -440,6 +440,7 @@ const HQ_TABS = [
   { key: 'radio', label: '📡 無線' },
   { key: 'event_orgs', label: '🏢 企画一覧' },
   { key: 'master', label: '⚙️ 鍵マスタ' },
+  { key: 'settings', label: '🛠 設定' },
 ];
 
 /** HQタブのデフォルト */
@@ -1421,7 +1422,12 @@ const SupportDeskScreen = ({
     const delayedMinutes = 60;
 
     const newTickets = tickets.filter((ticket) => ticket.ticket_status === SUPPORT_TICKET_STATUSES.NEW).length;
+    /** 遅延案件: 企画管理部対応案件（rule_question/layout_change）で60分以上未解決のもの */
     const delayedTickets = tickets.filter((ticket) => {
+      /** HQ対応案件（企画ルール変更・配置図変更）のみが対象 */
+      if (!HQ_RESPONDABLE_TICKET_TYPES.includes(ticket.ticket_type)) {
+        return false;
+      }
       if ([SUPPORT_TICKET_STATUSES.RESOLVED, SUPPORT_TICKET_STATUSES.CLOSED].includes(ticket.ticket_status)) {
         return false;
       }
@@ -3908,37 +3914,56 @@ const SupportDeskScreen = ({
               </TouchableOpacity>
             </View>
 
-            {/* 警告カード: 遅延案件 */}
+            {/* 警告カード: 遅延案件（タップで連絡案件タブへ移動） */}
             {dashboardSummary.delayedTickets > 0 ? (
-              <View style={[styles.dashboardAlertBanner, { backgroundColor: '#FFF0F0', borderColor: '#D1242F' }]}>
+              <TouchableOpacity
+                style={[styles.dashboardAlertBanner, { backgroundColor: '#FFF0F0', borderColor: '#D1242F' }]}
+                onPress={() => setActiveTab('tickets')}
+              >
                 <Text style={[styles.dashboardAlertText, { color: '#D1242F' }]}>
-                  ⚠️ 対応遅延: {dashboardSummary.delayedTickets}件（60分以上未解決）
+                  ⚠️ 対応遅延: {dashboardSummary.delayedTickets}件（60分以上未解決）▶ 詳細
                 </Text>
-              </View>
+              </TouchableOpacity>
             ) : null}
 
-            {/* 概要カードグリッド: 種別ごとに色分けした Material 3 風カード */}
+            {/* 概要カードグリッド: タップで対応するタブへ移動できる Material 3 風カード */}
             <View style={styles.dashboardGrid}>
-              <View style={[styles.dashboardCard, { backgroundColor: `${theme.primary}15` }]}>
+              {/* 新着連絡: タップで連絡案件タブへ */}
+              <TouchableOpacity
+                style={[styles.dashboardCard, { backgroundColor: `${theme.primary}15` }]}
+                onPress={() => setActiveTab('tickets')}
+              >
                 <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>📬 新着連絡</Text>
                 <Text style={[styles.dashboardValue, { color: theme.primary }]}>{dashboardSummary.newTickets}</Text>
                 <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
-              </View>
-              <View style={[styles.dashboardCard, { backgroundColor: dashboardSummary.delayedTickets > 0 ? '#FEF2F2' : theme.background }]}>
+              </TouchableOpacity>
+              {/* 遅延案件: タップで連絡案件タブへ */}
+              <TouchableOpacity
+                style={[styles.dashboardCard, { backgroundColor: dashboardSummary.delayedTickets > 0 ? '#FEF2F2' : theme.background }]}
+                onPress={() => setActiveTab('tickets')}
+              >
                 <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>⏰ 遅延案件(60分+)</Text>
                 <Text style={[styles.dashboardValue, { color: '#D1242F' }]}>{dashboardSummary.delayedTickets}</Text>
                 <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
-              </View>
-              <View style={[styles.dashboardCard, { backgroundColor: '#ECFDF5' }]}>
+              </TouchableOpacity>
+              {/* 巡回対応中: タップで巡回タブへ */}
+              <TouchableOpacity
+                style={[styles.dashboardCard, { backgroundColor: '#ECFDF5' }]}
+                onPress={() => setActiveTab('patrol')}
+              >
                 <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>🚶 巡回対応中</Text>
                 <Text style={[styles.dashboardValue, { color: '#059669' }]}>{dashboardSummary.activePatrolTasks}</Text>
                 <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
-              </View>
-              <View style={[styles.dashboardCard, { backgroundColor: theme.background }]}>
+              </TouchableOpacity>
+              {/* 無線ログ: タップで無線タブへ */}
+              <TouchableOpacity
+                style={[styles.dashboardCard, { backgroundColor: theme.background }]}
+                onPress={() => setActiveTab('radio')}
+              >
                 <Text style={[styles.dashboardLabel, { color: theme.textSecondary }]}>📡 無線ログ(1h)</Text>
                 <Text style={[styles.dashboardValue, { color: theme.text }]}>{dashboardSummary.recentRadioLogs}</Text>
                 <Text style={[styles.dashboardUnit, { color: theme.textSecondary }]}>件</Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             {/* 最新の未解決連絡案件プレビュー */}
@@ -3949,7 +3974,15 @@ const SupportDeskScreen = ({
                   .filter((t) => t.ticket_status === SUPPORT_TICKET_STATUSES.NEW)
                   .slice(0, 5)
                   .map((t) => (
-                    <View key={t.id} style={[styles.dashboardTicketRow, { borderColor: theme.border }]}>
+                    <TouchableOpacity
+                      key={t.id}
+                      style={[styles.dashboardTicketRow, { borderColor: theme.border }]}
+                      onPress={() => {
+                        /** 対象チケットを選択して連絡案件タブへ遷移 */
+                        setSelectedTicketId(t.id);
+                        setActiveTab('tickets');
+                      }}
+                    >
                       <View style={[styles.dashboardTicketTypeBadge, { backgroundColor: `${theme.primary}18` }]}>
                         <Text style={[styles.dashboardTicketTypeText, { color: theme.primary }]}>
                           {TICKET_TYPE_LABELS[t.ticket_type] || t.ticket_type}
@@ -3963,7 +3996,7 @@ const SupportDeskScreen = ({
                           {t.event_name || '-'} / {new Date(t.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
                         </Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   ))}
               </View>
             ) : (
@@ -4061,49 +4094,6 @@ const SupportDeskScreen = ({
         {/* ─── 概況確認タブ: 企画報告確認 + 施錠確認 ─── */}
         {isHQRole && activeTab === 'overview' ? (
           <>
-            {/* ── 未巡回アラート閾値設定（本部のみ変更可能） ── */}
-            <View style={[styles.card, { backgroundColor: theme.surface }]}>
-              <View style={styles.sectionHeader}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.sectionTitle, { color: theme.text }]}>未巡回アラート閾値設定</Text>
-                  <Text style={[styles.helpText, { color: theme.textSecondary, marginTop: 2 }]}>
-                    巡回サポートの「未巡回アラート」に適用される閾値です。この設定は巡回担当者には変更できません。
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.patrolAlertThresholdRow}>
-                {UNVISITED_ALERT_MINUTE_OPTIONS.map((minutes) => {
-                  /** 選択中かどうか */
-                  const isActive = minutes === hqUnvisitedAlertMinutes;
-                  return (
-                    <Pressable
-                      key={String(minutes)}
-                      style={[
-                        styles.patrolAlertThresholdButton,
-                        {
-                          borderColor: isActive ? theme.primary : theme.border,
-                          backgroundColor: isActive ? theme.primary : theme.background,
-                        },
-                      ]}
-                      onPress={() => handleChangeHqAlertMinutes(minutes)}
-                    >
-                      <Text
-                        style={[
-                          styles.patrolAlertThresholdText,
-                          { color: isActive ? '#FFFFFF' : theme.textSecondary },
-                        ]}
-                      >
-                        {minutes}分
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-                現在の設定: {hqUnvisitedAlertMinutes}分以上巡回がない場所にアラートを表示
-              </Text>
-            </View>
-
             {/* ── 企画報告確認セクション（開始確認・終了確認） ── */}
             <View style={[styles.card, { backgroundColor: theme.surface }]}>
               <View style={styles.sectionHeader}>
@@ -4907,52 +4897,28 @@ const SupportDeskScreen = ({
           </View>
         ) : null}
 
-        {/* ─── 評価タブ: 評価項目設定 + 評価タスク生成 ─── */}
+        {/* ─── 評価タブ: 評価タスク生成 ─── */}
         {isHQRole && activeTab === 'evaluation' ? (
           <View style={[styles.card, { backgroundColor: theme.surface }]}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>評価項目設定</Text>
-            </View>
-            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-              評価する項目名を設定します。生成した評価タスクは巡回サポートのタスク一覧へ追加されます。
-            </Text>
-            {/* 現在の評価項目リスト */}
-            <View style={styles.evalItemList}>
-              {evaluationItems.map((item, index) => (
-                <View
-                  key={`eval-item-${index}`}
-                  style={[styles.evalItemRow, { borderColor: theme.border, backgroundColor: theme.background }]}
-                >
-                  <Text style={[styles.evalItemLabel, { color: theme.text }]} numberOfLines={1}>
-                    {index + 1}. {item}
-                  </Text>
-                  <TouchableOpacity
-                    style={[styles.evalItemRemoveButton, { borderColor: theme.border }]}
-                    onPress={() => handleRemoveEvaluationItem(index)}
-                  >
-                    <Text style={[styles.evalItemRemoveText, { color: theme.textSecondary }]}>削除</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-            {/* 項目追加欄 */}
-            <View style={styles.evalItemAddRow}>
-              <TextInput
-                value={newEvaluationItemText}
-                onChangeText={setNewEvaluationItemText}
-                placeholder="新しい評価項目名を入力"
-                placeholderTextColor={theme.textSecondary}
-                style={[styles.evalItemInput, { borderColor: theme.border, backgroundColor: theme.background, color: theme.text }]}
-                returnKeyType="done"
-                onSubmitEditing={handleAddEvaluationItem}
-              />
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>評価タスク生成</Text>
+              {/* 評価項目設定は設定タブに移動 */}
               <TouchableOpacity
-                style={[styles.evalItemAddButton, { backgroundColor: theme.primary }]}
-                onPress={handleAddEvaluationItem}
+                style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
+                onPress={() => setActiveTab('settings')}
               >
-                <Text style={styles.evalItemAddButtonText}>追加</Text>
+                <Text style={[styles.refreshButtonText, { color: theme.primary }]}>⚙️ 評価項目設定</Text>
               </TouchableOpacity>
             </View>
+            {evaluationItems.length > 0 ? (
+              <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                評価項目（{evaluationItems.length}件）: {evaluationItems.join(' / ')}
+              </Text>
+            ) : (
+              <Text style={[styles.helpText, { color: '#D1242F' }]}>
+                ⚠️ 評価項目が設定されていません。「⚙️ 評価項目設定」から追加してください。
+              </Text>
+            )}
             {/* 企画を選んで評価タスク一括生成 */}
             <Text style={[styles.label, { color: theme.text, marginTop: 8 }]}>評価対象企画を選択（複数可）</Text>
             <Text style={[styles.helpText, { color: theme.textSecondary }]}>
@@ -6931,6 +6897,101 @@ const SupportDeskScreen = ({
               </Text>
             </TouchableOpacity>
           </View>
+        ) : null}
+
+        {/* ─── 設定タブ ─── */}
+        {isHQRole && activeTab === 'settings' ? (
+          <>
+            {/* ── 未巡回アラート閾値設定 ── */}
+            <View style={[styles.card, { backgroundColor: theme.surface }]}>
+              <View style={styles.sectionHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.sectionTitle, { color: theme.text }]}>未巡回アラート閾値設定</Text>
+                  <Text style={[styles.helpText, { color: theme.textSecondary, marginTop: 2 }]}>
+                    巡回サポートの「未巡回アラート」に適用される閾値です。この設定は巡回担当者には変更できません。
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.patrolAlertThresholdRow}>
+                {UNVISITED_ALERT_MINUTE_OPTIONS.map((minutes) => {
+                  /** 選択中かどうか */
+                  const isActive = minutes === hqUnvisitedAlertMinutes;
+                  return (
+                    <Pressable
+                      key={String(minutes)}
+                      style={[
+                        styles.patrolAlertThresholdButton,
+                        {
+                          borderColor: isActive ? theme.primary : theme.border,
+                          backgroundColor: isActive ? theme.primary : theme.background,
+                        },
+                      ]}
+                      onPress={() => handleChangeHqAlertMinutes(minutes)}
+                    >
+                      <Text
+                        style={[
+                          styles.patrolAlertThresholdText,
+                          { color: isActive ? '#FFFFFF' : theme.textSecondary },
+                        ]}
+                      >
+                        {minutes}分
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                現在の設定: {hqUnvisitedAlertMinutes}分以上巡回がない場所にアラートを表示
+              </Text>
+            </View>
+
+            {/* ── 評価項目設定 ── */}
+            <View style={[styles.card, { backgroundColor: theme.surface }]}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>評価項目設定</Text>
+              </View>
+              <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+                評価する項目名を設定します。生成した評価タスクは巡回サポートのタスク一覧へ追加されます。
+              </Text>
+              {/* 現在の評価項目リスト */}
+              <View style={styles.evalItemList}>
+                {evaluationItems.map((item, index) => (
+                  <View
+                    key={`eval-item-${index}`}
+                    style={[styles.evalItemRow, { borderColor: theme.border, backgroundColor: theme.background }]}
+                  >
+                    <Text style={[styles.evalItemLabel, { color: theme.text }]} numberOfLines={1}>
+                      {index + 1}. {item}
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.evalItemRemoveButton, { borderColor: theme.border }]}
+                      onPress={() => handleRemoveEvaluationItem(index)}
+                    >
+                      <Text style={[styles.evalItemRemoveText, { color: theme.textSecondary }]}>削除</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+              {/* 項目追加欄 */}
+              <View style={styles.evalItemAddRow}>
+                <TextInput
+                  value={newEvaluationItemText}
+                  onChangeText={setNewEvaluationItemText}
+                  placeholder="新しい評価項目名を入力"
+                  placeholderTextColor={theme.textSecondary}
+                  style={[styles.evalItemInput, { borderColor: theme.border, backgroundColor: theme.background, color: theme.text }]}
+                  returnKeyType="done"
+                  onSubmitEditing={handleAddEvaluationItem}
+                />
+                <TouchableOpacity
+                  style={[styles.evalItemAddButton, { backgroundColor: theme.primary }]}
+                  onPress={handleAddEvaluationItem}
+                >
+                  <Text style={styles.evalItemAddButtonText}>追加</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
         ) : null}
 
       </ScrollView>

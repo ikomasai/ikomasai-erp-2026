@@ -1347,20 +1347,16 @@ const Item12Screen = ({ navigation, route }) => {
 
   /**
    * 受諾可能かどうか（＝「向かいます」ボタンを押せるか）
-   * - 自分に割り当て済み: 向かいます可能（割り当てられても行けない場合は拒否ボタンを使う）
-   * - 未割当: 種別問わずアクティブタスクを1つでも持っていなければ受諾可
+   * - OPENのタスクのみが対象（ACCEPTED/EN_ROUTE は既に受諾済みのため不可）
+   * - 自分に割り当て済み／未割当: 他にアクティブタスクがなければ受諾可
    * - 他者に割り当て済み: 受諾不可
    */
   const canAccept = useMemo(() => {
     if (!selectedTask) {
       return false;
     }
-    const isActiveStatus = [
-      PATROL_TASK_STATUSES.OPEN,
-      PATROL_TASK_STATUSES.ACCEPTED,
-      PATROL_TASK_STATUSES.EN_ROUTE,
-    ].includes(selectedTask.task_status);
-    if (!isActiveStatus) {
+    /** 向かいます対象はOPEN状態のみ（既に受諾済みのタスクは再受諾させない） */
+    if (selectedTask.task_status !== PATROL_TASK_STATUSES.OPEN) {
       return false;
     }
     /** 自分が担当者の場合でも他にアクティブタスクがあれば受諾不可 */
@@ -2130,9 +2126,10 @@ const Item12Screen = ({ navigation, route }) => {
                 onRefresh={refreshPatrolCheckData}
               />
 
+              {/* 定常巡回チェック: アラート閾値を超えた場所のみを表示（対応が必要な場所に絞る） */}
               <UnvisitedAlertList
                 theme={theme}
-                unvisitedLocations={unvisitedLocations}
+                unvisitedLocations={unvisitedLocations.filter((loc) => loc.is_alert)}
                 isLoadingUnvisitedLocations={isLoadingUnvisitedLocations}
                 unvisitedAlertMinutes={unvisitedAlertMinutes}
                 onRefresh={loadUnvisitedAlerts}
