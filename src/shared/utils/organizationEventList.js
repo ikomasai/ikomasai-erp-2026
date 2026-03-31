@@ -5,10 +5,11 @@
 
 /**
  * 文字列の前後空白を除去する
+ * 非文字列（数値・オブジェクト・配列等）が渡された場合も安全に空文字を返す
  * @param {string|null|undefined} value - 対象文字列
  * @returns {string} 正規化後文字列
  */
-const normalizeText = (value) => (value || '').trim();
+const normalizeText = (value) => (typeof value === 'string' ? value : '').trim();
 
 /** 全団体を表す選択値 */
 export const ALL_ORGANIZATION_EVENT_FILTER = '__all__';

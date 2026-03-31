@@ -10,15 +10,23 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {
+  getEvaluationPatrolTaskItemName,
+  getEvaluationPatrolTaskItemNames,
+  getPatrolTaskDisplayType,
   PATROL_RESULT_CODES,
+  PATROL_TASK_DISPLAY_TYPES,
   PATROL_TASK_STATUSES,
   PATROL_TASK_TYPES,
 } from '../../../services/supabase/patrolTaskService';
 import SkeletonLoader from '../../../shared/components/SkeletonLoader';
 import EmptyState from '../../../shared/components/EmptyState';
+
+/** 表示専用の評価タスクラベル */
+const EVALUATION_TASK_LABEL = '企画評価';
 
 /** タスク種別表示名 */
 const TASK_TYPE_LABELS = {
@@ -62,9 +70,11 @@ const RESULT_LABELS = {
  * @param {string} props.patrolMemo - 巡回メモ文字列
  * @param {Function} props.onChangePatrolMemo - メモ変更コールバック
  * @param {boolean} props.isSubmitting - 送信中フラグ
- * @param {boolean} props.canAccept - 受諾可能フラグ
+ * @param {boolean} props.canAccept - 受諾可能フラグ（向かいますボタン押下可否）
+ * @param {boolean} props.hasAnyActiveTask - 自分が対応中の別タスクが存在するかどうか
  * @param {boolean} props.canComplete - 完了可能フラグ
  * @param {Function} props.onAcceptTask - 向かいますボタン押下コールバック
+ * @param {Function} props.onRejectTask - 拒否ボタン押下コールバック（割当を外して未割当に戻す）
  * @param {Function} props.onCompleteTask - 完了ボタン押下コールバック
  * @param {Function} props.onSendMemoOnly - メモのみ共有ボタン押下コールバック
  * @param {Array} props.taskResults - タスク結果履歴配列
@@ -73,6 +83,11 @@ const RESULT_LABELS = {
  * @param {Array} props.sourceMessages - 元連絡案件メッセージ配列
  * @param {boolean} props.isLoadingSourceMessages - メッセージ読み込み中フラグ
  * @param {Function} props.onRefreshSourceMessages - メッセージ更新コールバック
+ * @param {Object} [props.evaluationInputs] - 評価項目ごとの入力状態
+ * @param {Function} [props.onChangeEvaluationScore] - 評価点数変更コールバック
+ * @param {Function} [props.onChangeEvaluationComment] - 評価コメント変更コールバック
+ * @param {string} [props.evaluationSummaryMemo] - 総評メモ
+ * @param {Function} [props.onChangeEvaluationSummaryMemo] - 総評メモ変更コールバック
  * @returns {JSX.Element} タスク詳細UI
  */
 const PatrolTaskDetail = ({
@@ -86,8 +101,10 @@ const PatrolTaskDetail = ({
   onChangePatrolMemo,
   isSubmitting,
   canAccept,
+  hasAnyActiveTask,
   canComplete,
   onAcceptTask,
+  onRejectTask,
   onCompleteTask,
   onSendMemoOnly,
   taskResults,
@@ -96,12 +113,27 @@ const PatrolTaskDetail = ({
   sourceMessages,
   isLoadingSourceMessages,
   onRefreshSourceMessages,
+  evaluationInputs = {},
+  onChangeEvaluationScore = () => {},
+  onChangeEvaluationComment = () => {},
+  evaluationSummaryMemo = '',
+  onChangeEvaluationSummaryMemo = () => {},
 }) => {
+  /** 画面幅（レスポンシブ対応用） */
+  const { width: windowWidth } = useWindowDimensions();
+  /** スマホ幅かどうか（768px 未満） */
+  const isMobile = windowWidth < 768;
   /** 場所表示 */
   const locationLabel = selectedTask.event_location || selectedTask.location_text || '場所未設定';
+  /** 自分がこのタスクの担当者かどうか */
+  const isAssignedToMe = selectedTask.assigned_to && selectedTask.assigned_to === user?.id;
+  const evaluationItemName = getEvaluationPatrolTaskItemName(selectedTask);
+  const isEvaluationTask = getPatrolTaskDisplayType(selectedTask) === PATROL_TASK_DISPLAY_TYPES.EVALUATION;
+  const evaluationItems = isEvaluationTask ? getEvaluationPatrolTaskItemNames(selectedTask) : [];
+  const taskTypeLabel = isEvaluationTask ? EVALUATION_TASK_LABEL : TASK_TYPE_LABELS[selectedTask.task_type] || selectedTask.task_type;
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.card, isMobile && styles.cardMobile, { backgroundColor: theme.surface }]}>
       <View style={styles.headerRow}>
         <View style={styles.headerTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>タスク詳細</Text>
@@ -112,7 +144,7 @@ const PatrolTaskDetail = ({
         <View
           style={[
             styles.statusBadge,
-            { borderColor: theme.border, backgroundColor: `${theme.primary}12` },
+            { backgroundColor: `${theme.primary}15` },
           ]}
         >
           <Text style={[styles.statusBadgeText, { color: theme.primary }]}>
@@ -124,25 +156,25 @@ const PatrolTaskDetail = ({
       <View
         style={[
           styles.focusCard,
-          { borderColor: theme.border, backgroundColor: theme.background },
+          { borderLeftColor: theme.primary, backgroundColor: `${theme.primary}08` },
         ]}
       >
         <View style={styles.focusBadgeRow}>
           <View
             style={[
               styles.focusBadge,
-              { borderColor: theme.border, backgroundColor: `${theme.primary}12` },
+              { backgroundColor: `${theme.primary}15` },
             ]}
           >
             <Text style={[styles.focusBadgeText, { color: theme.primary }]}>
-              {TASK_TYPE_LABELS[selectedTask.task_type] || selectedTask.task_type}
+              {taskTypeLabel}
             </Text>
           </View>
           {selectedTask.source_ticket_id ? (
             <View
               style={[
                 styles.focusBadge,
-                { borderColor: theme.border, backgroundColor: theme.surface },
+                { backgroundColor: theme.border },
               ]}
             >
               <Text style={[styles.focusBadgeText, { color: theme.textSecondary }]}>
@@ -156,71 +188,155 @@ const PatrolTaskDetail = ({
           {selectedTask.event_name || '企画名未設定'}
         </Text>
         <Text style={[styles.focusLocation, { color: theme.text }]}>📍 {locationLabel}</Text>
-        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-          タスク番号: {selectedTask.task_no || '-'}
-        </Text>
-        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-          元連絡案件: {selectedTask.source_ticket_id || 'なし'} / 元鍵貸出: {selectedTask.source_key_loan_id || 'なし'}
-        </Text>
+        {/* タスク番号・元連絡案件IDはスマホでは省略（管理情報のため） */}
+        {!isMobile ? (
+          <>
+            <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+              タスク番号: {selectedTask.task_no || '-'}
+            </Text>
+            <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
+              元連絡案件: {selectedTask.source_ticket_id || 'なし'} / 元鍵貸出: {selectedTask.source_key_loan_id || 'なし'}
+            </Text>
+          </>
+        ) : null}
       </View>
+
+      {selectedTask.source_ticket?.description ? (
+        <View
+          style={[
+            styles.sourceTicketDescriptionBox,
+            { borderColor: theme.border, backgroundColor: theme.background },
+          ]}
+        >
+          <Text style={[styles.label, { color: theme.text, marginTop: 0 }]}>依頼内容</Text>
+          <Text style={[styles.sourceTicketDescriptionText, { color: theme.text }]}>
+            {selectedTask.source_ticket.description}
+          </Text>
+        </View>
+      ) : null}
 
       <View
         style={[
           styles.actionPanel,
-          { borderColor: theme.border, backgroundColor: theme.background },
+          { backgroundColor: theme.background },
         ]}
       >
         <Text style={[styles.label, { color: theme.text }]}>次の操作</Text>
         <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-          現地へ向かうときは先に受諾し、対応後は結果とメモを添えて完了登録してください。
+          {isEvaluationTask
+            ? '現地へ向かうときは先に受諾し、各評価項目の点数とコメントを入力して登録してください。'
+            : '現地へ向かうときは先に受諾し、対応後は結果とメモを添えて完了登録してください。'}
         </Text>
-        <View style={styles.actionRow}>
+        {/* 向かいます不可バナー: 別タスク対応中で未割当タスクを受諾できない場合に表示 */}
+        {!isAssignedToMe && hasAnyActiveTask && selectedTask.task_status === PATROL_TASK_STATUSES.OPEN && (
+          <View style={styles.cannotAcceptBanner}>
+            <Text style={styles.cannotAcceptBannerText}>
+              現在別のタスクを対応中のため受諾できません
+            </Text>
+          </View>
+        )}
+        <View style={[styles.actionRow, isMobile && styles.actionRowMobile]}>
           <TouchableOpacity
             style={[
               styles.actionButton,
+              isMobile && styles.actionButtonMobile,
               { backgroundColor: canAccept ? theme.primary : theme.border },
             ]}
             disabled={!canAccept || isSubmitting}
             onPress={onAcceptTask}
           >
-            <Text style={styles.actionButtonText}>向かいます</Text>
+            <Text style={[styles.actionButtonText, isMobile && styles.actionButtonTextMobile]}>向かいます</Text>
           </TouchableOpacity>
+          {/* 拒否ボタン: 自分に割り当てられたタスクのみ表示 */}
+          {isAssignedToMe ? (
+            <TouchableOpacity
+              style={[styles.actionButton, isMobile && styles.actionButtonMobile, { backgroundColor: '#E53E3E' }]}
+              disabled={isSubmitting}
+              onPress={onRejectTask}
+            >
+              <Text style={[styles.actionButtonText, isMobile && styles.actionButtonTextMobile]}>拒否</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={[
               styles.actionButton,
+              isMobile && styles.actionButtonMobile,
               { backgroundColor: canComplete ? (theme.success || '#22A06B') : theme.border },
             ]}
             disabled={!canComplete || isSubmitting}
             onPress={onCompleteTask}
           >
-            <Text style={styles.actionButtonText}>完了登録</Text>
+            <Text style={[styles.actionButtonText, isMobile && styles.actionButtonTextMobile]}>
+              {isEvaluationTask ? '評価登録' : '完了登録'}
+            </Text>
           </TouchableOpacity>
         </View>
         <TouchableOpacity
           style={[
             styles.memoButton,
             {
-              borderColor: theme.border,
-              backgroundColor: selectedTask.source_ticket_id ? theme.surface : theme.border,
+              backgroundColor: selectedTask.source_ticket_id ? `${theme.primary}15` : theme.border,
             },
           ]}
           onPress={onSendMemoOnly}
           disabled={!selectedTask.source_ticket_id || isSubmitting}
         >
-          <Text style={[styles.memoButtonText, { color: theme.textSecondary }]}>メモのみ共有</Text>
+          <Text style={[styles.memoButtonText, { color: selectedTask.source_ticket_id ? theme.primary : theme.textSecondary }]}>メモのみ共有</Text>
         </TouchableOpacity>
       </View>
 
       <View
         style={[
           styles.requestCard,
-          { borderColor: theme.border, backgroundColor: theme.background },
+          { backgroundColor: theme.background },
         ]}
       >
-        <Text style={[styles.label, { color: theme.text }]}>指示メモ</Text>
-        <Text style={[styles.requestBody, { color: theme.text }]}>
-          {selectedTask.notes || '指示メモはありません'}
+        <Text style={[styles.label, { color: theme.text }]}>
+          {isEvaluationTask ? '評価項目' : '指示メモ'}
         </Text>
+        {/* 施錠確認タスクの場合は鍵名を目立つように強調表示する */}
+        {isEvaluationTask && evaluationItemName ? (
+          <View>
+            <View style={styles.evaluationItemChipList}>
+              {evaluationItems.map((item) => (
+                <View
+                  key={item}
+                  style={[styles.evaluationItemChip, { backgroundColor: `${theme.primary}12` }]}
+                >
+                  <Text style={[styles.evaluationItemChipText, { color: theme.text }]}>{item}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : selectedTask.task_type === PATROL_TASK_TYPES.LOCK_CHECK && selectedTask.notes ? (
+          (() => {
+            /** notes が "鍵返却後の施錠確認: [鍵ラベル]" 形式かチェック */
+            const colonIndex = selectedTask.notes.indexOf(':');
+            const hasKeyLabel = colonIndex !== -1;
+            /** コロン前のプレフィックス（"鍵返却後の施錠確認" など） */
+            const prefix = hasKeyLabel ? selectedTask.notes.substring(0, colonIndex).trim() : null;
+            /** コロン後の鍵名部分 */
+            const keyLabel = hasKeyLabel
+              ? selectedTask.notes.substring(colonIndex + 1).trim()
+              : selectedTask.notes;
+            return (
+              <View>
+                {prefix ? (
+                  <Text style={[styles.requestBody, { color: theme.textSecondary }]}>
+                    {prefix}:
+                  </Text>
+                ) : null}
+                <Text style={[styles.keyLabelHighlight, { color: theme.text }]}>
+                  🔑 {keyLabel}
+                </Text>
+              </View>
+            );
+          })()
+        ) : (
+          <Text style={[styles.requestBody, { color: theme.text }]}>
+            {selectedTask.notes || '指示メモはありません'}
+          </Text>
+        )}
       </View>
 
       <Text style={[styles.label, { color: theme.text }]}>完了結果</Text>
@@ -235,7 +351,7 @@ const PatrolTaskDetail = ({
                 styles.optionButton,
                 {
                   borderColor: isActive ? theme.primary : theme.border,
-                  backgroundColor: isActive ? `${theme.primary}1A` : theme.background,
+                  backgroundColor: isActive ? theme.primary : theme.background,
                 },
               ]}
               onPress={() => onChangeResultCode(option.key)}
@@ -243,7 +359,7 @@ const PatrolTaskDetail = ({
               <Text
                 style={[
                   styles.optionButtonText,
-                  { color: isActive ? theme.primary : theme.textSecondary },
+                  { color: isActive ? '#FFFFFF' : theme.textSecondary },
                 ]}
               >
                 {option.label}
@@ -253,30 +369,114 @@ const PatrolTaskDetail = ({
         })}
       </View>
 
-      <Text style={[styles.label, { color: theme.text }]}>巡回メモ</Text>
-      <TextInput
-        value={patrolMemo}
-        onChangeText={onChangePatrolMemo}
-        multiline
-        placeholder="現地状況・対応内容を入力してください"
-        placeholderTextColor={theme.textSecondary}
-        style={[
-          styles.memoInput,
-          {
-            borderColor: theme.border,
-            backgroundColor: theme.background,
-            color: theme.text,
-          },
-        ]}
-      />
+      {isEvaluationTask ? (
+        <>
+          <Text style={[styles.label, { color: theme.text }]}>評価入力</Text>
+          {evaluationItems.map((item) => {
+            const scoreValue = Number(evaluationInputs[item]?.score || 0);
+            const itemComment = evaluationInputs[item]?.comment || '';
+
+            return (
+              <View
+                key={item}
+                style={[
+                  styles.evaluationInputCard,
+                  { borderColor: theme.border, backgroundColor: theme.background },
+                ]}
+              >
+                <Text style={[styles.evaluationInputTitle, { color: theme.text }]}>{item}</Text>
+                <View style={styles.evaluationScoreRow}>
+                  {[1, 2, 3, 4, 5].map((score) => {
+                    const isActive = score === scoreValue;
+
+                    return (
+                      <Pressable
+                        key={`${item}-${score}`}
+                        style={[
+                          styles.evaluationScoreButton,
+                          {
+                            borderColor: isActive ? theme.primary : theme.border,
+                            backgroundColor: isActive ? theme.primary : theme.surface,
+                          },
+                        ]}
+                        onPress={() => onChangeEvaluationScore(item, score)}
+                      >
+                        <Text
+                          style={[
+                            styles.evaluationScoreButtonText,
+                            { color: isActive ? '#FFFFFF' : theme.text },
+                          ]}
+                        >
+                          {score}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <TextInput
+                  value={itemComment}
+                  onChangeText={(value) => onChangeEvaluationComment(item, value)}
+                  multiline
+                  placeholder="項目ごとのコメントを入力"
+                  placeholderTextColor={theme.textSecondary}
+                  style={[
+                    styles.evaluationCommentInput,
+                    {
+                      borderColor: theme.border,
+                      backgroundColor: theme.surface,
+                      color: theme.text,
+                    },
+                  ]}
+                />
+              </View>
+            );
+          })}
+
+          <Text style={[styles.label, { color: theme.text }]}>総評メモ</Text>
+          <TextInput
+            value={evaluationSummaryMemo}
+            onChangeText={onChangeEvaluationSummaryMemo}
+            multiline
+            placeholder="全体の印象や気づきを入力してください"
+            placeholderTextColor={theme.textSecondary}
+            style={[
+              styles.memoInput,
+              {
+                borderColor: theme.border,
+                backgroundColor: theme.background,
+                color: theme.text,
+              },
+            ]}
+          />
+        </>
+      ) : (
+        <>
+          <Text style={[styles.label, { color: theme.text }]}>巡回メモ</Text>
+          <TextInput
+            value={patrolMemo}
+            onChangeText={onChangePatrolMemo}
+            multiline
+            placeholder="現地状況・対応内容を入力してください"
+            placeholderTextColor={theme.textSecondary}
+            style={[
+              styles.memoInput,
+              {
+                borderColor: theme.border,
+                backgroundColor: theme.background,
+                color: theme.text,
+              },
+            ]}
+          />
+        </>
+      )}
 
       <View style={styles.sectionHeader}>
         <Text style={[styles.label, { color: theme.text }]}>タスク結果履歴</Text>
         <TouchableOpacity
-          style={[styles.refreshButton, { borderColor: theme.border }]}
+          style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
           onPress={onRefreshTaskResults}
         >
-          <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+          <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
         </TouchableOpacity>
       </View>
 
@@ -318,10 +518,10 @@ const PatrolTaskDetail = ({
           <View style={styles.sectionHeader}>
             <Text style={[styles.label, { color: theme.text }]}>元連絡案件メッセージ</Text>
             <TouchableOpacity
-              style={[styles.refreshButton, { borderColor: theme.border }]}
+              style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
               onPress={onRefreshSourceMessages}
             >
-              <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+              <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
             </TouchableOpacity>
           </View>
 
@@ -370,11 +570,22 @@ const PatrolTaskDetail = ({
 };
 
 const styles = StyleSheet.create({
+  /** 外枠カード: shadow で浮かせる / borderWidth削除 */
   card: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  /** スマホ向けカード: 余白を詰める */
+  cardMobile: {
+    padding: 12,
+    borderRadius: 14,
+    gap: 10,
   },
   headerRow: {
     flexDirection: 'row',
@@ -400,37 +611,58 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  /** ステータスバッジ: pill型 */
   statusBadge: {
-    borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
     paddingVertical: 6,
+    overflow: 'hidden',
   },
   statusBadgeText: {
     fontSize: 11,
     fontWeight: '700',
   },
+  /** タスク情報フォーカスカード: 左アクセントボーダー + shadow */
   focusCard: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderLeftWidth: 4,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   focusBadgeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
   },
+  /** 種別バッジ: pill型 / borderWidth削除 */
   focusBadge: {
-    borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 9,
     paddingVertical: 5,
+    overflow: 'hidden',
   },
   focusBadgeText: {
     fontSize: 11,
     fontWeight: '700',
+  },
+  sourceTicketDescriptionBox: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: -2,
+    marginBottom: 2,
+    gap: 6,
+  },
+  sourceTicketDescriptionText: {
+    fontSize: 13,
+    lineHeight: 20,
   },
   ticketDetailTitle: {
     fontSize: 20,
@@ -445,19 +677,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  /** アクションパネル: borderWidth削除 + shadow */
   actionPanel: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
+  /** 指示メモカード: borderWidth削除 + shadow */
   requestCard: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   requestBody: {
     fontSize: 14,
@@ -474,10 +716,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
+  /** 結果選択ボタン: pill型 / アクティブ時fill */
   optionButton: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderRadius: 999,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 8,
   },
   optionButtonText: {
@@ -488,19 +731,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
   },
+  /** 更新ボタン: primary薄め背景 / borderWidth削除 */
   refreshButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    overflow: 'hidden',
   },
   refreshButtonText: {
     fontSize: 12,
     fontWeight: '600',
   },
+  /** メモ入力: borderRadius 14→12 */
   memoInput: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     minHeight: 112,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -511,22 +756,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  /** スマホ向けボタン行: 折り返し可能にして各ボタンを大きく */
+  actionRowMobile: {
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  /** アクションボタン: pill型 (borderRadius 14→24) */
   actionButton: {
     flex: 1,
-    borderRadius: 14,
-    paddingVertical: 13,
+    borderRadius: 24,
+    paddingVertical: 14,
     alignItems: 'center',
+  },
+  /** スマホ向けボタン: 最小幅を設定して折り返し時も押しやすく */
+  actionButtonMobile: {
+    minWidth: '45%',
+    paddingVertical: 16,
+    borderRadius: 24,
   },
   actionButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
   },
+  /** スマホ向けボタンテキスト: 少し大きく */
+  actionButtonTextMobile: {
+    fontSize: 16,
+  },
+  /** メモのみ共有ボタン: pill型 */
   memoButton: {
-    borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 24,
     paddingVertical: 11,
     alignItems: 'center',
+    overflow: 'hidden',
   },
   memoButtonText: {
     fontSize: 13,
@@ -538,7 +800,7 @@ const styles = StyleSheet.create({
   },
   messageItem: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -553,6 +815,93 @@ const styles = StyleSheet.create({
   messageDate: {
     fontSize: 11,
     marginTop: 4,
+  },
+  /** 自分に割り当てられたタスクであることを知らせるバナー（青系） */
+  assignedToMeBanner: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#1565C0',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  assignedToMeBannerText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  /** 別タスク対応中で受諾不可バナー */
+  cannotAcceptBanner: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#FF4D4F',
+    alignItems: 'center',
+  },
+  cannotAcceptBannerText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  /** 施錠確認タスクの鍵名強調表示 */
+  keyLabelHighlight: {
+    fontSize: 18,
+    fontWeight: '800',
+    marginTop: 4,
+    lineHeight: 26,
+  },
+  evaluationItemChipList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  evaluationItemChip: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  evaluationItemChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  evaluationInputCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+  },
+  evaluationInputTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  evaluationScoreRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  evaluationScoreButton: {
+    minWidth: 44,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  evaluationScoreButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  evaluationCommentInput: {
+    minHeight: 72,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlignVertical: 'top',
   },
 });
 

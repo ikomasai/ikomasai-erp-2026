@@ -1,6 +1,6 @@
 /**
  * 定常巡回チェックフォームコンポーネント
- * organizations_events を巡回対象として選び、設問ごとの回答と項目別メモを記録する
+ * 本部評価と同じ企画マスタを巡回対象として選び、設問ごとの回答と項目別メモを記録する
  */
 
 import React, { useMemo, useState } from 'react';
@@ -107,7 +107,7 @@ const normalizeHistoryCheckItems = (value) => {
  * 定常巡回チェックフォームコンポーネント
  * @param {Object} props - コンポーネントプロパティ
  * @param {Object} props.theme - テーマオブジェクト
- * @param {Array} props.patrolLocations - 巡回対象候補配列（organizations_events）
+ * @param {Array} props.patrolLocations - 巡回対象候補配列（events ベース）
  * @param {string} props.selectedPatrolLocationId - 選択中企画ID
  * @param {Function} props.onSelectLocation - 企画選択コールバック
  * @param {string} props.patrolLocationText - 選択中企画表示文字列
@@ -144,6 +144,11 @@ const PatrolCheckForm = ({
 }) => {
   /** 団体名検索キーワード */
   const [organizationSearch, setOrganizationSearch] = useState('');
+  /**
+   * 選択済み状態で「選び直す」を押したときに企画一覧を再表示するフラグ
+   * true のときは selectedLocation があっても候補リストを表示する
+   */
+  const [isReselecting, setIsReselecting] = useState(false);
 
   /** 選択中企画 */
   const selectedLocation = useMemo(() => {
@@ -172,7 +177,7 @@ const PatrolCheckForm = ({
     '企画を選択してください';
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.card, { backgroundColor: theme.surface }]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>定常巡回チェック</Text>
@@ -182,17 +187,37 @@ const PatrolCheckForm = ({
         </View>
         <View style={styles.sectionHeaderActions}>
           <TouchableOpacity
-            style={[styles.refreshButton, { borderColor: theme.border }]}
+            style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
             onPress={onRefresh}
           >
-            <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+            <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
           </TouchableOpacity>
-          {selectedLocation ? (
+          {selectedLocation && !isReselecting ? (
+            <>
+              {/* 選択済み状態から別の企画に選び直すボタン */}
+              <TouchableOpacity
+                style={[styles.reselectButton, { borderColor: theme.primary, backgroundColor: `${theme.primary}12` }]}
+                onPress={() => setIsReselecting(true)}
+              >
+                <Text style={[styles.reselectButtonText, { color: theme.primary }]}>選び直す</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: theme.border }]}
+                onPress={() => {
+                  setIsReselecting(false);
+                  onClearSelectedLocation();
+                }}
+              >
+                <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>キャンセル</Text>
+              </TouchableOpacity>
+            </>
+          ) : selectedLocation && isReselecting ? (
+            /* 選び直し中は「戻る」ボタン（選択をキャンセルして元の状態に戻す） */
             <TouchableOpacity
               style={[styles.cancelButton, { borderColor: theme.border }]}
-              onPress={onClearSelectedLocation}
+              onPress={() => setIsReselecting(false)}
             >
-              <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>キャンセル</Text>
+              <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>戻る</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -201,7 +226,7 @@ const PatrolCheckForm = ({
       <View
         style={[
           styles.locationSummaryCard,
-          { borderColor: theme.border, backgroundColor: theme.background },
+          { borderLeftColor: theme.primary, backgroundColor: `${theme.primary}08` },
         ]}
       >
         <Text style={[styles.locationSummaryLabel, { color: theme.textSecondary }]}>
@@ -212,12 +237,18 @@ const PatrolCheckForm = ({
         </Text>
       </View>
 
-      {selectedLocation ? (
+      {selectedLocation && !isReselecting ? (
         <Text style={[styles.subLabel, { color: theme.textSecondary }]}>
-          選択中の企画だけ表示しています。別の企画を選ぶときはキャンセルしてください。
+          選択中の企画だけ表示しています。別の企画に変更するときは「選び直す」を押してください。
         </Text>
       ) : (
         <>
+          {/* 選び直し中の場合は現在の選択を強調表示 */}
+          {isReselecting && selectedLocation ? (
+            <Text style={[styles.subLabel, { color: theme.primary }]}>
+              ↩ 別の企画を選択すると切り替わります
+            </Text>
+          ) : null}
           <Text style={[styles.label, { color: theme.text }]}>団体名で絞り込み</Text>
           <TextInput
             value={organizationSearch}
@@ -255,7 +286,11 @@ const PatrolCheckForm = ({
                         backgroundColor: isActive ? `${theme.primary}12` : theme.background,
                       },
                     ]}
-                    onPress={() => onSelectLocation(location)}
+                    onPress={() => {
+                      /** 企画を選択したら選び直しモードを終了する */
+                      setIsReselecting(false);
+                      onSelectLocation(location);
+                    }}
                   >
                     <Text
                       style={[
@@ -315,7 +350,7 @@ const PatrolCheckForm = ({
                         styles.answerButton,
                         {
                           borderColor: isActive ? theme.primary : theme.border,
-                          backgroundColor: isActive ? `${theme.primary}18` : theme.surface,
+                          backgroundColor: isActive ? theme.primary : theme.surface,
                         },
                       ]}
                       onPress={() => onChangeCheckAnswer(item.key, option.key, option.label)}
@@ -323,7 +358,7 @@ const PatrolCheckForm = ({
                       <Text
                         style={[
                           styles.answerButtonText,
-                          { color: isActive ? theme.primary : theme.textSecondary },
+                          { color: isActive ? '#FFFFFF' : theme.textSecondary },
                         ]}
                       >
                         {option.label}
@@ -446,11 +481,16 @@ const PatrolCheckForm = ({
 };
 
 const styles = StyleSheet.create({
+  /** 外枠カード: shadow で浮かせる / borderWidth削除 */
   card: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -484,16 +524,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  /** 更新ボタン: primary薄め背景 / borderWidth削除 */
   refreshButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    overflow: 'hidden',
   },
   refreshButtonText: {
     fontSize: 12,
     fontWeight: '600',
   },
+  /** キャンセル/戻るボタン */
   cancelButton: {
     borderWidth: 1,
     borderRadius: 999,
@@ -504,12 +546,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  /** 選び直すボタン: pill型 */
+  reselectButton: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    overflow: 'hidden',
+  },
+  reselectButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  /** 選択中企画サマリーカード: 左アクセントボーダー */
   locationSummaryCard: {
-    borderWidth: 1,
-    borderRadius: 16,
+    borderLeftWidth: 4,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   locationSummaryLabel: {
     fontSize: 11,
@@ -520,9 +579,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 24,
   },
+  /** 検索入力: borderRadius 14→12 */
   searchInput: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     minHeight: 52,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -537,7 +597,7 @@ const styles = StyleSheet.create({
   },
   locationOption: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 3,
@@ -553,12 +613,18 @@ const styles = StyleSheet.create({
   checkItemList: {
     gap: 10,
   },
+  /** チェックカード: borderWidth 1.5 + shadow */
   checkCard: {
-    borderWidth: 1,
-    borderRadius: 16,
+    borderWidth: 1.5,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 12,
     gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   checkCardTitle: {
     fontSize: 14,
@@ -569,10 +635,11 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  /** 回答ボタン: pill型 (borderRadius 12→999) / アクティブ時fill */
   answerButton: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
+    borderWidth: 1.5,
+    borderRadius: 999,
+    paddingHorizontal: 16,
     paddingVertical: 9,
     alignItems: 'center',
   },
@@ -589,18 +656,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlignVertical: 'top',
   },
+  /** 全体メモ入力: borderRadius 14→12 */
   summaryMemoInput: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     minHeight: 88,
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 14,
     textAlignVertical: 'top',
   },
+  /** 登録ボタン: pill型 (borderRadius 14→24) */
   actionButton: {
-    borderRadius: 14,
-    paddingVertical: 13,
+    borderRadius: 24,
+    paddingVertical: 14,
     alignItems: 'center',
   },
   actionButtonText: {
@@ -623,7 +692,7 @@ const styles = StyleSheet.create({
   },
   historyItem: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,

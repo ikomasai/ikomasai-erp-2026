@@ -4,7 +4,7 @@
  * state管理とAPI呼び出しを担当し、子コンポーネントへpropsを渡す
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -40,7 +40,12 @@ import {
 } from '../../../services/supabase/supportTicketService';
 import { KEY_BUILDINGS, KEY_CATALOG } from '../data/keyCatalog';
 import { ensureKeysSeededFromCatalog } from '../../../services/supabase/keyMasterService';
-import { updateExhibitorEventProfile } from '../../../services/supabase/userService';
+import { KEY_LOAN_STATUSES, listKeyLoans } from '../../../services/supabase/keyLoanService';
+import {
+  selectAllUserProfiles,
+  updateExhibitorEventProfile,
+} from '../../../services/supabase/userService';
+import { selectAllOrganizations } from '../../../services/supabase/organizationService';
 import {
   createAttachmentSignedUrl,
   listTicketAttachments,
@@ -66,6 +71,9 @@ const REQUESTED_AT_TIME_PATTERN = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
 /** 希望時刻パターン（YYYY-MM-DD HH:mm） */
 const REQUESTED_AT_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})\s+([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** 鍵貸出状況の確認時に取得する最大件数 */
+const KEY_LOAN_FETCH_LIMIT = KEY_CATALOG.length + 50;
 
 /** タブごとに表示する最新案件の種別 */
 const VISIBLE_TICKET_TYPES_BY_TAB = {
@@ -281,6 +289,19 @@ const Item16Screen = ({ navigation, route }) => {
     userId: user?.id,
     enabled: Boolean(user?.id),
   });
+  /** 通知送信前に現在ブラウザの Push 購読を再同期する */
+  const syncPushSubscriptionBeforeNotify = useCallback(async () => {
+    if (Platform.OS !== 'web' || !user?.id) {
+      return null;
+    }
+
+    try {
+      return await pushNotice.refreshPushSubscription(false);
+    } catch (error) {
+      console.error('Push購読同期エラー:', error);
+      return null;
+    }
+  }, [pushNotice.refreshPushSubscription, user?.id]);
 
   // 画面切替
   const [activeTab, setActiveTab] = useState(
@@ -306,6 +327,20 @@ const Item16Screen = ({ navigation, route }) => {
   const [emergencyDetail, setEmergencyDetail] = useState('');
 
   // 鍵の事前申請
+  /** 鍵事前申請: 借受人候補一覧 */
+  const [keyBorrowerUserOptions, setKeyBorrowerUserOptions] = useState([]);
+  /** 鍵事前申請: 団体候補一覧 */
+  const [keyBorrowerOrganizationOptions, setKeyBorrowerOrganizationOptions] = useState([]);
+  /** 鍵事前申請: 借受人候補読込中 */
+  const [isLoadingKeyBorrowerOptions, setIsLoadingKeyBorrowerOptions] = useState(false);
+  /** 鍵事前申請: 選択中借受団体 */
+  const [selectedKeyBorrowerOrganization, setSelectedKeyBorrowerOrganization] = useState(null);
+  /** 鍵事前申請: 選択中借受人 */
+  const [selectedKeyBorrowerUser, setSelectedKeyBorrowerUser] = useState(null);
+  /** 鍵事前申請: 貸出中の鍵ID一覧 */
+  const [loanedKeyIds, setLoanedKeyIds] = useState([]);
+  /** 鍵事前申請: 貸出中鍵の読込中 */
+  const [isLoadingLoanedKeys, setIsLoadingLoanedKeys] = useState(false);
   const [keyBuilding, setKeyBuilding] = useState(ALL_BUILDINGS_VALUE);
   const [keySelectedId, setKeySelectedId] = useState('');
   const [selectedKeyIds, setSelectedKeyIds] = useState([]);
@@ -338,6 +373,30 @@ const Item16Screen = ({ navigation, route }) => {
     }
     Alert.alert(title, message);
   };
+
+  /**
+   * 貸出中の鍵一覧を読み込む
+   * @returns {Promise<{loanedKeyIds: string[], error: Error|null}>} 読込結果
+   */
+  const loadLoanedKeys = useCallback(async () => {
+    setIsLoadingLoanedKeys(true);
+    const { data, error } = await listKeyLoans({
+      status: KEY_LOAN_STATUSES.LOANED,
+      limit: KEY_LOAN_FETCH_LIMIT,
+    });
+    setIsLoadingLoanedKeys(false);
+
+    if (error) {
+      console.error('鍵事前申請の貸出中鍵取得に失敗:', error);
+      return { loanedKeyIds: [], error };
+    }
+
+    const nextLoanedKeyIds = Array.from(
+      new Set((data || []).map((row) => normalizeText(row?.key_code)).filter(Boolean))
+    );
+    setLoanedKeyIds(nextLoanedKeyIds);
+    return { loanedKeyIds: nextLoanedKeyIds, error: null };
+  }, []);
 
   /**
    * 連絡案件一覧を読み込む
@@ -479,7 +538,7 @@ const Item16Screen = ({ navigation, route }) => {
     }
 
     if (activeTab === SUPPORT_TAB_TYPES.EMERGENCY) {
-      return '本部・警備部に連絡案件を送信しました。';
+      return '企画管理部に連絡案件を送信しました。';
     }
 
     return '本部に連絡案件を送信しました。';
@@ -495,6 +554,8 @@ const Item16Screen = ({ navigation, route }) => {
     }
 
     const executeClose = async () => {
+      await syncPushSubscriptionBeforeNotify();
+
       setIsClosingLatestContact(true);
       const result = await updateTicketStatus({
         ticketId: selectedContact.id,
@@ -577,6 +638,67 @@ const Item16Screen = ({ navigation, route }) => {
     };
     seedKeys();
   }, []);
+
+  /**
+   * 鍵事前申請の借受人候補・団体候補を読み込む
+   * 鍵貸出/返却端末と同じ候補ソースを使い、入力文字の揺れを減らす
+   */
+  useEffect(() => {
+    if (!user?.id) {
+      setKeyBorrowerUserOptions([]);
+      setKeyBorrowerOrganizationOptions([]);
+      setSelectedKeyBorrowerUser(null);
+      setSelectedKeyBorrowerOrganization(null);
+      return;
+    }
+
+    const loadKeyPreapplyOptions = async () => {
+      setIsLoadingKeyBorrowerOptions(true);
+      const [profilesResult, organizationsResult] = await Promise.all([
+        selectAllUserProfiles(),
+        selectAllOrganizations(),
+      ]);
+      setIsLoadingKeyBorrowerOptions(false);
+
+      if (profilesResult.error) {
+        console.error('鍵事前申請の借受人候補取得に失敗:', profilesResult.error);
+      }
+      if (organizationsResult.error) {
+        console.error('鍵事前申請の団体候補取得に失敗:', organizationsResult.error);
+      }
+
+      const nextBorrowerUsers = (profilesResult.data || [])
+        .map((profile) => ({
+          id: profile.user_id || profile.id,
+          name: normalizeText(profile.name) || normalizeText(profile.organization) || profile.user_id || profile.id,
+        }))
+        .filter((option) => normalizeText(option.id) && normalizeText(option.name))
+        .sort((left, right) => left.name.localeCompare(right.name, 'ja'));
+
+      const nextBorrowerOrganizations = (organizationsResult.data || [])
+        .map((organization) => ({
+          id: organization.id,
+          name: normalizeText(organization.name),
+        }))
+        .filter((option) => normalizeText(option.id) && normalizeText(option.name))
+        .sort((left, right) => left.name.localeCompare(right.name, 'ja'));
+
+      setKeyBorrowerUserOptions(nextBorrowerUsers);
+      setKeyBorrowerOrganizationOptions(nextBorrowerOrganizations);
+    };
+
+    loadKeyPreapplyOptions();
+  }, [user?.id]);
+
+  /**
+   * 鍵申請タブ表示時に貸出中の鍵一覧を更新
+   */
+  useEffect(() => {
+    if (activeTab !== SUPPORT_TAB_TYPES.KEY_PREAPPLY) {
+      return;
+    }
+    loadLoanedKeys();
+  }, [activeTab, loadLoanedKeys]);
 
   /**
    * 企画情報をローカルストレージへ保存（ユーザー別）
@@ -833,6 +955,20 @@ const Item16Screen = ({ navigation, route }) => {
   }, [keyBuilding]);
 
   /**
+   * 貸出中鍵の参照用セット
+   */
+  const loanedKeyIdSet = useMemo(() => {
+    return new Set(loanedKeyIds);
+  }, [loanedKeyIds]);
+
+  /**
+   * 現在の棟フィルタで選択可能な鍵候補
+   */
+  const selectableFilteredKeyCatalog = useMemo(() => {
+    return filteredKeyCatalog.filter((item) => !loanedKeyIdSet.has(item.id));
+  }, [filteredKeyCatalog, loanedKeyIdSet]);
+
+  /**
    * 複数追加済みの鍵一覧
    */
   const selectedKeyItems = useMemo(() => {
@@ -840,18 +976,49 @@ const Item16Screen = ({ navigation, route }) => {
     return KEY_CATALOG.filter((item) => selectedSet.has(item.id));
   }, [selectedKeyIds]);
 
+  /** 鍵事前申請で選択中の借受人名 */
+  const keyBorrowerPersonName = normalizeText(selectedKeyBorrowerUser?.name);
+  /** 鍵事前申請で選択中の借受人ユーザーID */
+  const keyBorrowerUserId = normalizeText(selectedKeyBorrowerUser?.id);
+  /** 鍵事前申請で選択中の団体名 */
+  const keyBorrowerOrgName = normalizeText(selectedKeyBorrowerOrganization?.name);
+  /** 鍵事前申請で選択中の団体ID */
+  const keyBorrowerOrgId = normalizeText(selectedKeyBorrowerOrganization?.id);
+  /** 現在選択中の鍵が貸出中かどうか */
+  const isSelectedKeyLoaned = Boolean(keySelectedId && loanedKeyIdSet.has(keySelectedId));
+
   /**
    * 棟切替時に選択中の鍵が候補外になった場合は先頭へ戻す
    */
   useEffect(() => {
-    if (filteredKeyCatalog.length === 0) {
+    if (selectableFilteredKeyCatalog.length === 0) {
       setKeySelectedId('');
       return;
     }
-    if (!filteredKeyCatalog.some((item) => item.id === keySelectedId)) {
-      setKeySelectedId(filteredKeyCatalog[0].id);
+    if (!selectableFilteredKeyCatalog.some((item) => item.id === keySelectedId)) {
+      setKeySelectedId(selectableFilteredKeyCatalog[0].id);
     }
-  }, [filteredKeyCatalog, keySelectedId]);
+  }, [keySelectedId, selectableFilteredKeyCatalog]);
+
+  /**
+   * 鍵候補の選択値を更新
+   * 貸出中の鍵は選択状態として保持しない
+   * @param {string} value - 選択した鍵ID
+   * @returns {void}
+   */
+  const handleChangeKeySelectedId = (value) => {
+    const normalizedValue = normalizeText(value);
+    if (!normalizedValue) {
+      setKeySelectedId('');
+      return;
+    }
+    if (loanedKeyIdSet.has(normalizedValue)) {
+      setKeySelectedId(selectableFilteredKeyCatalog[0]?.id || '');
+      showMessage('選択不可', '貸出中の鍵は事前申請で選択できません。');
+      return;
+    }
+    setKeySelectedId(normalizedValue);
+  };
 
   /**
    * プルダウン選択中の鍵を複数選択リストへ追加
@@ -863,6 +1030,10 @@ const Item16Screen = ({ navigation, route }) => {
     }
     if (selectedKeyIds.includes(keySelectedId)) {
       showMessage('確認', 'その鍵はすでに追加済みです。');
+      return;
+    }
+    if (loanedKeyIdSet.has(keySelectedId)) {
+      showMessage('選択不可', '貸出中の鍵は事前申請で追加できません。');
       return;
     }
     setSelectedKeyIds((prev) => [...prev, keySelectedId]);
@@ -1078,9 +1249,35 @@ const Item16Screen = ({ navigation, route }) => {
    * 仮送信処理
    * @returns {void}
    */
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validateCommonFields()) {
       return;
+    }
+    if (activeTab === SUPPORT_TAB_TYPES.KEY_PREAPPLY) {
+      if (!keyBorrowerOrgId || !keyBorrowerOrgName) {
+        showMessage('入力不足', '借受団体を選択してください。');
+        return;
+      }
+      if (!keyBorrowerUserId || !keyBorrowerPersonName) {
+        showMessage('入力不足', '借受人を選択してください。');
+        return;
+      }
+      if (selectedKeyItems.length === 0) {
+        showMessage('入力不足', '申請する鍵を追加してください。');
+        return;
+      }
+      const { loanedKeyIds: latestLoanedKeyIds, error: loanedKeyError } = await loadLoanedKeys();
+      if (loanedKeyError) {
+        showMessage('鍵情報エラー', '貸出中の鍵確認に失敗しました。時間を空けて再度お試しください。');
+        return;
+      }
+      const latestLoanedKeyIdSet = new Set(latestLoanedKeyIds);
+      const loanedSelectedKeys = selectedKeyItems.filter((item) => latestLoanedKeyIdSet.has(item.id));
+      if (loanedSelectedKeys.length > 0) {
+        const loanedKeyNames = loanedSelectedKeys.map((item) => item.name).join('、');
+        showMessage('選択不可', `貸出中の鍵は申請できません: ${loanedKeyNames}`);
+        return;
+      }
     }
     if (isAttachmentEnabled && attachmentFile && attachmentFile.size > MAX_ATTACHMENT_FILE_BYTES) {
       showMessage(
@@ -1118,6 +1315,10 @@ const Item16Screen = ({ navigation, route }) => {
       payload = {
         type: activeTab,
         keyTargets: selectedKeyItems,
+        borrowerOrgId: keyBorrowerOrgId,
+        borrowerOrgName: keyBorrowerOrgName,
+        borrowerUserId: keyBorrowerUserId,
+        borrowerPersonName: keyBorrowerPersonName,
       };
     } else if (activeTab === SUPPORT_TAB_TYPES.EVENT_STATUS) {
       payload = {
@@ -1151,6 +1352,8 @@ const Item16Screen = ({ navigation, route }) => {
         return;
       }
 
+      await syncPushSubscriptionBeforeNotify();
+
       setIsSubmitting(true);
 
       const commonPayload = {
@@ -1180,6 +1383,10 @@ const Item16Screen = ({ navigation, route }) => {
         result = await exhibitorSupportService.createKeyPreapply({
           ...commonPayload,
           keyTargets: selectedKeyItems,
+          borrowerOrgId: keyBorrowerOrgId,
+          borrowerOrgName: keyBorrowerOrgName,
+          borrowerUserId: keyBorrowerUserId,
+          borrowerPersonName: keyBorrowerPersonName,
         });
       } else if (activeTab === SUPPORT_TAB_TYPES.EVENT_STATUS) {
         result = await exhibitorSupportService.createEventStatusReport({
@@ -1207,6 +1414,8 @@ const Item16Screen = ({ navigation, route }) => {
         setSelectedKeyIds([]);
         setKeyBuilding(ALL_BUILDINGS_VALUE);
         setKeySelectedId('');
+        setSelectedKeyBorrowerOrganization(null);
+        setSelectedKeyBorrowerUser(null);
       }
       if (isAttachmentEnabled) {
         setAttachmentFile(null);
@@ -1313,14 +1522,24 @@ const Item16Screen = ({ navigation, route }) => {
       return (
         <KeyPreApplyForm
           theme={theme}
+          borrowerOrganizationOptions={keyBorrowerOrganizationOptions}
+          onChangeBorrowerOrganization={setSelectedKeyBorrowerOrganization}
+          selectedBorrowerOrganization={selectedKeyBorrowerOrganization}
+          borrowerUserOptions={keyBorrowerUserOptions}
+          onChangeBorrowerUser={setSelectedKeyBorrowerUser}
+          selectedBorrowerUser={selectedKeyBorrowerUser}
+          isLoadingBorrowerOptions={isLoadingKeyBorrowerOptions}
+          loanedKeyIds={loanedKeyIds}
+          isLoadingLoanedKeys={isLoadingLoanedKeys}
           keyBuilding={keyBuilding}
           onChangeKeyBuilding={setKeyBuilding}
           keySelectedId={keySelectedId}
-          onChangeKeySelectedId={setKeySelectedId}
+          onChangeKeySelectedId={handleChangeKeySelectedId}
           onAddSelectedKey={addSelectedKey}
           onRemoveSelectedKey={removeSelectedKey}
           selectedKeyItems={selectedKeyItems}
           filteredKeyCatalog={filteredKeyCatalog}
+          isSelectedKeyLoaned={isSelectedKeyLoaned}
           keyBuildings={KEY_BUILDINGS}
           allBuildingsValue={ALL_BUILDINGS_VALUE}
         />

@@ -2,13 +2,17 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
 
-type TargetType = 'user' | 'roles';
+type TargetType = 'user' | 'roles' | 'organization';
 
 interface DispatchPayload {
   targetType: TargetType;
   userId?: string;
   roleIds?: string[];
   roleNames?: string[];
+  organizationId?: string;
+  organizationIds?: string[];
+  organizationName?: string;
+  organizationNames?: string[];
   title: string;
   body: string;
   metadata?: Record<string, unknown>;
@@ -36,6 +40,12 @@ interface PushMessage {
   body: string;
   url: string;
   notificationId: string;
+  traceId: string;
+  sender: UserLogEntry | null;
+  recipients: UserLogEntry[];
+  recipientCount: number;
+  receiptUrl: string | null;
+  receiptToken: string | null;
   navigateTo: { screen: string; tab: string } | null;
   icon: string;
   badge: string;
@@ -48,41 +58,31 @@ interface PushMessage {
   ttl: number;
 }
 
+interface UserLogEntry {
+  userId: string;
+  name: string | null;
+  organization: string | null;
+}
+
+interface PushDispatchLogContext {
+  traceId: string;
+  notificationId: string;
+  sender: UserLogEntry | null;
+  recipients: UserLogEntry[];
+  metadata: Record<string, unknown>;
+}
+
 const VAPID_PUBLIC_KEY = Deno.env.get('WEB_PUSH_VAPID_PUBLIC_KEY');
 const VAPID_PRIVATE_KEY = Deno.env.get('WEB_PUSH_VAPID_PRIVATE_KEY');
 const VAPID_SUBJECT = Deno.env.get('WEB_PUSH_VAPID_SUBJECT');
 const INTERNAL_NOTIFY_TOKEN = Deno.env.get('INTERNAL_NOTIFY_TOKEN');
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const PUSH_DELIVERY_RECEIPT_URL = SUPABASE_URL
+  ? `${SUPABASE_URL}/functions/v1/push-delivery-receipt`
+  : null;
 const PUSH_NOTIFICATION_ICON = '/icons/icon-192.png';
 const PUSH_NOTIFICATION_BADGE = '/icons/icon-192.png';
 const PUSH_TTL_SECONDS = 60 * 60 * 24;
-const ADMIN_ROLE_NAMES = ['管理者', 'Admin', 'Administrator', '祭実長', '部長', '事務部', '実長', '渉外部'];
-const PATROL_ASSIGN_ROLE_NAMES = [
-  '企画管理部',
-  '本部',
-  'HQ',
-  'Headquarters',
-  '管理者',
-  'Admin',
-  'Administrator',
-];
-const SUPPORT_USER_NOTIFICATION_EVENTS = ['message_created', 'status_changed'];
-const SUPPORT_ROLE_NAME_TARGETS = {
-  hq: ['企画管理部', '本部', 'HQ', 'Headquarters', '管理者', 'Admin', 'Administrator'],
-  accounting: ['会計部', '会計', 'Accounting', '管理者', 'Admin', 'Administrator'],
-  property: ['物品部', '物品', 'Property', '管理者', 'Admin', 'Administrator'],
-  patrol: [
-    '警備部',
-    '巡回',
-    'Patrol',
-    '企画管理部',
-    '本部',
-    'HQ',
-    'Headquarters',
-    '管理者',
-    'Admin',
-    'Administrator',
-  ],
-} as const;
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-notify-token',
@@ -123,17 +123,6 @@ const uniqueValues = (values: string[]) => {
 };
 
 /**
- * 役割名配列が指定候補を含むか判定する
- * @param {string[]} actualRoleNames - ユーザーの役割名一覧
- * @param {string[]} expectedRoleNames - 判定対象の役割名一覧
- * @returns {boolean} 含む場合はtrue
- */
-const hasAnyRoleName = (actualRoleNames: string[], expectedRoleNames: string[]) => {
-  const actualSet = new Set(uniqueValues(actualRoleNames));
-  return uniqueValues(expectedRoleNames).some((roleName) => actualSet.has(roleName));
-};
-
-/**
  * 通知認可エラーの調査に必要なメタデータだけを抽出する
  * @param {Record<string, unknown> | undefined} metadata - 通知メタデータ
  * @returns {Record<string, unknown>} ログ用メタデータ
@@ -151,35 +140,221 @@ const pickAuthorizationMetadata = (metadata?: Record<string, unknown>) => {
 };
 
 /**
- * 通知認可ログを出力する
- * @param {string} label - ログ識別子
- * @param {Record<string, unknown>} detail - ログ詳細
- * @returns {void}
+ * 組織ID一覧を正規化する
+ * @param {DispatchPayload} payload - 送信リクエスト
+ * @returns {string[]} 正規化済み組織ID一覧
  */
-const logAuthorizationDebug = (label: string, detail: Record<string, unknown>) => {
-  console.warn(`[dispatch-notification] ${label}`, detail);
+const getNormalizedOrganizationIds = (payload: DispatchPayload) => {
+  return uniqueValues([
+    ...(payload.organizationIds ?? []),
+    normalizeText(payload.organizationId),
+  ]);
 };
 
 /**
- * 連絡案件に紐づく許可ロール名一覧を返す
- * @param {string} ticketType - 連絡案件種別
- * @param {string} notifyTarget - 通知先種別
- * @returns {string[]} 許可ロール名一覧
+ * 組織名一覧を正規化する
+ * @param {DispatchPayload} payload - 送信リクエスト
+ * @returns {string[]} 正規化済み組織名一覧
  */
-const getRoleNamesForTicket = (ticketType: string, notifyTarget: string) => {
-  if (ticketType === 'start_report' || ticketType === 'end_report' || ticketType === 'emergency') {
-    return uniqueValues([
-      ...SUPPORT_ROLE_NAME_TARGETS.hq,
-      ...SUPPORT_ROLE_NAME_TARGETS.patrol,
-    ]);
+const getNormalizedOrganizationNames = (payload: DispatchPayload) => {
+  return uniqueValues([
+    ...(payload.organizationNames ?? []),
+    normalizeText(payload.organizationName),
+  ]);
+};
+
+/**
+ * IDのみ保持したログ用プロフィールを作る
+ * @param {string[]} userIds - 対象ユーザーID一覧
+ * @returns {UserLogEntry[]} ログ用プロフィール
+ */
+const createFallbackUserLogEntries = (userIds: string[]): UserLogEntry[] => {
+  return uniqueValues(userIds).map((userId) => ({
+    userId,
+    name: null,
+    organization: null,
+  }));
+};
+
+/**
+ * ログ向けのユーザープロフィール一覧を取得する
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
+ * @param {string[]} userIds - 対象ユーザーID一覧
+ * @returns {Promise<UserLogEntry[]>} ログ用プロフィール一覧
+ */
+const selectUserLogEntries = async (
+  supabase: ReturnType<typeof createServiceClient>,
+  userIds: string[]
+): Promise<UserLogEntry[]> => {
+  const normalizedUserIds = uniqueValues(userIds);
+  if (normalizedUserIds.length === 0) {
+    return [];
   }
-  if (notifyTarget === 'accounting') {
-    return SUPPORT_ROLE_NAME_TARGETS.accounting;
+
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('user_id,name,organization')
+    .in('user_id', normalizedUserIds);
+
+  if (error) {
+    console.error('user profile fetch error:', error);
+    return createFallbackUserLogEntries(normalizedUserIds);
   }
-  if (notifyTarget === 'property') {
-    return SUPPORT_ROLE_NAME_TARGETS.property;
+
+  const profileMap = new Map(
+    (data ?? []).map((profile) => [
+      normalizeText(profile.user_id),
+      {
+        name: normalizeText(profile.name) || null,
+        organization: normalizeText(profile.organization) || null,
+      },
+    ])
+  );
+
+  return normalizedUserIds.map((userId) => {
+    const profile = profileMap.get(userId);
+    return {
+      userId,
+      name: profile?.name ?? null,
+      organization: profile?.organization ?? null,
+    };
+  });
+};
+
+/**
+ * ユーザーIDからログ用プロフィールを解決する
+ * @param {Map<string, UserLogEntry>} userEntryMap - ログ用プロフィールMap
+ * @param {string | null} userId - ユーザーID
+ * @returns {UserLogEntry | null} ログ用プロフィール
+ */
+const resolveUserLogEntry = (
+  userEntryMap: Map<string, UserLogEntry>,
+  userId: string | null
+): UserLogEntry | null => {
+  const normalizedUserId = normalizeText(userId);
+  if (!normalizedUserId) {
+    return null;
   }
-  return SUPPORT_ROLE_NAME_TARGETS.hq;
+
+  return (
+    userEntryMap.get(normalizedUserId) ?? {
+      userId: normalizedUserId,
+      name: null,
+      organization: null,
+    }
+  );
+};
+
+/**
+ * 通知ログを info で出力する
+ * @param {string} traceId - 追跡ID
+ * @param {string} label - ログ種別
+ * @param {Record<string, unknown>} detail - ログ詳細
+ * @returns {void}
+ */
+const logDispatchInfo = (traceId: string, label: string, detail: Record<string, unknown>) => {
+  console.info(`[dispatch-notification][${traceId}] ${label}`, detail);
+};
+
+/**
+ * 通知ログを warn で出力する
+ * @param {string} traceId - 追跡ID
+ * @param {string} label - ログ種別
+ * @param {Record<string, unknown>} detail - ログ詳細
+ * @returns {void}
+ */
+const logDispatchWarning = (traceId: string, label: string, detail: Record<string, unknown>) => {
+  console.warn(`[dispatch-notification][${traceId}] ${label}`, detail);
+};
+
+/**
+ * endpoint から Push provider host を取り出す
+ * @param {string} endpoint - Push endpoint
+ * @returns {string} provider host
+ */
+const getEndpointProviderHost = (endpoint: string) => {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return 'unknown';
+  }
+};
+
+/**
+ * 通知保存用メタデータを組み立てる
+ * @param {Record<string, unknown> | undefined} metadata - 元メタデータ
+ * @param {Object} params - 補助情報
+ * @param {string} params.traceId - 送信追跡ID
+ * @param {string} params.receiptToken - 受信確認トークン
+ * @param {string | null} params.senderUserId - 送信者ユーザーID
+ * @param {string[]} params.recipientUserIds - 受信者ユーザーID一覧
+ * @returns {Record<string, unknown>} 保存用メタデータ
+ */
+const buildStoredNotificationMetadata = (
+  metadata: Record<string, unknown> | undefined,
+  {
+    traceId,
+    receiptToken,
+    senderUserId,
+    recipientUserIds,
+  }: {
+    traceId: string;
+    receiptToken: string;
+    senderUserId: string | null;
+    recipientUserIds: string[];
+  }
+) => {
+  return {
+    ...(metadata ?? {}),
+    _push_trace_id: traceId,
+    _push_receipt_token: receiptToken,
+    _push_sender_user_id: senderUserId,
+    _push_recipient_user_ids: recipientUserIds,
+  };
+};
+
+/**
+ * 購読状況をログ用に集計する
+ * @param {{ user_id: string; endpoint: string }[]} subscriptions - Push購読一覧
+ * @param {UserLogEntry[]} recipients - 受信者プロフィール
+ * @returns {{ totalSubscriptions: number; byUser: Array<UserLogEntry & { count: number }>; byProvider: Array<{ provider: string; count: number }> }} 購読集計
+ */
+const summarizeSubscriptionsForLog = (
+  subscriptions: { user_id: string; endpoint: string }[],
+  recipients: UserLogEntry[]
+) => {
+  const recipientMap = new Map(recipients.map((recipient) => [recipient.userId, recipient]));
+  const countsByUser = new Map<string, number>();
+  const countsByProvider = new Map<string, number>();
+
+  subscriptions.forEach((subscription) => {
+    const normalizedUserId = normalizeText(subscription.user_id);
+    const provider = getEndpointProviderHost(subscription.endpoint);
+    countsByUser.set(normalizedUserId, (countsByUser.get(normalizedUserId) ?? 0) + 1);
+    countsByProvider.set(provider, (countsByProvider.get(provider) ?? 0) + 1);
+  });
+
+  const byUser = Array.from(countsByUser.entries())
+    .map(([userId, count]) => {
+      const recipient = recipientMap.get(userId);
+      return {
+        userId,
+        name: recipient?.name ?? null,
+        organization: recipient?.organization ?? null,
+        count,
+      };
+    })
+    .sort((left, right) => right.count - left.count || left.userId.localeCompare(right.userId));
+
+  const byProvider = Array.from(countsByProvider.entries())
+    .map(([provider, count]) => ({ provider, count }))
+    .sort((left, right) => right.count - left.count || left.provider.localeCompare(right.provider));
+
+  return {
+    totalSubscriptions: subscriptions.length,
+    byUser,
+    byProvider,
+  };
 };
 
 /**
@@ -198,6 +373,33 @@ const createServiceClient = () => {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
+    },
+  });
+};
+
+/**
+ * リクエストヘッダー付きの認証用 Supabase クライアントを作成する
+ * service role client と分離し、Edge Functions 推奨の user-auth 検証経路を使う。
+ * @param {Request} request - リクエスト
+ * @returns {import('@supabase/supabase-js').SupabaseClient} 認証用クライアント
+ */
+const createRequestAuthClient = (request: Request) => {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('SUPABASE_URL または SUPABASE_ANON_KEY が未設定です');
+  }
+
+  return createClient(supabaseUrl, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: request.headers.get('authorization') ?? '',
+      },
     },
   });
 };
@@ -222,57 +424,6 @@ const getBearerToken = (request: Request) => {
   return token;
 };
 
-/**
- * 管理者系ロールを持つか判定する
- * targetType=user の通知（個人宛て）はこのロールのみ送信可能
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} userId - ユーザーID
- * @returns {Promise<boolean>} 送信権限がある場合true
- */
-const isAdminSender = async (supabase: ReturnType<typeof createServiceClient>, userId: string) => {
-  const senderRoleNames = await selectUserRoleNames(supabase, userId);
-  return hasAnyRoleName(senderRoleNames, ADMIN_ROLE_NAMES);
-};
-
-/**
- * 指定ユーザーの役割名一覧を取得する
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} userId - ユーザーID
- * @returns {Promise<string[]>} 役割名一覧
- */
-const selectUserRoleNames = async (
-  supabase: ReturnType<typeof createServiceClient>,
-  userId: string
-): Promise<string[]> => {
-  const normalizedUserId = normalizeText(userId);
-  if (!normalizedUserId) {
-    return [];
-  }
-
-  const { data, error } = await supabase
-    .from('user_roles')
-    .select('roles!inner(name,display_name)')
-    .eq('user_id', normalizedUserId);
-
-  if (error) {
-    console.error('user role fetch error:', error);
-    throw new Error('Failed to resolve user roles');
-  }
-
-  const roleNames = (data ?? []).flatMap((row) => {
-    const roles = Array.isArray(row.roles) ? row.roles : row.roles ? [row.roles] : [];
-    return roles.flatMap((role) => [normalizeText(role.name), normalizeText(role.display_name)]);
-  });
-
-  return uniqueValues(roleNames);
-};
-
-/**
- * 連絡案件の権限判定に必要な最小情報を取得する
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} ticketId - 連絡案件ID
- * @returns {Promise<{id: string; created_by: string | null; ticket_type: string | null; notify_target: string | null} | null>} 連絡案件
- */
 /**
  * ロール名一覧からロールID一覧を解決する
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
@@ -308,185 +459,133 @@ const selectRoleIdsByNames = async (
   );
 };
 
-const selectSupportTicketForAuthorization = async (
+/**
+ * 組織名一覧から組織ID一覧を解決する
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
+ * @param {string[] | undefined} organizationNames - 組織名一覧
+ * @returns {Promise<string[]>} 組織ID一覧
+ */
+const selectOrganizationIdsByNames = async (
   supabase: ReturnType<typeof createServiceClient>,
-  ticketId: string
-) => {
-  const normalizedTicketId = normalizeText(ticketId);
-  if (!normalizedTicketId) {
-    return null;
+  organizationNames?: string[]
+): Promise<string[]> => {
+  const normalizedOrganizationNames = uniqueValues(organizationNames ?? []);
+  if (normalizedOrganizationNames.length === 0) {
+    return [];
   }
 
   const { data, error } = await supabase
-    .from('support_tickets')
-    .select('id,created_by,ticket_type,notify_target')
-    .eq('id', normalizedTicketId)
-    .single();
+    .from('organizations')
+    .select('id,name,code');
 
   if (error) {
-    console.error('support ticket auth lookup error:', error);
-    throw new Error('Failed to resolve support ticket');
+    console.error('organization fetch error:', error);
+    throw new Error('Failed to resolve organizations');
   }
 
-  return data;
+  return uniqueValues(
+    (data ?? [])
+      .filter((organization) => {
+        const organizationName = normalizeText(organization.name);
+        const organizationCode = normalizeText(organization.code);
+        return (
+          normalizedOrganizationNames.includes(organizationName) ||
+          normalizedOrganizationNames.includes(organizationCode)
+        );
+      })
+      .map((organization) => organization.id)
+  );
 };
 
 /**
- * 巡回タスクの権限判定に必要な最小情報を取得する
+ * 組織所属でユーザー一覧を絞り込む
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} taskId - 巡回タスクID
- * @returns {Promise<{id: string; assigned_to: string | null} | null>} 巡回タスク
+ * @param {string[]} userIds - 候補ユーザーID一覧
+ * @param {string[]} organizationIds - 対象組織ID一覧
+ * @returns {Promise<string[]>} 組織所属に一致したユーザーID一覧
  */
-const selectPatrolTaskForAuthorization = async (
+const filterUserIdsByOrganizationIds = async (
   supabase: ReturnType<typeof createServiceClient>,
-  taskId: string
+  userIds: string[],
+  organizationIds: string[]
 ) => {
-  const normalizedTaskId = normalizeText(taskId);
-  if (!normalizedTaskId) {
-    return null;
+  const normalizedUserIds = uniqueValues(userIds);
+  const normalizedOrganizationIds = uniqueValues(organizationIds);
+
+  if (normalizedUserIds.length === 0 || normalizedOrganizationIds.length === 0) {
+    return normalizedUserIds;
   }
 
   const { data, error } = await supabase
-    .from('patrol_tasks')
-    .select('id,assigned_to')
-    .eq('id', normalizedTaskId)
-    .single();
+    .from('user_organizations')
+    .select('user_id')
+    .in('user_id', normalizedUserIds)
+    .in('organization_id', normalizedOrganizationIds);
 
   if (error) {
-    console.error('patrol task auth lookup error:', error);
-    throw new Error('Failed to resolve patrol task');
+    console.error('user organization resolve error:', error);
+    throw new Error('Failed to resolve organization users');
   }
 
-  return data;
+  return uniqueValues((data ?? []).map((item) => item.user_id));
 };
 
 /**
- * 連絡案件由来の個人宛て通知を許可できるか判定する
+ * 送信対象の組織ID一覧を解決する
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} senderUserId - 送信者ユーザーID
- * @param {string} targetUserId - 宛先ユーザーID
- * @param {Record<string, unknown> | undefined} metadata - 通知メタデータ
- * @returns {Promise<boolean>} 許可できる場合true
+ * @param {DispatchPayload} payload - 送信リクエスト
+ * @returns {Promise<string[]>} 解決済み組織ID一覧
  */
-const canSendSupportUserNotification = async (
+const resolveOrganizationIdsFromPayload = async (
   supabase: ReturnType<typeof createServiceClient>,
-  senderUserId: string,
-  targetUserId: string,
-  metadata?: Record<string, unknown>
+  payload: DispatchPayload
 ) => {
-  if (normalizeText(metadata?.source) !== 'support_ticket') {
-    return false;
+  /** 組織IDフィルタ一覧 */
+  const organizationIds = getNormalizedOrganizationIds(payload);
+  /** 組織名フィルタ一覧 */
+  const organizationNames = getNormalizedOrganizationNames(payload);
+
+  if (organizationIds.length === 0 && organizationNames.length === 0) {
+    return [];
   }
 
-  const event = normalizeText(metadata?.event);
-  if (!SUPPORT_USER_NOTIFICATION_EVENTS.includes(event)) {
-    return false;
-  }
-
-  const ticket = await selectSupportTicketForAuthorization(
-    supabase,
-    normalizeText(metadata?.ticket_id)
-  );
-  if (!ticket) {
-    return false;
-  }
-
-  const ticketCreatorId = normalizeText(ticket.created_by);
-  const relatedRoleNames = getRoleNamesForTicket(
-    normalizeText(ticket.ticket_type),
-    normalizeText(ticket.notify_target)
-  );
-  const [senderRoleNames, targetRoleNames] = await Promise.all([
-    selectUserRoleNames(supabase, senderUserId),
-    selectUserRoleNames(supabase, targetUserId),
-  ]);
-
-  const senderAllowed =
-    normalizeText(senderUserId) === ticketCreatorId || hasAnyRoleName(senderRoleNames, relatedRoleNames);
-  const targetAllowed =
-    normalizeText(targetUserId) === ticketCreatorId || hasAnyRoleName(targetRoleNames, relatedRoleNames);
-
-  if (!senderAllowed || !targetAllowed) {
-    logAuthorizationDebug('support-user-notification-denied', {
-      senderUserId: normalizeText(senderUserId) || null,
-      targetUserId: normalizeText(targetUserId) || null,
-      ticketCreatorId: ticketCreatorId || null,
-      senderRoleNames,
-      targetRoleNames,
-      relatedRoleNames,
-      metadata: pickAuthorizationMetadata(metadata),
-    });
-  }
-
-  return senderAllowed && targetAllowed;
+  /** 組織名から解決した組織ID一覧 */
+  const resolvedOrganizationIds = await selectOrganizationIdsByNames(supabase, organizationNames);
+  return uniqueValues([...organizationIds, ...resolvedOrganizationIds]);
 };
 
 /**
- * 巡回割当の個人宛て通知を許可できるか判定する
+ * 組織所属ユーザー一覧を取得する
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} senderUserId - 送信者ユーザーID
- * @param {string} targetUserId - 宛先ユーザーID
- * @param {Record<string, unknown> | undefined} metadata - 通知メタデータ
- * @returns {Promise<boolean>} 許可できる場合true
+ * @param {string[]} organizationIds - 対象組織ID一覧
+ * @returns {Promise<string[]>} 組織所属ユーザーID一覧
  */
-const canSendPatrolAssignmentNotification = async (
+const selectUserIdsByOrganizationIds = async (
   supabase: ReturnType<typeof createServiceClient>,
-  senderUserId: string,
-  targetUserId: string,
-  metadata?: Record<string, unknown>
+  organizationIds: string[]
 ) => {
-  if (normalizeText(metadata?.source) !== 'patrol_task' || normalizeText(metadata?.event) !== 'assigned') {
-    return false;
+  const normalizedOrganizationIds = uniqueValues(organizationIds);
+  if (normalizedOrganizationIds.length === 0) {
+    return [];
   }
 
-  const task = await selectPatrolTaskForAuthorization(supabase, normalizeText(metadata?.task_id));
-  if (!task || normalizeText(task.assigned_to) !== normalizeText(targetUserId)) {
-    return false;
+  const { data, error } = await supabase
+    .from('user_organizations')
+    .select('user_id')
+    .in('organization_id', normalizedOrganizationIds);
+
+  if (error) {
+    console.error('organization user resolve error:', error);
+    throw new Error('Failed to resolve organization users');
   }
 
-  const senderRoleNames = await selectUserRoleNames(supabase, senderUserId);
-  const senderAllowed = hasAnyRoleName(senderRoleNames, PATROL_ASSIGN_ROLE_NAMES);
-
-  if (!senderAllowed) {
-    logAuthorizationDebug('patrol-assignment-notification-denied', {
-      senderUserId: normalizeText(senderUserId) || null,
-      targetUserId: normalizeText(targetUserId) || null,
-      senderRoleNames,
-      requiredRoleNames: PATROL_ASSIGN_ROLE_NAMES,
-      metadata: pickAuthorizationMetadata(metadata),
-    });
-  }
-
-  return senderAllowed;
-};
-
-/**
- * 管理部統合システムの業務イベントで許可される個人宛て通知か判定する
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
- * @param {string} senderUserId - 送信者ユーザーID
- * @param {string} targetUserId - 宛先ユーザーID
- * @param {Record<string, unknown> | undefined} metadata - 通知メタデータ
- * @returns {Promise<boolean>} 許可できる場合true
- */
-const isWorkflowUserNotificationAllowed = async (
-  supabase: ReturnType<typeof createServiceClient>,
-  senderUserId: string,
-  targetUserId: string,
-  metadata?: Record<string, unknown>
-) => {
-  if (
-    await canSendSupportUserNotification(supabase, senderUserId, targetUserId, metadata)
-  ) {
-    return true;
-  }
-
-  return canSendPatrolAssignmentNotification(supabase, senderUserId, targetUserId, metadata);
+  return uniqueValues((data ?? []).map((item) => item.user_id));
 };
 
 /**
  * 呼び出し元を認証し送信者情報を返す
- * - targetType=roles: 認証済みユーザー全員に許可（企画者からの連絡案件通知に対応）
- * - targetType=user: 管理者ロール、または管理部統合システムの許可済み業務イベントのみ許可
+ * - targetType=roles / organization: 認証済みユーザー全員に許可
+ * - targetType=user: 宛先 userId が指定されていれば常に個人通知を許可
  * @param {Request} request - リクエスト
  * @param {DispatchPayload} payload - リクエストボディ
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
@@ -513,21 +612,30 @@ const authenticateRequester = async (
     throw new Error('Authorization header or internal token is required');
   }
 
+  /** リクエスト認証用クライアント */
+  const authClient = createRequestAuthClient(request);
   const {
     data: { user },
     error: userError,
-  } = await supabase.auth.getUser(bearerToken);
+  } = await authClient.auth.getUser();
 
   if (userError || !user) {
     console.error('user token validation error:', userError);
     throw new Error('Invalid user token');
   }
 
-  // targetType=roles（ロール宛て）は認証済みユーザー全員に許可（企画者からの通知に対応）
-  // targetType=user（個人宛て）は管理者ロール、または許可済み業務イベントのみ許可
+  const normalizedSenderUserId = normalizeText(user.id);
+
+  if (payload.targetType === 'user') {
+    const normalizedTargetUserId = normalizeText(payload.userId);
+    if (!normalizedTargetUserId) {
+      throw new Error('userId is required');
+    }
+  }
+
   return {
     type: 'user',
-    senderUserId: user.id,
+    senderUserId: normalizedSenderUserId,
   };
 };
 
@@ -546,6 +654,16 @@ const resolveRecipients = async (
       throw new Error('userId is required');
     }
     return [payload.userId];
+  }
+
+  if (payload.targetType === 'organization') {
+    /** 解決済み組織ID一覧 */
+    const organizationIds = await resolveOrganizationIdsFromPayload(supabase, payload);
+    if (organizationIds.length === 0) {
+      throw new Error('organizationId or organizationName is required');
+    }
+
+    return selectUserIdsByOrganizationIds(supabase, organizationIds);
   }
 
   const roleIds = uniqueValues(payload.roleIds ?? []);
@@ -567,8 +685,24 @@ const resolveRecipients = async (
     throw new Error('Failed to resolve role users');
   }
 
-  const recipients = new Set((data ?? []).map((item) => item.user_id));
-  return Array.from(recipients);
+  /** ロール解決で得た候補ユーザーID一覧 */
+  const roleRecipientUserIds = uniqueValues((data ?? []).map((item) => item.user_id));
+  /** 組織フィルタ指定の有無 */
+  const hasOrganizationFilter =
+    getNormalizedOrganizationIds(payload).length > 0 ||
+    getNormalizedOrganizationNames(payload).length > 0;
+  /** 解決済み組織ID一覧 */
+  const organizationIds = await resolveOrganizationIdsFromPayload(supabase, payload);
+
+  if (!hasOrganizationFilter) {
+    return roleRecipientUserIds;
+  }
+
+  if (organizationIds.length === 0) {
+    return [];
+  }
+
+  return filterUserIdsByOrganizationIds(supabase, roleRecipientUserIds, organizationIds);
 };
 
 /**
@@ -648,17 +782,39 @@ const getPushUrgency = (metadata?: Record<string, unknown>): PushUrgency => {
  * @param {string} notificationId - 通知ID
  * @returns {PushMessage} Push通知メッセージ
  */
-const buildPushMessage = (payload: DispatchPayload, notificationId: string): PushMessage => {
+const buildPushMessage = (
+  payload: DispatchPayload,
+  notificationId: string,
+  {
+    traceId,
+    sender,
+    recipients,
+    receiptToken,
+  }: {
+    traceId: string;
+    sender: UserLogEntry | null;
+    recipients: UserLogEntry[];
+    receiptToken: string;
+  }
+): PushMessage => {
   const metadata = payload.metadata ?? {};
   const type = typeof metadata.type === 'string' ? metadata.type : '';
   const isEmergencyLike =
     type === 'emergency' || type === 'damage_report' || type === 'start_report' || type === 'end_report';
+  /** Push payload に載せる受信者要約 */
+  const summarizedRecipients = recipients.slice(0, 10);
 
   return {
     title: payload.title.trim(),
     body: payload.body.trim(),
     url: payload.url || '/notifications',
     notificationId,
+    traceId,
+    sender,
+    recipients: summarizedRecipients,
+    recipientCount: recipients.length,
+    receiptUrl: PUSH_DELIVERY_RECEIPT_URL,
+    receiptToken,
     navigateTo: getNavigateTo(metadata),
     icon: PUSH_NOTIFICATION_ICON,
     badge: PUSH_NOTIFICATION_BADGE,
@@ -685,7 +841,8 @@ const buildPushMessage = (payload: DispatchPayload, notificationId: string): Pus
 const sendWebPush = async (
   supabase: ReturnType<typeof createServiceClient>,
   recipientUserIds: string[],
-  message: PushMessage
+  message: PushMessage,
+  logContext: PushDispatchLogContext
 ): Promise<PushStats> => {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY || !VAPID_SUBJECT) {
     throw new Error('VAPID secrets are not configured');
@@ -697,7 +854,7 @@ const sendWebPush = async (
 
   const { data: subscriptions, error } = await supabase
     .from('push_subscriptions')
-    .select('endpoint, p256dh, auth')
+    .select('user_id, endpoint, p256dh, auth')
     .in('user_id', recipientUserIds);
 
   if (error) {
@@ -706,8 +863,29 @@ const sendWebPush = async (
   }
 
   if (!subscriptions || subscriptions.length === 0) {
+    logDispatchWarning(logContext.traceId, 'push-subscription-missing', {
+      notificationId: logContext.notificationId,
+      sender: logContext.sender,
+      recipients: logContext.recipients,
+      metadata: logContext.metadata,
+      push: {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        removed: 0,
+      },
+    });
     return { attempted: 0, succeeded: 0, failed: 0, removed: 0 };
   }
+
+  const subscriptionSummary = summarizeSubscriptionsForLog(subscriptions, logContext.recipients);
+  logDispatchInfo(logContext.traceId, 'push-subscription-resolved', {
+    notificationId: logContext.notificationId,
+    sender: logContext.sender,
+    recipients: logContext.recipients,
+    metadata: logContext.metadata,
+    subscriptions: subscriptionSummary,
+  });
 
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
@@ -739,13 +917,7 @@ const sendWebPush = async (
         failed += 1;
         const statusCodeRaw = (error as { statusCode?: number | string })?.statusCode;
         const statusCode = Number(statusCodeRaw);
-        const endpointHost = (() => {
-          try {
-            return new URL(subscription.endpoint).host;
-          } catch {
-            return 'unknown';
-          }
-        })();
+        const endpointHost = getEndpointProviderHost(subscription.endpoint);
         const errorMessage =
           typeof (error as { message?: unknown })?.message === 'string'
             ? (error as { message: string }).message
@@ -761,6 +933,9 @@ const sendWebPush = async (
           invalidEndpoints.push(subscription.endpoint);
         }
         console.error('web push send error:', {
+          traceId: logContext.traceId,
+          notificationId: logContext.notificationId,
+          recipientUserId: subscription.user_id,
           endpoint: subscription.endpoint,
           statusCode: Number.isFinite(statusCode) ? statusCode : null,
           error,
@@ -781,16 +956,32 @@ const sendWebPush = async (
       console.error('invalid endpoint delete error:', deleteError);
     } else {
       removed = count ?? uniqueInvalidEndpoints.length;
+      logDispatchWarning(logContext.traceId, 'push-invalid-endpoint-removed', {
+        notificationId: logContext.notificationId,
+        removed,
+        invalidEndpointCount: uniqueInvalidEndpoints.length,
+      });
     }
   }
 
-  return {
+  const result = {
     attempted: subscriptions.length,
     succeeded,
     failed,
     removed,
     ...(sampleFailures.length > 0 ? { sampleFailures } : {}),
   };
+
+  logDispatchInfo(logContext.traceId, 'push-dispatch-finished', {
+    notificationId: logContext.notificationId,
+    sender: logContext.sender,
+    recipients: logContext.recipients,
+    metadata: logContext.metadata,
+    subscriptions: subscriptionSummary,
+    push: result,
+  });
+
+  return result;
 };
 
 /**
@@ -802,8 +993,8 @@ const validatePayload = (payload: DispatchPayload) => {
     throw new Error('Invalid payload');
   }
 
-  if (payload.targetType !== 'user' && payload.targetType !== 'roles') {
-    throw new Error('targetType must be user or roles');
+  if (payload.targetType !== 'user' && payload.targetType !== 'roles' && payload.targetType !== 'organization') {
+    throw new Error('targetType must be user, roles, or organization');
   }
 
   if (!payload.title || typeof payload.title !== 'string') {
@@ -821,9 +1012,19 @@ const validatePayload = (payload: DispatchPayload) => {
   ) {
     throw new Error('roleIds or roleNames is required');
   }
+
+  if (
+    payload.targetType === 'organization' &&
+    getNormalizedOrganizationIds(payload).length === 0 &&
+    getNormalizedOrganizationNames(payload).length === 0
+  ) {
+    throw new Error('organizationId or organizationName is required');
+  }
 };
 
 Deno.serve(async (request) => {
+  const traceId = crypto.randomUUID();
+
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -841,22 +1042,75 @@ Deno.serve(async (request) => {
     validatePayload(payload);
 
     const supabase = createServiceClient();
+    const metadataSummary = pickAuthorizationMetadata(payload.metadata);
+    const requestedSenderUserId = normalizeText(payload.senderUserId) || null;
 
     let authContext: AuthContext;
     try {
       authContext = await authenticateRequester(request, payload, supabase);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unauthorized';
-      if (message === 'Forbidden') {
-        return createJsonResponse({ error: message }, 403);
-      }
+      logDispatchWarning(traceId, 'dispatch-auth-rejected', {
+        requestedSenderUserId,
+        targetType: payload.targetType,
+        roleIds: uniqueValues(payload.roleIds ?? []),
+        roleNames: uniqueValues(payload.roleNames ?? []),
+        organizationIds: getNormalizedOrganizationIds(payload),
+        organizationNames: getNormalizedOrganizationNames(payload),
+        metadata: metadataSummary,
+        error: message,
+      });
       return createJsonResponse({ error: message }, 401);
     }
 
     const recipientUserIds = await resolveRecipients(payload, supabase);
+    const relatedUserEntries = await selectUserLogEntries(supabase, [
+      ...(authContext.senderUserId ? [authContext.senderUserId] : []),
+      ...recipientUserIds,
+    ]);
+    const userEntryMap = new Map(relatedUserEntries.map((entry) => [entry.userId, entry]));
+    const senderEntry = resolveUserLogEntry(userEntryMap, authContext.senderUserId);
+    const recipientEntries = recipientUserIds
+      .map((userId) => resolveUserLogEntry(userEntryMap, userId))
+      .filter((entry): entry is UserLogEntry => Boolean(entry));
     if (recipientUserIds.length === 0) {
+      logDispatchWarning(traceId, 'dispatch-recipient-empty', {
+        senderUserId: authContext.senderUserId,
+        requestedSenderUserId,
+        targetType: payload.targetType,
+        roleIds: uniqueValues(payload.roleIds ?? []),
+        roleNames: uniqueValues(payload.roleNames ?? []),
+        organizationIds: getNormalizedOrganizationIds(payload),
+        organizationNames: getNormalizedOrganizationNames(payload),
+        metadata: metadataSummary,
+      });
       return createJsonResponse({ error: '送信先ユーザーが見つかりません' }, 400);
     }
+
+    logDispatchInfo(traceId, 'dispatch-prepared', {
+      authType: authContext.type,
+      sender: senderEntry,
+      requestedSenderUserId,
+      targetType: payload.targetType,
+      roleIds: uniqueValues(payload.roleIds ?? []),
+      roleNames: uniqueValues(payload.roleNames ?? []),
+      organizationIds: getNormalizedOrganizationIds(payload),
+      organizationNames: getNormalizedOrganizationNames(payload),
+      recipients: recipientEntries,
+      title: payload.title.trim(),
+      metadata: metadataSummary,
+      url: payload.url || '/notifications',
+    });
+
+    /** 受信確認トークン */
+    const receiptToken = crypto.randomUUID();
+    /** 保存用通知メタデータ */
+    const storedMetadata = buildStoredNotificationMetadata(payload.metadata, {
+      traceId,
+      receiptToken,
+      senderUserId: authContext.senderUserId,
+      recipientUserIds,
+    });
 
     const { data: notification, error: notificationError } = await supabase
       .from('notifications')
@@ -865,14 +1119,20 @@ Deno.serve(async (request) => {
           sender_user_id: authContext.senderUserId,
           title: payload.title.trim(),
           body: payload.body.trim(),
-          metadata: payload.metadata ?? {},
+          metadata: storedMetadata,
         },
       ])
       .select('id')
       .single();
 
     if (notificationError || !notification) {
-      console.error('notification insert error:', notificationError);
+      console.error('notification insert error:', {
+        traceId,
+        sender: senderEntry,
+        recipients: recipientEntries,
+        metadata: metadataSummary,
+        error: notificationError,
+      });
       return createJsonResponse({ error: '通知の作成に失敗しました' }, 500);
     }
 
@@ -886,7 +1146,14 @@ Deno.serve(async (request) => {
       .insert(recipients);
 
     if (recipientsError) {
-      console.error('notification recipients insert error:', recipientsError);
+      console.error('notification recipients insert error:', {
+        traceId,
+        notificationId: notification.id,
+        sender: senderEntry,
+        recipients: recipientEntries,
+        metadata: metadataSummary,
+        error: recipientsError,
+      });
       return createJsonResponse({ error: '通知受信者の作成に失敗しました' }, 500);
     }
 
@@ -898,13 +1165,47 @@ Deno.serve(async (request) => {
     };
 
     try {
-      push = await sendWebPush(supabase, recipientUserIds, buildPushMessage(payload, notification.id));
+      push = await sendWebPush(
+        supabase,
+        recipientUserIds,
+        buildPushMessage(payload, notification.id, {
+          traceId,
+          sender: senderEntry,
+          recipients: recipientEntries,
+          receiptToken,
+        }),
+        {
+          traceId,
+          notificationId: notification.id,
+          sender: senderEntry,
+          recipients: recipientEntries,
+          metadata: metadataSummary,
+        }
+      );
     } catch (pushError) {
-      console.error('web push dispatch error:', pushError);
+      console.error('web push dispatch error:', {
+        traceId,
+        notificationId: notification.id,
+        sender: senderEntry,
+        recipients: recipientEntries,
+        metadata: metadataSummary,
+        error: pushError,
+      });
     }
+
+    logDispatchInfo(traceId, 'dispatch-finished', {
+      notificationId: notification.id,
+      sender: senderEntry,
+      recipients: recipientEntries,
+      metadata: metadataSummary,
+      push,
+    });
 
     return createJsonResponse({
       notificationId: notification.id,
+      traceId,
+      sender: senderEntry,
+      recipients: recipientEntries,
       recipientsCount: recipientUserIds.length,
       push,
     });

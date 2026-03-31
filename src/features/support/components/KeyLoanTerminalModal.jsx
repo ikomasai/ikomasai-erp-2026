@@ -502,6 +502,33 @@ const KeyLoanTerminalModal = ({ visible, onClose, theme, user, onLoanCreated, on
   }, [loanedItems, returnNameFilter]);
 
   /**
+   * 現在貸出中の借受人ごとの集計（借受人一覧表示用）
+   * 借受人名をキーにして、対応する貸出IDと団体名・件数をまとめる
+   */
+  const uniqueBorrowers = useMemo(() => {
+    /** 借受人名 → { borrowerName, eventName, count, loanIds } のマップ */
+    const map = new Map();
+    for (const loan of loanedItems) {
+      /** 借受人名（未登録の場合は代替テキスト） */
+      const key = normalizeText(loan.borrower_name) || '(名前未登録)';
+      if (!map.has(key)) {
+        map.set(key, {
+          borrowerName: key,
+          eventName: loan.event_name || '',
+          count: 0,
+          loanIds: [],
+        });
+      }
+      const entry = map.get(key);
+      entry.count += 1;
+      entry.loanIds.push(loan.id);
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      a.borrowerName.localeCompare(b.borrowerName, 'ja')
+    );
+  }, [loanedItems]);
+
+  /**
    * 選択中の団体が過去に借りたことのある鍵一覧（ユニーク・最新順）
    * event_name または metadata.org_id で団体を照合する
    * 3日連続使用など、同じ鍵を再借用するときに役立てる
@@ -581,6 +608,19 @@ const KeyLoanTerminalModal = ({ visible, onClose, theme, user, onLoanCreated, on
     setSelectedLoanIds((prev) =>
       prev.includes(loanId) ? prev.filter((id) => id !== loanId) : [...prev, loanId]
     );
+  };
+
+  /**
+   * 借受人を選択してその人の全貸出IDを選択状態にし返却ステップへ進む
+   * @param {Object} borrower - uniqueBorrowers の1件
+   * @param {string} borrower.borrowerName - 借受人名
+   * @param {string[]} borrower.loanIds - 対応する貸出IDの配列
+   * @returns {void}
+   */
+  const handleSelectBorrowerAndReturn = (borrower) => {
+    setReturnNameFilter(borrower.borrowerName);
+    setSelectedLoanIds(borrower.loanIds);
+    setReturnStep(2);
   };
 
   /**
@@ -1140,10 +1180,46 @@ const KeyLoanTerminalModal = ({ visible, onClose, theme, user, onLoanCreated, on
    */
   const renderReturnNameStep = () => (
     <View style={styles.section}>
-      <Text style={[styles.returnNameTitle, { color: theme.text }]}>返却者の名前を入力してください</Text>
-      <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-        名前や団体名で絞り込めます。空欄のまま次へ進むと全件表示します。
-      </Text>
+      <Text style={[styles.returnNameTitle, { color: theme.text }]}>返却者を選択してください</Text>
+
+      {/* 借受人一覧（貸出中の人をボタン表示） */}
+      {uniqueBorrowers.length > 0 ? (
+        <>
+          <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+            現在貸出中の人を選ぶと、その人の鍵をまとめて選択できます。
+          </Text>
+          <View style={styles.borrowerList}>
+            {uniqueBorrowers.map((borrower) => (
+              <TouchableOpacity
+                key={borrower.borrowerName}
+                style={[styles.borrowerCard, { borderColor: theme.primary, backgroundColor: `${theme.primary}14` }]}
+                onPress={() => handleSelectBorrowerAndReturn(borrower)}
+              >
+                <Text style={[styles.borrowerCardName, { color: theme.text }]}>
+                  {borrower.borrowerName}
+                </Text>
+                {borrower.eventName ? (
+                  <Text style={[styles.borrowerCardMeta, { color: theme.textSecondary }]}>
+                    {borrower.eventName}
+                  </Text>
+                ) : null}
+                <Text style={[styles.borrowerCardCount, { color: theme.primary }]}>
+                  {borrower.count}本 →
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      ) : (
+        <Text style={[styles.helpText, { color: theme.textSecondary }]}>
+          現在貸出中の鍵はありません。
+        </Text>
+      )}
+
+      {/* セパレーター */}
+      <View style={[styles.borrowerDivider, { borderTopColor: theme.border }]}>
+        <Text style={[styles.borrowerDividerText, { color: theme.textSecondary }]}>または名前で検索</Text>
+      </View>
 
       {/* 大きな名前入力欄 */}
       <View style={[styles.returnNameInputBox, { borderColor: theme.primary, backgroundColor: theme.surface }]}>
@@ -1153,7 +1229,6 @@ const KeyLoanTerminalModal = ({ visible, onClose, theme, user, onLoanCreated, on
           onChangeText={setReturnNameFilter}
           placeholder="例：山田、企画管理部..."
           placeholderTextColor={theme.textSecondary}
-          autoFocus
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="next"
@@ -1798,6 +1873,50 @@ const styles = StyleSheet.create({
   historyMeta: {
     fontSize: 11,
     lineHeight: 16,
+  },
+  /** 借受人一覧コンテナ */
+  borrowerList: {
+    gap: 10,
+    marginBottom: 8,
+  },
+  /** 借受人カード（1人分） */
+  borrowerCard: {
+    borderWidth: 2,
+    borderRadius: 12,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  /** 借受人名テキスト */
+  borrowerCardName: {
+    fontSize: 17,
+    fontWeight: '700',
+    flex: 1,
+  },
+  /** 借受人の団体名テキスト */
+  borrowerCardMeta: {
+    fontSize: 12,
+    flex: 1,
+  },
+  /** 借受人の貸出件数テキスト */
+  borrowerCardCount: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  /** 借受人一覧とテキスト検索の区切り線 */
+  borrowerDivider: {
+    borderTopWidth: 1,
+    marginVertical: 16,
+    alignItems: 'center',
+  },
+  /** 区切り線のテキスト */
+  borrowerDividerText: {
+    fontSize: 12,
+    marginTop: -10,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 8,
   },
 });
 

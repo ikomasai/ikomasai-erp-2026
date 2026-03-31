@@ -26,6 +26,7 @@ import {
   getNavigationTargetByType,
   getNavigationButtonLabel,
 } from '../../../shared/utils/notificationNavigation';
+import { canAccessScreen } from '../../../services/supabase/permissionService';
 
 /** 画面名 */
 const SCREEN_NAME = '通知一覧';
@@ -40,7 +41,9 @@ const NotificationListScreen = ({ navigation }) => {
   /** テーマ */
   const { theme } = useTheme();
   /** 認証コンテキスト */
-  const { user } = useAuth();
+  const { user, userInfo } = useAuth();
+  /** ユーザーのロール一覧 */
+  const userRoles = userInfo?.roles || [];
   /** 通知一覧 */
   const [items, setItems] = useState([]);
   /** ローディング状態 */
@@ -153,8 +156,10 @@ const NotificationListScreen = ({ navigation }) => {
     }
     /** 通知タイプ */
     const type = selectedItem.notification?.metadata?.type;
+    /** 通知メタデータ */
+    const metadata = selectedItem.notification?.metadata ?? {};
     /** 遷移先情報 */
-    const target = getNavigationTargetByType(type);
+    const target = getNavigationTargetByType(type, metadata);
     if (!target) {
       return;
     }
@@ -224,8 +229,18 @@ const NotificationListScreen = ({ navigation }) => {
   const detailCreatedAt = selectedItem?.notification?.created_at ?? selectedItem?.createdAt;
   const detailCreatedText = detailCreatedAt ? new Date(detailCreatedAt).toLocaleString() : '';
   const detailType = selectedItem?.notification?.metadata?.type;
-  /** 「確認する」ボタンのラベル（null のとき非表示） */
-  const navigateButtonLabel = getNavigationButtonLabel(detailType);
+  /** 詳細モーダルの通知メタデータ */
+  const detailMetadata = selectedItem?.notification?.metadata ?? {};
+  /** 遷移先情報（権限チェック前） */
+  const detailNavigationTarget = getNavigationTargetByType(detailType, detailMetadata);
+  /** 遷移先画面へのアクセス権があるか（権限がない場合はボタンを非表示） */
+  const canNavigateToTarget = detailNavigationTarget
+    ? canAccessScreen(userRoles, detailNavigationTarget.screen.toLowerCase())
+    : false;
+  /** 「確認する」ボタンのラベル（権限なし・遷移先未定義の場合 null で非表示） */
+  const navigateButtonLabel = canNavigateToTarget
+    ? getNavigationButtonLabel(detailType, detailMetadata)
+    : null;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>

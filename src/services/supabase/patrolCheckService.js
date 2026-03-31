@@ -4,21 +4,19 @@
  */
 
 import { getSupabaseClient } from './client.js';
+import { selectSupportEvents } from './eventService.js';
 
 /** 巡回チェックテーブル名 */
 const PATROL_CHECKS_TABLE = 'patrol_checks';
-/** 巡回対象候補として使うテーブル名 */
-const LOCATIONS_TABLE = 'organizations_events';
 
 /**
  * 文字列を前後空白除去して正規化する
+ * 非文字列（数値・オブジェクト・配列等）が渡された場合も安全に空文字を返す
  * @param {string|null|undefined} value - 対象文字列
  * @returns {string} 正規化後文字列
  */
-const normalizeText = (value) => (value || '').trim();
+const normalizeText = (value) => (typeof value === 'string' ? value : '').trim();
 
-/** 巡回対象候補に使うカラム */
-const LOCATION_COLUMNS = 'id,organization_name,event_name';
 /** 巡回チェック取得カラム */
 const PATROL_CHECK_COLUMNS =
   'id,patrol_user_id,location_id,location_text,check_items,memo,checked_at,created_at';
@@ -40,7 +38,7 @@ const normalizeScore = (value) => {
 
 /**
  * 巡回対象レコードから表示用ラベルを生成する
- * @param {Object} location - organizations_events テーブルのレコード
+ * @param {Object} location - events ベースの企画レコード
  * @returns {string} 表示ラベル
  */
 const toLocationLabel = (location) => {
@@ -122,18 +120,14 @@ const normalizeCheckItems = (rawCheckItems) => {
 
 /**
  * 場所一覧を取得
+ * 本部評価と同じ events ベースの企画一覧を巡回チェック候補として返す
  * @param {Object} params - 取得条件
  * @param {number} [params.limit=200] - 最大件数
  * @returns {Promise<{data: Array, error: Error|null}>} 取得結果
  */
 export const listPatrolLocations = async ({ limit = 200 } = {}) => {
   try {
-    const { data, error } = await getSupabaseClient()
-      .from(LOCATIONS_TABLE)
-      .select(LOCATION_COLUMNS)
-      .order('organization_name', { ascending: true })
-      .order('event_name', { ascending: true })
-      .limit(limit);
+    const { data, error } = await selectSupportEvents({ limit });
 
     if (error) {
       console.error('巡回場所一覧取得エラー:', error);
@@ -300,5 +294,46 @@ export const listUnvisitedLocations = async ({ alertMinutes = 90, limit = 200 } 
   } catch (error) {
     console.error('未巡回一覧作成処理でエラー:', error);
     return { data: [], error };
+  }
+};
+
+/**
+ * 本部向け: 企画ID別の定常巡回チェック履歴を取得
+ * 企画一覧タブで各企画の直近巡回チェックを表示するために使用する
+ * @param {Object} params - 取得条件
+ * @param {number} [params.limit=300] - 最大件数
+ * @returns {Promise<{data: Array, error: Error|null}>} locationId → チェック配列のマップを data に返す
+ */
+export const listPatrolChecksByLocation = async ({ limit = 300 } = {}) => {
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from(PATROL_CHECKS_TABLE)
+      .select(PATROL_CHECK_COLUMNS)
+      .not('location_id', 'is', null)
+      .order('checked_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('企画別巡回チェック取得エラー:', error);
+      return { data: {}, error };
+    }
+
+    /** locationId をキーにしたチェック配列マップ */
+    const locationMap = {};
+    (data || []).forEach((check) => {
+      const key = normalizeText(check.location_id);
+      if (!key) {
+        return;
+      }
+      if (!locationMap[key]) {
+        locationMap[key] = [];
+      }
+      locationMap[key].push(check);
+    });
+
+    return { data: locationMap, error: null };
+  } catch (error) {
+    console.error('企画別巡回チェック取得処理でエラー:', error);
+    return { data: {}, error };
   }
 };
