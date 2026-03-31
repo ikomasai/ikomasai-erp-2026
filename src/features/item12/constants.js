@@ -23,10 +23,10 @@ export const PATROL_TAB_TYPES = {
   DASHBOARD: 'dashboard',
   /** 巡回タスク一覧・詳細 */
   TASKS: 'tasks',
+  /** 評価タスク一覧・詳細 */
+  EVALUATION: 'evaluation',
   /** 巡回チェック記録・未巡回アラート */
   CHECK: 'check',
-  /** 企画一覧（organizations_events） */
-  EVENT_ORGS: 'event_orgs',
 };
 
 /** 下部タブ一覧 */
@@ -42,9 +42,9 @@ export const PATROL_TABS = [
     icon: '📍',
   },
   {
-    key: PATROL_TAB_TYPES.EVENT_ORGS,
-    label: '企画一覧',
-    icon: '🏢',
+    key: PATROL_TAB_TYPES.EVALUATION,
+    label: '評価',
+    icon: '📝',
   },
   {
     key: PATROL_TAB_TYPES.DASHBOARD,
@@ -52,4 +52,3 @@ export const PATROL_TABS = [
     icon: '📊',
   },
 ];
-

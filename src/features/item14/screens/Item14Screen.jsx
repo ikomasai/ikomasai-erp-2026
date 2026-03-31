@@ -14,11 +14,14 @@ import SupportScreenAccessGuard from '../../support/components/SupportScreenAcce
  * item14 画面
  * @param {Object} props - コンポーネント引数
  * @param {Object} props.navigation - React Navigation の navigation
+ * @param {Object} props.route - React Navigation の route（通知タップ時の initialTab を含む）
  * @returns {JSX.Element} item14 画面
  */
-const Item14Screen = ({ navigation }) => {
+const Item14Screen = ({ navigation, route }) => {
   /** ログインユーザー情報 */
   const { userInfo } = useAuth();
+  /** 通知タップ時の初期タブ */
+  const initialTab = route?.params?.initialTab || null;
   /** 会計対応の閲覧権限 */
   const isRoleReady = Array.isArray(userInfo?.roles);
   const canAccess = !isRoleReady || canAccessManagementSupportScreen(userInfo?.roles || [], 'item14');
@@ -35,6 +38,7 @@ const Item14Screen = ({ navigation }) => {
         screenName={SCREEN_NAME}
         screenDescription={SCREEN_DESCRIPTION}
         roleType={SUPPORT_DESK_ROLE_TYPES.ACCOUNTING}
+        initialTab={initialTab}
       />
     </SupportScreenAccessGuard>
   );

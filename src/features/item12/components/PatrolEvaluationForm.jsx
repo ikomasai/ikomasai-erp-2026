@@ -65,7 +65,7 @@ const PatrolEvaluationForm = ({
   onRefresh,
 }) => {
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.card, { backgroundColor: theme.surface }]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>企画評価入力</Text>
@@ -74,17 +74,17 @@ const PatrolEvaluationForm = ({
           </Text>
         </View>
         <TouchableOpacity
-          style={[styles.refreshButton, { borderColor: theme.border }]}
+          style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
           onPress={onRefresh}
         >
-          <Text style={[styles.refreshButtonText, { color: theme.textSecondary }]}>更新</Text>
+          <Text style={[styles.refreshButtonText, { color: theme.primary }]}>更新</Text>
         </TouchableOpacity>
       </View>
 
       <View
         style={[
           styles.targetCard,
-          { borderColor: theme.border, backgroundColor: theme.background },
+          { backgroundColor: theme.background },
         ]}
       >
         <Text style={[styles.targetLabel, { color: theme.textSecondary }]}>評価対象</Text>
@@ -113,7 +113,7 @@ const PatrolEvaluationForm = ({
                 styles.scoreButton,
                 {
                   borderColor: isActive ? theme.primary : theme.border,
-                  backgroundColor: isActive ? `${theme.primary}18` : theme.background,
+                  backgroundColor: isActive ? theme.primary : theme.background,
                 },
               ]}
               onPress={() => onChangeScore(score)}
@@ -121,7 +121,7 @@ const PatrolEvaluationForm = ({
               <Text
                 style={[
                   styles.scoreValue,
-                  { color: isActive ? theme.primary : theme.text },
+                  { color: isActive ? '#FFFFFF' : theme.text },
                 ]}
               >
                 {score}
@@ -129,7 +129,7 @@ const PatrolEvaluationForm = ({
               <Text
                 style={[
                   styles.scoreLabel,
-                  { color: isActive ? theme.primary : theme.textSecondary },
+                  { color: isActive ? '#FFFFFF' : theme.textSecondary },
                 ]}
               >
                 点
@@ -197,7 +197,7 @@ const PatrolEvaluationForm = ({
                 <View
                   style={[
                     styles.scoreMiniBadge,
-                    { borderColor: theme.border, backgroundColor: `${theme.primary}12` },
+                    { backgroundColor: `${theme.primary}15` },
                   ]}
                 >
                   <Text style={[styles.scoreMiniBadgeText, { color: theme.primary }]}>
@@ -220,11 +220,16 @@ const PatrolEvaluationForm = ({
 };
 
 const styles = StyleSheet.create({
+  /** 外枠カード: shadow で浮かせる / borderWidth削除 */
   card: {
-    borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -249,12 +254,17 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 2,
   },
+  /** 評価対象カード: shadow */
   targetCard: {
-    borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   targetLabel: {
     fontSize: 11,
@@ -269,11 +279,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  /** 更新ボタン: primary薄め背景 / borderWidth削除 */
   refreshButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    overflow: 'hidden',
   },
   refreshButtonText: {
     fontSize: 12,
@@ -284,35 +295,39 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  /** スコアボタン: borderRadius 16→12 / アクティブ時fill */
   scoreButton: {
     minWidth: '18%',
     flexGrow: 1,
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     gap: 2,
   },
+  /** スコア数値: fontSize 20→22 */
   scoreValue: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '800',
   },
   scoreLabel: {
     fontSize: 11,
     fontWeight: '700',
   },
+  /** メモ入力: borderRadius 14→12 */
   memoInput: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     minHeight: 110,
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 14,
     textAlignVertical: 'top',
   },
+  /** 登録ボタン: pill型 (borderRadius 14→24) */
   actionButton: {
-    borderRadius: 14,
-    paddingVertical: 13,
+    borderRadius: 24,
+    paddingVertical: 14,
     alignItems: 'center',
   },
   actionButtonText: {
@@ -335,7 +350,7 @@ const styles = StyleSheet.create({
   },
   messageItem: {
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -349,11 +364,12 @@ const styles = StyleSheet.create({
   messageAuthor: {
     fontSize: 11,
   },
+  /** スコアミニバッジ: pill型 / borderWidth削除 */
   scoreMiniBadge: {
-    borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    overflow: 'hidden',
   },
   scoreMiniBadgeText: {
     fontSize: 11,

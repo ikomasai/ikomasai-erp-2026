@@ -6,6 +6,11 @@
 import { Platform } from 'react-native';
 import { getSupabaseClient } from '../../services/supabase/client.js';
 import { registerServiceWorker } from '../utils/serviceWorker.js';
+import {
+  getEdgeFunctionAccessToken,
+  isUnauthorizedFunctionError,
+  recoverEdgeFunctionAccessToken,
+} from './edgeFunctionAuthService.js';
 
 /** 通知許可案内のローカルストレージキー接頭辞 */
 const WEB_PUSH_PROMPT_KEY_PREFIX = 'ikoma_erp_web_push_prompted_';
@@ -90,45 +95,6 @@ const requestNotificationPermissionIfNeeded = async (userId) => {
 };
 
 /**
- * 有効なアクセストークンを取得
- *
- * getSession() のみを使用し、手動 refreshSession() は一切呼ばない。
- * refreshSession() を手動で呼ぶと autoRefreshToken との競合でリフレッシュトークンが
- * 使用済みになり、Supabase JS クライアントが 400 を受けた際に内部でサインアウトを
- * 発火させるため使用しない。
- *
- * @returns {Promise<string|null>}
- */
-const getValidAccessToken = async () => {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.getSession();
-  if (error) {
-    return null;
-  }
-  return data?.session?.access_token ?? null;
-};
-
-/**
- * Edge Functionエラーが401か判定
- * @param {unknown} error
- * @returns {boolean}
- */
-const isUnauthorizedFunctionError = (error) => {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  const maybeError = /** @type {{ context?: { status?: number }; status?: number; message?: string }} */ (error);
-  const status = maybeError.context?.status ?? maybeError.status;
-  if (status === 401) {
-    return true;
-  }
-
-  const message = (maybeError.message ?? '').toLowerCase();
-  return message.includes('401') || message.includes('unauthorized');
-};
-
-/**
  * Functionエラーを整形
  * @param {unknown} error
  * @returns {Promise<Error>}
@@ -160,7 +126,7 @@ const normalizeFunctionError = async (error) => {
  */
 const savePushSubscription = async (subscription) => {
   const serialized = subscription.toJSON();
-  let accessToken = await getValidAccessToken();
+  let accessToken = await getEdgeFunctionAccessToken();
 
   if (!accessToken) {
     throw new Error('ログインセッションが見つかりません。再ログインしてください。');
@@ -179,9 +145,13 @@ const savePushSubscription = async (subscription) => {
   let { error } = await invokeSubscription(accessToken);
 
   if (error && isUnauthorizedFunctionError(error)) {
-    // autoRefreshToken の完了を待ってから再試行する
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    accessToken = await getValidAccessToken();
+    /** セッション再発行結果 */
+    const recoveryResult = await recoverEdgeFunctionAccessToken();
+    if (recoveryResult.error) {
+      throw recoveryResult.error;
+    }
+
+    accessToken = recoveryResult.accessToken;
     if (accessToken) {
       ({ error } = await invokeSubscription(accessToken));
     }
@@ -203,13 +173,21 @@ export const initializeWebPushSubscription = async (userId) => {
       return { enabled: false, error: null };
     }
 
+    registerServiceWorker();
+    const existingServiceWorkerRegistration = await navigator.serviceWorker.ready;
+    const existingSubscription = await existingServiceWorkerRegistration.pushManager.getSubscription();
+
+    if (existingSubscription) {
+      await savePushSubscription(existingSubscription);
+      return { enabled: Notification.permission === 'granted', error: null };
+    }
+
     const hasPermission = await requestNotificationPermissionIfNeeded(userId);
     if (!hasPermission) {
       return { enabled: false, error: null };
     }
 
-    registerServiceWorker();
-    const serviceWorkerRegistration = await navigator.serviceWorker.ready;
+    const serviceWorkerRegistration = existingServiceWorkerRegistration;
 
     let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
     if (!subscription) {

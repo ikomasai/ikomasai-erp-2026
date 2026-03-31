@@ -263,7 +263,7 @@ export const listTicketMessages = async ({ ticketId }) => {
  * @param {string} input.ticketId - 連絡案件ID
  * @param {string} input.authorId - 投稿者ユーザーID
  * @param {string} input.body - 返信本文
- * @returns {Promise<{data: Object|null, error: Error|null}>} 投稿結果
+ * @returns {Promise<{data: Object|null, notificationResult: Object|null, notificationError: Error|null, error: Error|null}>} 投稿結果
  */
 export const createTicketMessage = async (input) => {
   try {
@@ -295,26 +295,32 @@ export const createTicketMessage = async (input) => {
 
     if (error) {
       console.error('返信投稿エラー:', error);
-      return { data: null, error };
+      return { data: null, notificationResult: null, notificationError: null, error };
     }
 
+    /** 通知送信結果 */
+    let notificationResult = null;
+    /** 通知送信エラー */
+    let notificationError = null;
     /** 通知用の連絡案件詳細 */
     const { data: ticket } = await selectTicketById(ticketId);
     if (ticket) {
       /** 通知送信結果 */
-      const { error: notifyError } = await notifySupportTicketMessageCreated({
+      const notifyResult = await notifySupportTicketMessageCreated({
         ticket,
         authorId,
         body,
       });
-      if (notifyError) {
-        console.warn('返信投稿通知の送信に失敗:', notifyError);
+      notificationResult = notifyResult.data || null;
+      notificationError = notifyResult.error || null;
+      if (notificationError) {
+        console.warn('返信投稿通知の送信に失敗:', notificationError);
       }
     }
 
-    return { data, error: null };
+    return { data, notificationResult, notificationError, error: null };
   } catch (error) {
-    return { data: null, error };
+    return { data: null, notificationResult: null, notificationError: null, error };
   }
 };
 
@@ -323,13 +329,16 @@ export const createTicketMessage = async (input) => {
  * @param {Object} input - 更新データ
  * @param {string} input.ticketId - 連絡案件ID
  * @param {string} input.status - 更新後ステータス
+ * @param {string} [input.prevStatus] - 変更前ステータス（通知タイトルの「前→後」表示に使用）
  * @param {string} [input.notifyActorUserId] - 通知上の更新者ユーザーID
- * @returns {Promise<{data: Object|null, error: Error|null}>} 更新結果
+ * @returns {Promise<{data: Object|null, notificationResult: Object|null, notificationError: Error|null, error: Error|null}>} 更新結果
  */
 export const updateTicketStatus = async (input) => {
   try {
     const ticketId = normalizeText(input.ticketId);
     const status = normalizeText(input.status);
+    /** 変更前ステータス（通知タイトル用） */
+    const prevStatus = normalizeText(input.prevStatus) || null;
     const notifyActorUserId = normalizeText(input.notifyActorUserId);
 
     if (!ticketId) {
@@ -348,24 +357,31 @@ export const updateTicketStatus = async (input) => {
 
     if (error) {
       console.error('連絡案件ステータス更新エラー:', error);
-      return { data: null, error };
+      return { data: null, notificationResult: null, notificationError: null, error };
     }
 
+    /** 通知送信結果 */
+    let notificationResult = null;
+    /** 通知送信エラー */
+    let notificationError = null;
     if (notifyActorUserId) {
       /** 状態更新通知結果 */
-      const { error: notifyError } = await notifySupportTicketStatusChanged({
+      const notifyResult = await notifySupportTicketStatusChanged({
         ticket: data,
+        prevStatus,
         nextStatus: status,
         actorUserId: notifyActorUserId,
       });
-      if (notifyError) {
-        console.warn('連絡案件状態更新通知の送信に失敗:', notifyError);
+      notificationResult = notifyResult.data || null;
+      notificationError = notifyResult.error || null;
+      if (notificationError) {
+        console.warn('連絡案件状態更新通知の送信に失敗:', notificationError);
       }
     }
 
-    return { data, error: null };
+    return { data, notificationResult, notificationError, error: null };
   } catch (error) {
-    return { data: null, error };
+    return { data: null, notificationResult: null, notificationError: null, error };
   }
 };
 
