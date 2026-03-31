@@ -66,6 +66,10 @@ const resolveKeyIdMap = async (keyCodes) => {
  * @param {string} input.requestedAtText - 希望時刻
  * @param {string} input.reason - 理由
  * @param {Array} input.keyTargets - 対象鍵配列
+ * @param {string|null} [input.borrowerOrgId] - 借受団体ID
+ * @param {string} [input.borrowerOrgName] - 借受団体名
+ * @param {string|null} [input.borrowerUserId] - 借受人ユーザーID
+ * @param {string} [input.borrowerPersonName] - 借受人氏名
  * @returns {Promise<{data: Array, error: Error|null}>} 登録結果
  */
 export const createKeyReservations = async (input) => {
@@ -77,6 +81,10 @@ export const createKeyReservations = async (input) => {
     const eventLocation = normalizeText(input.eventLocation);
     const requestedAtText = normalizeText(input.requestedAtText);
     const reason = normalizeText(input.reason);
+    const borrowerOrgId = normalizeText(input.borrowerOrgId) || null;
+    const borrowerOrgName = normalizeText(input.borrowerOrgName);
+    const borrowerUserId = normalizeText(input.borrowerUserId) || null;
+    const borrowerPersonName = normalizeText(input.borrowerPersonName);
 
     if (!requestedBy) {
       throw new Error('requestedBy が未指定です');
@@ -121,6 +129,10 @@ export const createKeyReservations = async (input) => {
             key_name: keyName,
             building,
             location,
+            borrower_org_id: borrowerOrgId,
+            borrower_org_name: borrowerOrgName || null,
+            borrower_user_id: borrowerUserId,
+            borrower_person_name: borrowerPersonName || null,
           },
         };
       })

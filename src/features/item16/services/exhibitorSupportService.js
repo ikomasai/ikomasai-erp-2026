@@ -515,8 +515,12 @@ const createKeyPreapply = async (input) => {
       throw new Error('対象の鍵を選択してください');
     }
 
+    /** 借受団体ID */
+    const borrowerOrgId = normalizeText(input.borrowerOrgId) || null;
     /** 借受団体名（任意） */
     const borrowerOrgName = normalizeText(input.borrowerOrgName);
+    /** 借受人ユーザーID */
+    const borrowerUserId = normalizeText(input.borrowerUserId) || null;
     /** 借受人氏名（任意） */
     const borrowerPersonName = normalizeText(input.borrowerPersonName);
 
@@ -548,7 +552,9 @@ const createKeyPreapply = async (input) => {
       metadata: {
         key_target: keySummaryForTitle,
         key_targets: keyTargets,
+        borrower_org_id: borrowerOrgId,
         borrower_org_name: borrowerOrgName || null,
+        borrower_user_id: borrowerUserId,
         borrower_person_name: borrowerPersonName || null,
       },
     };
@@ -560,13 +566,17 @@ const createKeyPreapply = async (input) => {
 
     const reservationResult = await createKeyReservations({
       requestedBy: normalizeText(input.createdBy),
-      orgId: input.orgId || null,
+      orgId: borrowerOrgId || input.orgId || null,
       ticketId: result.data.id,
-      eventName: normalizeText(input.eventName),
+      eventName: borrowerOrgName || normalizeText(input.eventName),
       eventLocation: normalizeText(input.eventLocation),
       requestedAtText: '',
       reason: borrowerLines || '',
       keyTargets,
+      borrowerOrgId,
+      borrowerOrgName,
+      borrowerUserId,
+      borrowerPersonName,
     });
 
     let nextResult = await applyAttachmentAndNotify(result, input);

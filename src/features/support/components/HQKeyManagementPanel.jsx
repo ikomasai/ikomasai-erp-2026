@@ -108,6 +108,15 @@ const getReservationKeyLabel = (reservation) => {
 };
 
 /**
+ * 鍵予約メタデータを安全に取得する
+ * @param {Object} reservation - 鍵予約
+ * @returns {Object} メタデータ
+ */
+const getReservationMetadata = (reservation) => {
+  return reservation?.metadata && typeof reservation.metadata === 'object' ? reservation.metadata : {};
+};
+
+/**
  * 検索バーコンポーネント
  * @param {Object} props
  * @param {string} props.value - 検索文字列
@@ -188,6 +197,33 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
       return;
     }
     Alert.alert(title, message);
+  };
+
+  /**
+   * 鍵予約から貸出登録に使う借受人・団体情報を解決する
+   * 新しい予約データでは metadata の選択値を優先し、旧データでは従来の requested_by / event_name へフォールバックする
+   * @param {Object} reservation - 鍵予約
+   * @returns {Promise<{borrowerName: string|null, organizationName: string|null, organizationId: string|null}>} 解決結果
+   */
+  const resolveReservationLoanPartyInfo = async (reservation) => {
+    const metadata = getReservationMetadata(reservation);
+    let borrowerName = normalizeText(metadata.borrower_person_name) || null;
+    const borrowerUserId = normalizeText(metadata.borrower_user_id) || normalizeText(reservation?.requested_by) || null;
+
+    if (!borrowerName && borrowerUserId) {
+      const { profiles } = await getUserProfilesByIds([borrowerUserId]);
+      borrowerName = profiles?.[0]?.name || null;
+    }
+
+    return {
+      borrowerName,
+      organizationName: normalizeText(metadata.borrower_org_name) || normalizeText(reservation?.event_name) || null,
+      organizationId:
+        normalizeText(metadata.borrower_org_id) ||
+        normalizeText(metadata.org_id) ||
+        normalizeText(reservation?.org_id) ||
+        null,
+    };
   };
 
   /**
@@ -445,12 +481,8 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
       /** keys join を優先し、なければ metadata.key_name、最後に key_code を使用 */
       const keyLabel = getReservationKeyLabel(originalReservation);
 
-      /** 申請者ユーザーIDからプロフィール名を取得して借受人名に設定する */
-      let borrowerName = null;
-      if (originalReservation.requested_by) {
-        const { profiles } = await getUserProfilesByIds([originalReservation.requested_by]);
-        borrowerName = profiles?.[0]?.name || null;
-      }
+      /** 予約時に選択された借受人・団体情報を解決する */
+      const partyInfo = await resolveReservationLoanPartyInfo(originalReservation);
 
       if (keyCode && keyLabel) {
         /** keys JOIN から鍵の場所テキストを取得（どの館のどこの鍵かを貸出記録に保存） */
@@ -458,13 +490,14 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
         const { error: loanError } = await createKeyLoan({
           keyCode,
           keyLabel,
-          eventName: normalizeText(originalReservation.event_name) || null,
+          eventName: partyInfo.organizationName,
           eventLocation: normalizeText(originalReservation.event_location) || null,
-          borrowerName,
+          borrowerName: partyInfo.borrowerName,
           metadata: {
             /** 予約IDをメタデータに保存して予約との紐付けを維持 */
             reservation_id: originalReservation.id,
-            org_id: originalReservation.org_id || null,
+            org_id: partyInfo.organizationId,
+            org_name: partyInfo.organizationName,
             /** 鍵の物理的な場所（何館のどこか）を貸出記録に保存 */
             key_location_text: keyLocationText,
           },
@@ -515,23 +548,20 @@ const HQKeyManagementPanel = ({ theme, user, onLoanCreated, onLoanReturned }) =>
 
       /** 貸出記録を自動作成 */
       if (keyCode && keyLabel) {
-        /** 申請者ユーザーIDからプロフィール名を取得して借受人名に設定する */
-        let borrowerName = null;
-        if (reservation.requested_by) {
-          const { profiles } = await getUserProfilesByIds([reservation.requested_by]);
-          borrowerName = profiles?.[0]?.name || null;
-        }
+        /** 予約時に選択された借受人・団体情報を解決する */
+        const partyInfo = await resolveReservationLoanPartyInfo(reservation);
         /** keys JOIN から鍵の場所テキストを取得（どの館のどこの鍵かを貸出記録に保存） */
         const keyLocationText = normalizeText(reservation.keys?.location_text) || null;
         const { error: loanError } = await createKeyLoan({
           keyCode,
           keyLabel,
-          eventName: normalizeText(reservation.event_name) || null,
+          eventName: partyInfo.organizationName,
           eventLocation: normalizeText(reservation.event_location) || null,
-          borrowerName,
+          borrowerName: partyInfo.borrowerName,
           metadata: {
             reservation_id: reservation.id,
-            org_id: reservation.org_id || null,
+            org_id: partyInfo.organizationId,
+            org_name: partyInfo.organizationName,
             /** 鍵の物理的な場所（何館のどこか）を貸出記録に保存 */
             key_location_text: keyLocationText,
           },

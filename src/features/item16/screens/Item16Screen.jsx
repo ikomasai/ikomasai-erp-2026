@@ -40,7 +40,11 @@ import {
 } from '../../../services/supabase/supportTicketService';
 import { KEY_BUILDINGS, KEY_CATALOG } from '../data/keyCatalog';
 import { ensureKeysSeededFromCatalog } from '../../../services/supabase/keyMasterService';
-import { updateExhibitorEventProfile } from '../../../services/supabase/userService';
+import {
+  selectAllUserProfiles,
+  updateExhibitorEventProfile,
+} from '../../../services/supabase/userService';
+import { selectAllOrganizations } from '../../../services/supabase/organizationService';
 import {
   createAttachmentSignedUrl,
   listTicketAttachments,
@@ -319,10 +323,16 @@ const Item16Screen = ({ navigation, route }) => {
   const [emergencyDetail, setEmergencyDetail] = useState('');
 
   // 鍵の事前申請
-  /** 借受団体名 */
-  const [keyBorrowerOrg, setKeyBorrowerOrg] = useState('');
-  /** 借受人氏名 */
-  const [keyBorrowerName, setKeyBorrowerName] = useState('');
+  /** 鍵事前申請: 借受人候補一覧 */
+  const [keyBorrowerUserOptions, setKeyBorrowerUserOptions] = useState([]);
+  /** 鍵事前申請: 団体候補一覧 */
+  const [keyBorrowerOrganizationOptions, setKeyBorrowerOrganizationOptions] = useState([]);
+  /** 鍵事前申請: 借受人候補読込中 */
+  const [isLoadingKeyBorrowerOptions, setIsLoadingKeyBorrowerOptions] = useState(false);
+  /** 鍵事前申請: 選択中借受団体 */
+  const [selectedKeyBorrowerOrganization, setSelectedKeyBorrowerOrganization] = useState(null);
+  /** 鍵事前申請: 選択中借受人 */
+  const [selectedKeyBorrowerUser, setSelectedKeyBorrowerUser] = useState(null);
   const [keyBuilding, setKeyBuilding] = useState(ALL_BUILDINGS_VALUE);
   const [keySelectedId, setKeySelectedId] = useState('');
   const [selectedKeyIds, setSelectedKeyIds] = useState([]);
@@ -598,6 +608,57 @@ const Item16Screen = ({ navigation, route }) => {
   }, []);
 
   /**
+   * 鍵事前申請の借受人候補・団体候補を読み込む
+   * 鍵貸出/返却端末と同じ候補ソースを使い、入力文字の揺れを減らす
+   */
+  useEffect(() => {
+    if (!user?.id) {
+      setKeyBorrowerUserOptions([]);
+      setKeyBorrowerOrganizationOptions([]);
+      setSelectedKeyBorrowerUser(null);
+      setSelectedKeyBorrowerOrganization(null);
+      return;
+    }
+
+    const loadKeyPreapplyOptions = async () => {
+      setIsLoadingKeyBorrowerOptions(true);
+      const [profilesResult, organizationsResult] = await Promise.all([
+        selectAllUserProfiles(),
+        selectAllOrganizations(),
+      ]);
+      setIsLoadingKeyBorrowerOptions(false);
+
+      if (profilesResult.error) {
+        console.error('鍵事前申請の借受人候補取得に失敗:', profilesResult.error);
+      }
+      if (organizationsResult.error) {
+        console.error('鍵事前申請の団体候補取得に失敗:', organizationsResult.error);
+      }
+
+      const nextBorrowerUsers = (profilesResult.data || [])
+        .map((profile) => ({
+          id: profile.user_id || profile.id,
+          name: normalizeText(profile.name) || normalizeText(profile.organization) || profile.user_id || profile.id,
+        }))
+        .filter((option) => normalizeText(option.id) && normalizeText(option.name))
+        .sort((left, right) => left.name.localeCompare(right.name, 'ja'));
+
+      const nextBorrowerOrganizations = (organizationsResult.data || [])
+        .map((organization) => ({
+          id: organization.id,
+          name: normalizeText(organization.name),
+        }))
+        .filter((option) => normalizeText(option.id) && normalizeText(option.name))
+        .sort((left, right) => left.name.localeCompare(right.name, 'ja'));
+
+      setKeyBorrowerUserOptions(nextBorrowerUsers);
+      setKeyBorrowerOrganizationOptions(nextBorrowerOrganizations);
+    };
+
+    loadKeyPreapplyOptions();
+  }, [user?.id]);
+
+  /**
    * 企画情報をローカルストレージへ保存（ユーザー別）
    */
   useEffect(() => {
@@ -859,6 +920,15 @@ const Item16Screen = ({ navigation, route }) => {
     return KEY_CATALOG.filter((item) => selectedSet.has(item.id));
   }, [selectedKeyIds]);
 
+  /** 鍵事前申請で選択中の借受人名 */
+  const keyBorrowerPersonName = normalizeText(selectedKeyBorrowerUser?.name);
+  /** 鍵事前申請で選択中の借受人ユーザーID */
+  const keyBorrowerUserId = normalizeText(selectedKeyBorrowerUser?.id);
+  /** 鍵事前申請で選択中の団体名 */
+  const keyBorrowerOrgName = normalizeText(selectedKeyBorrowerOrganization?.name);
+  /** 鍵事前申請で選択中の団体ID */
+  const keyBorrowerOrgId = normalizeText(selectedKeyBorrowerOrganization?.id);
+
   /**
    * 棟切替時に選択中の鍵が候補外になった場合は先頭へ戻す
    */
@@ -1102,12 +1172,12 @@ const Item16Screen = ({ navigation, route }) => {
       return;
     }
     if (activeTab === SUPPORT_TAB_TYPES.KEY_PREAPPLY) {
-      if (!keyBorrowerOrg.trim()) {
-        showMessage('入力不足', '借受団体名を入力してください。');
+      if (!keyBorrowerOrgId || !keyBorrowerOrgName) {
+        showMessage('入力不足', '借受団体を選択してください。');
         return;
       }
-      if (!keyBorrowerName.trim()) {
-        showMessage('入力不足', '借受人氏名を入力してください。');
+      if (!keyBorrowerUserId || !keyBorrowerPersonName) {
+        showMessage('入力不足', '借受人を選択してください。');
         return;
       }
     }
@@ -1147,8 +1217,10 @@ const Item16Screen = ({ navigation, route }) => {
       payload = {
         type: activeTab,
         keyTargets: selectedKeyItems,
-        borrowerOrgName: keyBorrowerOrg,
-        borrowerPersonName: keyBorrowerName,
+        borrowerOrgId: keyBorrowerOrgId,
+        borrowerOrgName: keyBorrowerOrgName,
+        borrowerUserId: keyBorrowerUserId,
+        borrowerPersonName: keyBorrowerPersonName,
       };
     } else if (activeTab === SUPPORT_TAB_TYPES.EVENT_STATUS) {
       payload = {
@@ -1213,8 +1285,10 @@ const Item16Screen = ({ navigation, route }) => {
         result = await exhibitorSupportService.createKeyPreapply({
           ...commonPayload,
           keyTargets: selectedKeyItems,
-          borrowerOrgName: keyBorrowerOrg,
-          borrowerPersonName: keyBorrowerName,
+          borrowerOrgId: keyBorrowerOrgId,
+          borrowerOrgName: keyBorrowerOrgName,
+          borrowerUserId: keyBorrowerUserId,
+          borrowerPersonName: keyBorrowerPersonName,
         });
       } else if (activeTab === SUPPORT_TAB_TYPES.EVENT_STATUS) {
         result = await exhibitorSupportService.createEventStatusReport({
@@ -1242,8 +1316,8 @@ const Item16Screen = ({ navigation, route }) => {
         setSelectedKeyIds([]);
         setKeyBuilding(ALL_BUILDINGS_VALUE);
         setKeySelectedId('');
-        setKeyBorrowerOrg('');
-        setKeyBorrowerName('');
+        setSelectedKeyBorrowerOrganization(null);
+        setSelectedKeyBorrowerUser(null);
       }
       if (isAttachmentEnabled) {
         setAttachmentFile(null);
@@ -1350,10 +1424,13 @@ const Item16Screen = ({ navigation, route }) => {
       return (
         <KeyPreApplyForm
           theme={theme}
-          borrowerOrgName={keyBorrowerOrg}
-          onChangeBorrowerOrgName={setKeyBorrowerOrg}
-          borrowerPersonName={keyBorrowerName}
-          onChangeBorrowerPersonName={setKeyBorrowerName}
+          borrowerOrganizationOptions={keyBorrowerOrganizationOptions}
+          onChangeBorrowerOrganization={setSelectedKeyBorrowerOrganization}
+          selectedBorrowerOrganization={selectedKeyBorrowerOrganization}
+          borrowerUserOptions={keyBorrowerUserOptions}
+          onChangeBorrowerUser={setSelectedKeyBorrowerUser}
+          selectedBorrowerUser={selectedKeyBorrowerUser}
+          isLoadingBorrowerOptions={isLoadingKeyBorrowerOptions}
           keyBuilding={keyBuilding}
           onChangeKeyBuilding={setKeyBuilding}
           keySelectedId={keySelectedId}
