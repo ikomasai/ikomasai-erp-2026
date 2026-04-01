@@ -74,20 +74,14 @@ export const canAccessScreen = (userRoles, screenName) => {
 };
 
 /**
- * 管理部統合システム(item12-item15)の役職ベース閲覧判定
+ * 管理部統合システム(item12-item15)の閲覧判定
+ * permissions.screens ベースで統一判定する
  * @param {Array} userRoles - ユーザー役職一覧
  * @param {string} screenName - 画面権限名
  * @returns {boolean} 閲覧可能な場合 true
  */
 export const canAccessManagementSupportScreen = (userRoles, screenName) => {
-  const normalizedScreenName = typeof screenName === 'string' ? screenName.trim() : '';
-  const requiredRoles = MANAGEMENT_SUPPORT_SCREEN_ROLES[normalizedScreenName];
-
-  if (!requiredRoles) {
-    return canAccessScreen(userRoles, normalizedScreenName);
-  }
-
-  return hasAnyRoleName(userRoles, requiredRoles);
+  return canAccessScreen(userRoles, screenName);
 };
 
 /**
