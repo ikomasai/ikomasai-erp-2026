@@ -16,7 +16,7 @@ import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { useTheme } from '../../shared/hooks/useTheme';
-import { canAccessScreen, isAdmin } from '../../services/supabase/permissionService';
+import { canAccessScreen, hasRole, isAdmin } from '../../services/supabase/permissionService';
 
 /**
  * ドロワーアイテムコンポーネント
@@ -94,6 +94,8 @@ const CustomDrawerContent = (props) => {
     }
   };
 
+  const canAccessAdmin = isAdmin(userInfo?.roles || []);
+
   /**
    * 項目ラベルのマッピング
    * 項目番号に対応する表示名を定義
@@ -102,6 +104,7 @@ const CustomDrawerContent = (props) => {
     1: '企画・屋台一覧',
     3: 'チケット配布率',
     4: '落とし物検索',
+    6: '厚生部場所管理',
     9: '実長機能',
     10: '本部',
     11: '当日部員',
@@ -116,6 +119,7 @@ const CustomDrawerContent = (props) => {
    */
   const SCREEN_NAME_MAP = {
     1: '01_Events&Stalls_list',
+    6: 'Item6',
     11: 'JimuShift',
   };
 
@@ -126,6 +130,7 @@ const CustomDrawerContent = (props) => {
   const PERMISSION_NAME_MAP = {
     1: '企画・屋台一覧',
     4: '落とし物検索',
+    6: '厚生部場所管理',
     11: '当日部員',
   };
 
@@ -133,7 +138,10 @@ const CustomDrawerContent = (props) => {
     const itemNumber = index + 1;
     // カスタム権限名があればそれを使用、なければデフォルト
     const permissionName = PERMISSION_NAME_MAP[itemNumber] || `item${itemNumber}`;
-    const isAccessible = canAccessScreen(userInfo?.roles || [], permissionName);
+    const isKoseibuScreen = itemNumber === 6;
+    const isAccessible = isKoseibuScreen
+      ? canAccessAdmin || hasRole(userInfo?.roles || [], '厚生部')
+      : canAccessScreen(userInfo?.roles || [], permissionName);
     // カスタムラベルがあればそれを使用、なければデフォルト
     const label = ITEM_LABELS[itemNumber] || `項目${itemNumber}`;
     // カスタム画面名があればそれを使用、なければデフォルト
@@ -146,8 +154,6 @@ const CustomDrawerContent = (props) => {
       isAccessible,
     };
   }).filter((item) => item.isAccessible);
-
-  const canAccessAdmin = isAdmin(userInfo?.roles || []);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}>
