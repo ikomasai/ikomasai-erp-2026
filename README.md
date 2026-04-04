@@ -119,16 +119,16 @@ cp .env.example .env
 ### 4. アプリを起動
 
 ```bash
+npx expo start -c  # Expo 開発サーバー起動（キャッシュクリア付き）
 npm run web        # Web版 + 地震監視サービス同時起動（推奨）
 npm run web-only   # Web版のみ起動
-npm start          # Expo 開発サーバー起動
 ```
 
 ## スクリプト
 
 | コマンド | 説明 |
 |----------|------|
-| `npm start` | Expo 開発サーバーを起動 |
+| `npx expo start -c` | Expo 開発サーバー起動（キャッシュクリア付き） |
 | `npm run web` | Web版 + 地震監視サービス同時起動 |
 | `npm run web-only` | Web版のみ起動 |
 | `npm run ios` | iOS シミュレータで起動 |

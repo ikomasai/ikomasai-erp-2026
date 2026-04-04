@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 開発コマンド
 
 ```bash
-npm start              # Expo 開発サーバー起動
+npx expo start -c      # Expo 開発サーバー起動（キャッシュクリア付き）
 npm run web            # Web版起動 + 地震モニター同時起動
 npm run web-only       # Web版のみ起動
 npm run ios            # iOS起動

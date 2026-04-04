@@ -21,7 +21,7 @@
 ## 開発コマンド
 
 ```bash
-npm start              # Expo 開発サーバー
+npx expo start -c      # Expo 開発サーバー（キャッシュクリア付き）
 npm run web            # Web版 + 地震モニター同時起動
 npm run web-only       # Web版のみ
 npm run build          # Web版ビルド（expo export --platform web）
