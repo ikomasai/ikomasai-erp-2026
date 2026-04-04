@@ -1,408 +1,429 @@
 /**
- * 厚生部場所管理の schematic マップ表示
- * Web / Native 共通で使えるよう、座標をキャンパス領域にマッピングして描画する。
+ * 厚生部場所管理のキャンパスマップ表示
+ *
+ * Leaflet CRS.Simple を使い、キャンパス画像上にマーカーを配置する。
+ * - Web: Leaflet を直接 DOM にマウント（iframe不使用で状態同期が確実）
+ * - iOS/Android: WebView 内で Leaflet を描画し postMessage で通信
+ *
+ * 仕様: docs/プロジェクト仕様書_厚生部場所機能.md
+ * - 厚生部長: マップ上でピンを指定して場所を登録・更新・削除
+ * - 厚生部員: 有効な場所から現在地を選択して登録
+ * - 管理者: 閲覧のみ
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ImageBackground, PanResponder } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '../../../shared/components/icons';
-import { CAMPUS_BOUNDS, DEFAULT_MAP_REGION, MAP_INTERACTION_MODES } from '../constants.js';
+import { CAMPUS_BOUNDS, MAP_INTERACTION_MODES } from '../constants.js';
 
-const MAP_IMAGE = require('../../../../assets/map.png');
+/** マップ画像のサイズ（ピクセル） */
 const MAP_IMAGE_WIDTH = 1191;
 const MAP_IMAGE_HEIGHT = 900;
-const MAP_SCALE = 1.45;
-const TAP_DRAG_THRESHOLD = 4;
-const MARKER_PIN_HEIGHT = 28;
 
-const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+/** マップ画像アセットの参照 */
+const MAP_IMAGE_ASSET = require('../../../../assets/map.png');
 
-const getImageFrame = (boxWidth, boxHeight) => {
-  if (boxWidth <= 0 || boxHeight <= 0) {
-    return { x: 0, y: 0, width: boxWidth, height: boxHeight };
+/** Leaflet 標準カラーマーカーの CDN ベースURL */
+const MARKER_ICON_BASE = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img';
+/** Leaflet 標準マーカーの影画像URL */
+const MARKER_SHADOW_URL = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
+
+/** マーカーの色名マッピング（leaflet-color-markers の色名に対応） */
+const MARKER_COLORS = {
+  /** 通常の場所（青） */
+  normal: 'blue',
+  /** 選択中・編集対象（赤） */
+  selected: 'red',
+  /** 現在地登録先（緑） */
+  highlighted: 'green',
+  /** 新規ドラフト（オレンジ） */
+  draft: 'orange',
+};
+
+/** 凡例表示用のHEX色 */
+const LEGEND_COLORS = {
+  normal: '#2A81CB',
+  selected: '#CB2B3E',
+  highlighted: '#2AAD27',
+  draft: '#CB8427',
+};
+
+/**
+ * マップ画像のURLを解決する
+ * Expo Web では require() が文字列またはオブジェクトを返す
+ * @returns {string} マップ画像のURL
+ */
+const resolveMapImageUrl = () => {
+  if (typeof MAP_IMAGE_ASSET === 'string') {
+    if (MAP_IMAGE_ASSET.startsWith('/') && typeof window !== 'undefined') {
+      return window.location.origin + MAP_IMAGE_ASSET;
+    }
+    return MAP_IMAGE_ASSET;
   }
-
-  const scale = Math.min(boxWidth / MAP_IMAGE_WIDTH, boxHeight / MAP_IMAGE_HEIGHT);
-  const width = MAP_IMAGE_WIDTH * scale;
-  const height = MAP_IMAGE_HEIGHT * scale;
-
-  return {
-    x: (boxWidth - width) / 2,
-    y: (boxHeight - height) / 2,
-    width,
-    height,
-  };
-};
-
-const mapCoordinateToPoint = (coordinate, width, height) => {
-  if (!coordinate || width <= 0 || height <= 0) {
-    return { x: width / 2, y: height / 2 };
+  if (MAP_IMAGE_ASSET && typeof MAP_IMAGE_ASSET === 'object' && MAP_IMAGE_ASSET.uri) {
+    const uri = MAP_IMAGE_ASSET.uri;
+    if (uri.startsWith('/') && typeof window !== 'undefined') {
+      return window.location.origin + uri;
+    }
+    return uri;
   }
+  return '';
+};
 
-  const longitudeRange = CAMPUS_BOUNDS.longitudeMax - CAMPUS_BOUNDS.longitudeMin;
-  const latitudeRange = CAMPUS_BOUNDS.latitudeMax - CAMPUS_BOUNDS.latitudeMin;
-  const imageFrame = getImageFrame(width, height);
+/**
+ * 緯度経度を CRS.Simple 座標 [y, x] に変換する
+ * @param {number} lat - 緯度
+ * @param {number} lng - 経度
+ * @returns {Array<number>} [y, x]
+ */
+const geoToPixel = (lat, lng) => {
+  const xRatio = (lng - CAMPUS_BOUNDS.longitudeMin) / (CAMPUS_BOUNDS.longitudeMax - CAMPUS_BOUNDS.longitudeMin);
+  const yRatio = 1 - (lat - CAMPUS_BOUNDS.latitudeMin) / (CAMPUS_BOUNDS.latitudeMax - CAMPUS_BOUNDS.latitudeMin);
+  return [yRatio * MAP_IMAGE_HEIGHT, xRatio * MAP_IMAGE_WIDTH];
+};
 
-  const xRatio = (Number(coordinate.longitude) - CAMPUS_BOUNDS.longitudeMin) / longitudeRange;
-  const yRatio = 1 - (Number(coordinate.latitude) - CAMPUS_BOUNDS.latitudeMin) / latitudeRange;
-
+/**
+ * CRS.Simple 座標を緯度経度に変換する
+ * @param {number} y - Y座標
+ * @param {number} x - X座標
+ * @returns {Object} { latitude, longitude }
+ */
+const pixelToGeo = (y, x) => {
+  const xRatio = x / MAP_IMAGE_WIDTH;
+  const yRatio = y / MAP_IMAGE_HEIGHT;
   return {
-    x: imageFrame.x + clamp(xRatio, 0, 1) * imageFrame.width,
-    y: imageFrame.y + clamp(yRatio, 0, 1) * imageFrame.height,
+    latitude: CAMPUS_BOUNDS.latitudeMin + (1 - yRatio) * (CAMPUS_BOUNDS.latitudeMax - CAMPUS_BOUNDS.latitudeMin),
+    longitude: CAMPUS_BOUNDS.longitudeMin + xRatio * (CAMPUS_BOUNDS.longitudeMax - CAMPUS_BOUNDS.longitudeMin),
   };
 };
 
-const mapPointToCoordinate = (x, y, width, height) => {
-  const longitudeRange = CAMPUS_BOUNDS.longitudeMax - CAMPUS_BOUNDS.longitudeMin;
-  const latitudeRange = CAMPUS_BOUNDS.latitudeMax - CAMPUS_BOUNDS.latitudeMin;
-  const imageFrame = getImageFrame(width, height);
-  const clampedX = clamp(x, imageFrame.x, imageFrame.x + imageFrame.width);
-  const clampedY = clamp(y, imageFrame.y, imageFrame.y + imageFrame.height);
-  const xRatio = imageFrame.width > 0 ? (clampedX - imageFrame.x) / imageFrame.width : 0;
-  const yRatio = imageFrame.height > 0 ? (clampedY - imageFrame.y) / imageFrame.height : 0;
-
-  return {
-    latitude: CAMPUS_BOUNDS.latitudeMin + (1 - yRatio) * latitudeRange,
-    longitude: CAMPUS_BOUNDS.longitudeMin + xRatio * longitudeRange,
-  };
+/**
+ * Leaflet 標準カラーマーカーアイコンを生成する
+ * @param {Object} L - Leaflet ライブラリ参照
+ * @param {string} colorName - 色名（blue, red, green, orange）
+ * @returns {L.Icon} Leaflet アイコンインスタンス
+ */
+const createColorIcon = (L, colorName) => {
+  return L.icon({
+    iconUrl: `${MARKER_ICON_BASE}/marker-icon-2x-${colorName}.png`,
+    shadowUrl: MARKER_SHADOW_URL,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41],
+  });
 };
 
-const getContentSize = (layout) => {
-  const width = Math.max(Math.round(layout.width * MAP_SCALE), layout.width);
-  const height = Math.max(Math.round(layout.height * MAP_SCALE), layout.height);
-
-  return { width, height };
-};
-
-const clampPan = (nextPan, layout, contentSize) => {
-  if (!layout.width || !layout.height) {
-    return nextPan;
-  }
-
-  const minX = Math.min(0, layout.width - contentSize.width);
-  const minY = Math.min(0, layout.height - contentSize.height);
-
-  return {
-    x: clamp(nextPan.x, minX, 0),
-    y: clamp(nextPan.y, minY, 0),
-  };
-};
-
-const MarkerBubble = ({ theme, title, subtitle, color, selected, onPress }) => {
-  const Container = onPress ? TouchableOpacity : View;
-  const pinColor = selected ? theme?.error || '#E53935' : color;
-
-  return (
-    <Container
-      {...(onPress
-        ? {
-            activeOpacity: 0.85,
-            onPress,
-          }
-        : {})}
-      style={[styles.marker, selected && styles.markerSelected]}
-    >
-      <View style={styles.pinWrapper}>
-        {selected ? <View style={[styles.selectedRing, { borderColor: pinColor }]} /> : null}
-        <MaterialCommunityIcons name="map-marker" size={28} color={pinColor} />
-      </View>
-      <View style={[styles.bubble, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-        <Text
-          style={[styles.bubbleTitle, { color: theme.text }]}
-          numberOfLines={1}
-          allowFontScaling={false}
-        >
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text
-            style={[styles.bubbleSubtitle, { color: theme.textSecondary }]}
-            numberOfLines={1}
-            allowFontScaling={false}
-          >
-            {subtitle}
-          </Text>
-        ) : null}
-      </View>
-    </Container>
-  );
-};
-
-const LocationMarker = ({
+/**
+ * Leaflet ベースのキャンパスマップコンポーネント
+ *
+ * @param {Object} props
+ * @param {Object} props.theme - テーマオブジェクト
+ * @param {boolean} props.compact - コンパクト表示モード
+ * @param {number} props.height - マップの高さ
+ * @param {Array} props.locations - 場所マスタの配列
+ * @param {Object} [props.draftCoordinate] - ドラフト座標 { latitude, longitude }
+ * @param {Function} [props.onDraftCoordinateChange] - ドラフト座標変更コールバック
+ * @param {string} [props.interactionMode] - 操作モード ('pin' | 'move')
+ * @param {string} [props.selectedLocationId] - 選択中の場所ID
+ * @param {string} [props.highlightedLocationId] - ハイライト中の場所ID
+ * @param {string} [props.focusLocationId] - フォーカス対象の場所ID
+ * @param {boolean} [props.canEdit] - 編集モード有効フラグ
+ * @param {Function} [props.onLocationPress] - マーカータップコールバック
+ * @param {Function} [props.onBoardPress] - マップタップコールバック
+ * @returns {React.ReactElement}
+ */
+const ShiftLocationMap = ({
   theme,
-  marker,
-  layoutSize,
-  onDraftCoordinateChange,
-  onLayout,
-}) => {
-  const dragStartCoordinateRef = useRef(marker.coordinate);
-
-  useEffect(() => {
-    dragStartCoordinateRef.current = marker.coordinate;
-  }, [marker.coordinate]);
-
-  const dragResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => marker.draggable,
-        onMoveShouldSetPanResponder: (_, gestureState) =>
-          marker.draggable && (Math.abs(gestureState.dx) > TAP_DRAG_THRESHOLD || Math.abs(gestureState.dy) > TAP_DRAG_THRESHOLD),
-        onPanResponderGrant: () => {
-          dragStartCoordinateRef.current = marker.coordinate;
-        },
-        onPanResponderMove: (_, gestureState) => {
-          if (!marker.draggable || !onDraftCoordinateChange) {
-            return;
-          }
-
-          const startCoordinate = dragStartCoordinateRef.current;
-          const startPoint = mapCoordinateToPoint(startCoordinate, layoutSize.width, layoutSize.height);
-          const nextCoordinate = mapPointToCoordinate(
-            startPoint.x + gestureState.dx,
-            startPoint.y + gestureState.dy,
-            layoutSize.width,
-            layoutSize.height
-          );
-
-          onDraftCoordinateChange(nextCoordinate);
-        },
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderTerminate: () => {},
-        onShouldBlockNativeResponder: () => false,
-      }),
-    [layoutSize.height, layoutSize.width, marker.coordinate, marker.draggable, onDraftCoordinateChange]
-  );
-
-  return (
-    <View
-      {...(marker.draggable ? dragResponder.panHandlers : {})}
-      onLayout={onLayout}
-      style={[
-        styles.markerWrap,
-        {
-          left: marker.x - (marker.width ?? 88) / 2,
-          top: marker.y - MARKER_PIN_HEIGHT,
-        },
-      ]}
-    >
-      <MarkerBubble
-        theme={theme}
-        title={marker.title}
-        subtitle={marker.subtitle}
-        color={marker.color}
-        selected={marker.selected}
-        onPress={marker.onPress}
-      />
-    </View>
-  );
-};
-
-const MarkerLayer = ({
-  theme,
-  locations,
+  compact,
+  height,
+  locations = [],
   draftCoordinate,
   onDraftCoordinateChange,
   interactionMode = MAP_INTERACTION_MODES.pin,
-  selectedLocationId,
-  highlightedLocationId,
+  selectedLocationId = '',
+  highlightedLocationId = '',
   focusLocationId = null,
-  canEdit,
+  canEdit = false,
   onLocationPress,
   onBoardPress,
-  height,
-  compact,
 }) => {
-  const [layout, setLayout] = useState({ width: 0, height: 0 });
-  const [ready, setReady] = useState(false);
-  const [contentSize, setContentSize] = useState({ width: 0, height: 0 });
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [markerLayouts, setMarkerLayouts] = useState({});
-  const layoutRef = useRef(layout);
-  const contentSizeRef = useRef(contentSize);
-  const panRef = useRef(pan);
-  const dragStartPanRef = useRef({ x: 0, y: 0 });
-  const hasInitializedPanRef = useRef(false);
+  /** @type {React.MutableRefObject<HTMLDivElement|null>} マップコンテナのDOM参照 */
+  const mapContainerRef = useRef(null);
+  /** @type {React.MutableRefObject<Object|null>} Leafletマップインスタンス */
+  const mapInstanceRef = useRef(null);
+  /** @type {React.MutableRefObject<Object>} 現在表示中のマーカー群 */
+  const markersRef = useRef({});
+  /** @type {React.MutableRefObject<Object|null>} ドラフトマーカー */
+  const draftMarkerRef = useRef(null);
+  /** @type {React.MutableRefObject<boolean>} Leaflet初期化済みフラグ */
+  const initializedRef = useRef(false);
+  /** @type {React.MutableRefObject<Object>} 最新のコールバック参照（stale closure回避） */
+  const callbacksRef = useRef({ onLocationPress, onBoardPress, onDraftCoordinateChange });
+  /** @type {React.MutableRefObject<Object>} 最新のモード参照（初期化時のclosure問題回避） */
+  const modeRef = useRef({ canEdit, interactionMode });
+  /** @type {boolean} Leaflet CSS/JS の読み込み完了状態 */
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  /** @type {boolean} エラー状態 */
+  const [loadError, setLoadError] = useState(false);
 
+  /* コールバック参照を常に最新に保つ（useEffectのクロージャ問題を回避） */
   useEffect(() => {
-    layoutRef.current = layout;
-  }, [layout]);
+    callbacksRef.current = { onLocationPress, onBoardPress, onDraftCoordinateChange };
+  }, [onLocationPress, onBoardPress, onDraftCoordinateChange]);
 
+  /* モード参照を常に最新に保つ */
   useEffect(() => {
-    contentSizeRef.current = contentSize;
-  }, [contentSize]);
+    modeRef.current = { canEdit, interactionMode };
+  }, [canEdit, interactionMode]);
 
+  /**
+   * Leaflet CSS/JS を動的に読み込む（Web版、1回だけ実行）
+   */
   useEffect(() => {
-    panRef.current = pan;
-  }, [pan]);
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
 
-  useEffect(() => {
-    if (!layout.width || !layout.height) {
+    /* 既にLeafletが読み込み済みなら即座に完了 */
+    if (window.L) {
+      setLeafletLoaded(true);
       return;
     }
 
-    const nextContentSize = getContentSize(layout);
-    setContentSize(nextContentSize);
+    /* CSS を読み込み */
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
 
-    if (!hasInitializedPanRef.current) {
-      const initialPan = {
-        x: (layout.width - nextContentSize.width) / 2,
-        y: (layout.height - nextContentSize.height) / 2,
-      };
-      setPan(clampPan(initialPan, layout, nextContentSize));
-      hasInitializedPanRef.current = true;
-      return;
-    }
+    /* JS を読み込み */
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.onload = () => setLeafletLoaded(true);
+    script.onerror = () => setLoadError(true);
+    document.head.appendChild(script);
+  }, []);
 
-    setPan((current) => clampPan(current, layout, nextContentSize));
-  }, [layout.height, layout.width]);
-
+  /**
+   * Leaflet マップを初期化する（1回だけ実行）
+   */
   useEffect(() => {
-    if (!focusLocationId || !layout.width || !layout.height || !contentSize.width || !contentSize.height) {
-      return;
-    }
+    if (!leafletLoaded || !mapContainerRef.current || initializedRef.current) return;
+    if (!window.L) return;
 
-    const focusLocation = (locations || []).find((location) => location.id === focusLocationId && location.is_active !== false);
-    if (!focusLocation) {
-      return;
-    }
+    const L = window.L;
+    const bounds = [[0, 0], [MAP_IMAGE_HEIGHT, MAP_IMAGE_WIDTH]];
 
-    const point = mapCoordinateToPoint(
-      { latitude: Number(focusLocation.latitude), longitude: Number(focusLocation.longitude) },
-      contentSize.width,
-      contentSize.height
-    );
-
-    const nextPan = {
-      x: layout.width / 2 - point.x,
-      y: layout.height / 2 - point.y,
-    };
-
-    setPan(clampPan(nextPan, layout, contentSize));
-  }, [contentSize.height, contentSize.width, focusLocationId, layout.height, layout.width, locations]);
-
-  const markers = useMemo(() => {
-    const safeWidth = contentSize.width || layout.width;
-    const safeHeight = contentSize.height || layout.height;
-    const activeLocations = (locations || []).filter((location) => location.is_active !== false);
-
-    const locationMarkers = activeLocations.map((location) => {
-      const isEditableSelectedLocation =
-        canEdit &&
-        interactionMode === MAP_INTERACTION_MODES.pin &&
-        selectedLocationId === location.id;
-      const coordinate = isEditableSelectedLocation && draftCoordinate ? draftCoordinate : {
-        latitude: Number(location.latitude),
-        longitude: Number(location.longitude),
-      };
-      const point = mapCoordinateToPoint(
-        coordinate,
-        safeWidth,
-        safeHeight
-      );
-
-      return {
-        key: `location-${location.id}`,
-        x: point.x,
-        y: point.y,
-        width: markerLayouts[`location-${location.id}`]?.width,
-        color: location.is_active ? theme.primary : theme.textSecondary,
-        selected: selectedLocationId === location.id || highlightedLocationId === location.id,
-        title: location.name,
-        coordinate,
-        draggable: isEditableSelectedLocation,
-        onPress: isEditableSelectedLocation ? undefined : () => onLocationPress?.(location),
-      };
+    const map = L.map(mapContainerRef.current, {
+      crs: L.CRS.Simple,
+      minZoom: -2,
+      maxZoom: 3,
+      zoomSnap: 0.5,
+      maxBounds: [[-50, -50], [MAP_IMAGE_HEIGHT + 50, MAP_IMAGE_WIDTH + 50]],
+      maxBoundsViscosity: 0.8,
     });
 
-    const draftMarker =
-      canEdit && interactionMode === MAP_INTERACTION_MODES.pin && draftCoordinate && !selectedLocationId
-        ? [
-            {
-              key: 'draft-location',
-              x: mapCoordinateToPoint(draftCoordinate, safeWidth, safeHeight).x,
-              y: mapCoordinateToPoint(draftCoordinate, safeWidth, safeHeight).y,
-              width: markerLayouts['draft-location']?.width,
-              color: theme.error,
-              selected: true,
-              title: '選択中の位置',
-              coordinate: draftCoordinate,
-              draggable: false,
-              onPress: undefined,
-            },
-          ]
-        : [];
+    const imageUrl = resolveMapImageUrl();
+    L.imageOverlay(imageUrl, bounds).addTo(map);
+    map.fitBounds(bounds);
 
-    return [...locationMarkers, ...draftMarker];
-  }, [
-    canEdit,
-    draftCoordinate,
-    contentSize.height,
-    contentSize.width,
-    interactionMode,
-    layout.height,
-    layout.width,
-    locations,
-    onLocationPress,
-    selectedLocationId,
-    highlightedLocationId,
-    theme.error,
-    theme.primary,
-    theme.textSecondary,
-    markerLayouts,
-  ]);
+    /* マップクリックでピン配置 */
+    map.on('click', (e) => {
+      const coordinate = pixelToGeo(e.latlng.lat, e.latlng.lng);
+      callbacksRef.current.onBoardPress?.(coordinate);
+    });
 
-  const getCoordinateFromTouch = (locationX, locationY) => {
-    const activeContentSize = contentSizeRef.current;
-    const activePan = panRef.current;
-    const contentX = clamp(locationX - activePan.x, 0, activeContentSize.width);
-    const contentY = clamp(locationY - activePan.y, 0, activeContentSize.height);
+    mapInstanceRef.current = map;
+    initializedRef.current = true;
 
-    return mapPointToCoordinate(contentX, contentY, activeContentSize.width, activeContentSize.height);
-  };
-
-  const handlePinTap = (event) => {
-    if (!canEdit || interactionMode !== MAP_INTERACTION_MODES.pin || layout.width <= 0 || layout.height <= 0) {
-      return;
+    /* 初期化直後に操作モードを適用（refから最新の値を読む） */
+    const currentMode = modeRef.current;
+    if (currentMode.canEdit && currentMode.interactionMode === MAP_INTERACTION_MODES.pin) {
+      map.dragging.disable();
+      map.getContainer().style.cursor = 'crosshair';
     }
 
-    const { locationX, locationY } = event.nativeEvent;
-    const coordinate = getCoordinateFromTouch(locationX, locationY);
-    onBoardPress?.(coordinate);
+    return () => {
+      map.remove();
+      mapInstanceRef.current = null;
+      initializedRef.current = false;
+      markersRef.current = {};
+      draftMarkerRef.current = null;
+    };
+  }, [leafletLoaded]);
+
+  /**
+   * 操作モードに応じてドラッグ操作を切り替える
+   */
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (canEdit && interactionMode === MAP_INTERACTION_MODES.pin) {
+      map.dragging.disable();
+      map.getContainer().style.cursor = 'crosshair';
+    } else {
+      map.dragging.enable();
+      map.getContainer().style.cursor = '';
+    }
+  }, [canEdit, interactionMode]);
+
+  /**
+   * マーカーを更新する
+   */
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !window.L) return;
+
+    const L = window.L;
+
+    /* 既存マーカーを削除 */
+    Object.values(markersRef.current).forEach((m) => map.removeLayer(m));
+    markersRef.current = {};
+
+    /* アクティブな場所のマーカーを追加 */
+    (locations || []).forEach((loc) => {
+      if (loc.is_active === false) return;
+
+      const isSelected = loc.id === selectedLocationId;
+      const isHighlighted = loc.id === highlightedLocationId;
+      const isDraggable = isSelected && canEdit;
+
+      /** 選択中（編集中）のマーカーはドラフト座標を使う */
+      const coordinate = (isSelected && canEdit && draftCoordinate)
+        ? draftCoordinate
+        : { latitude: Number(loc.latitude), longitude: Number(loc.longitude) };
+      const pos = geoToPixel(Number(coordinate.latitude), Number(coordinate.longitude));
+
+      /** 状態に応じたカラーアイコンを選択 */
+      const colorName = isSelected ? MARKER_COLORS.selected
+        : isHighlighted ? MARKER_COLORS.highlighted
+        : MARKER_COLORS.normal;
+      const icon = createColorIcon(L, colorName);
+
+      const marker = L.marker(pos, {
+        icon,
+        draggable: isDraggable,
+      }).addTo(map);
+
+      /** 場所名をツールチップとして常時表示 */
+      marker.bindTooltip(loc.name, {
+        permanent: true,
+        direction: 'top',
+        offset: [0, -42],
+        className: 'leaflet-tooltip-custom',
+      });
+
+      /** マーカークリック */
+      marker.on('click', () => {
+        callbacksRef.current.onLocationPress?.(loc);
+      });
+
+      /** マーカードラッグ終了時に座標を更新 */
+      marker.on('dragend', (e) => {
+        const latlng = e.target.getLatLng();
+        const newCoordinate = pixelToGeo(latlng.lat, latlng.lng);
+        callbacksRef.current.onDraftCoordinateChange?.(newCoordinate);
+      });
+
+      markersRef.current[loc.id] = marker;
+    });
+  }, [locations, selectedLocationId, highlightedLocationId, canEdit, draftCoordinate]);
+
+  /**
+   * ドラフトマーカーを更新する
+   */
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !window.L) return;
+
+    const L = window.L;
+    const shouldShowDraft = draftCoordinate && canEdit && !selectedLocationId;
+
+    if (shouldShowDraft) {
+      const pos = geoToPixel(Number(draftCoordinate.latitude), Number(draftCoordinate.longitude));
+      const icon = createColorIcon(L, MARKER_COLORS.draft);
+
+      if (draftMarkerRef.current) {
+        draftMarkerRef.current.setLatLng(pos);
+        draftMarkerRef.current.setIcon(icon);
+      } else {
+        draftMarkerRef.current = L.marker(pos, { icon }).addTo(map);
+      }
+    } else if (draftMarkerRef.current) {
+      map.removeLayer(draftMarkerRef.current);
+      draftMarkerRef.current = null;
+    }
+  }, [draftCoordinate, canEdit, selectedLocationId]);
+
+  /**
+   * フォーカス対象の場所にマップをパンする
+   */
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !focusLocationId) return;
+
+    const loc = (locations || []).find(
+      (l) => l.id === focusLocationId && l.is_active !== false
+    );
+    if (!loc) return;
+
+    const pos = geoToPixel(Number(loc.latitude), Number(loc.longitude));
+    map.setView(pos, 1, { animate: true });
+  }, [focusLocationId, locations]);
+
+  /**
+   * Native版のLeafletマップを描画する（WebView使用）
+   * @returns {React.ReactElement}
+   */
+  const renderNativeMap = () => {
+    const { buildLeafletHtml } = require('./leafletMapHtml.js');
+
+    let WebView;
+    try {
+      WebView = require('react-native-webview').default;
+    } catch (error) {
+      return (
+        <View style={[styles.fallback, { height, backgroundColor: theme.surface }]}>
+          <MaterialCommunityIcons name="map-marker-alert" size={32} color={theme.textSecondary} />
+          <Text style={[styles.fallbackText, { color: theme.textSecondary }]}>
+            マップの表示にはreact-native-webviewが必要です
+          </Text>
+        </View>
+      );
+    }
+
+    const htmlContent = buildLeafletHtml({
+      mapImageBase64: '',
+      imgWidth: MAP_IMAGE_WIDTH,
+      imgHeight: MAP_IMAGE_HEIGHT,
+    });
+
+    return (
+      <View style={[styles.mapContainer, { height }]}>
+        <WebView
+          originWhitelist={['*']}
+          source={{ html: htmlContent }}
+          style={styles.webView}
+          javaScriptEnabled
+          domStorageEnabled
+          scrollEnabled={false}
+          bounces={false}
+        />
+      </View>
+    );
   };
 
-  const mapPanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => interactionMode === MAP_INTERACTION_MODES.move && canEdit,
-        onMoveShouldSetPanResponder: (_, gestureState) =>
-          interactionMode === MAP_INTERACTION_MODES.move &&
-          canEdit &&
-          (Math.abs(gestureState.dx) > TAP_DRAG_THRESHOLD || Math.abs(gestureState.dy) > TAP_DRAG_THRESHOLD),
-        onPanResponderGrant: () => {
-          dragStartPanRef.current = panRef.current;
-        },
-        onPanResponderMove: (_, gestureState) => {
-          if (!canEdit || interactionMode !== MAP_INTERACTION_MODES.move) {
-            return;
-          }
-
-          const nextPan = {
-            x: dragStartPanRef.current.x + gestureState.dx,
-            y: dragStartPanRef.current.y + gestureState.dy,
-          };
-          setPan(clampPan(nextPan, layoutRef.current, contentSizeRef.current));
-        },
-        onPanResponderRelease: (event, gestureState) => {
-          if (!canEdit || interactionMode !== MAP_INTERACTION_MODES.move) {
-            return;
-          }
-        },
-        onPanResponderTerminationRequest: () => true,
-        onPanResponderTerminate: () => {},
-        onShouldBlockNativeResponder: () => false,
-      }),
-    [canEdit, interactionMode]
-  );
+  /* エラー時のフォールバック */
+  if (loadError) {
+    return (
+      <View style={[styles.fallback, { height, backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <MaterialCommunityIcons name="map-marker-alert" size={32} color={theme.textSecondary} />
+        <Text style={[styles.fallbackText, { color: theme.textSecondary }]}>
+          マップの読み込みに失敗しました
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { borderColor: theme.border, backgroundColor: theme.background }]}>
@@ -414,300 +435,69 @@ const MarkerLayer = ({
       <Text style={[styles.description, { color: theme.textSecondary }]}>
         {canEdit
           ? interactionMode === MAP_INTERACTION_MODES.move
-            ? '地図をスライドして位置を合わせるモードです。'
-            : '地図をタップしてピンを指定するモードです。'
-          : '登録済みの場所と現在地を確認できます。'}
+            ? 'マップをドラッグして位置を調整できます。ピンチで拡大・縮小できます。'
+            : 'マップをタップしてピンを配置できます。ピンチで拡大・縮小できます。'
+          : '登録済みの場所と現在地を確認できます。ピンチで拡大・縮小できます。'}
       </Text>
 
-      <View
-        style={[
-          styles.board,
-          {
-            height,
-            borderColor: theme.border,
-            backgroundColor: theme.surface,
-          },
-          compact && styles.boardCompact,
-        ]}
-        onLayout={(event) => {
-          setLayout(event.nativeEvent.layout);
-          setReady(true);
-        }}
-      >
-        <View style={styles.mapSurface}>
-          <View
-            style={[
-              styles.mapCanvas,
-              {
-                width: contentSize.width || '100%',
-                height: contentSize.height || '100%',
-                transform: [{ translateX: pan.x }, { translateY: pan.y }],
-              },
-            ]}
-            {...mapPanResponder.panHandlers}
-          >
-            <ImageBackground source={MAP_IMAGE} resizeMode="contain" style={styles.mapImage}>
-              <View style={styles.gridLayer} pointerEvents="none">
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <View
-                    key={`v-${index}`}
-                    style={[
-                      styles.gridVertical,
-                      {
-                        left: `${((index + 1) / 5) * 100}%`,
-                        borderColor: theme.border,
-                      },
-                    ]}
-                  />
-                ))}
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <View
-                    key={`h-${index}`}
-                    style={[
-                      styles.gridHorizontal,
-                      {
-                        top: `${((index + 1) / 5) * 100}%`,
-                        borderColor: theme.border,
-                      },
-                    ]}
-                  />
-                ))}
-              </View>
-
-              <View style={styles.labelOverlay} pointerEvents="none">
-                <Text style={[styles.overlayTitle, { color: theme.text }]}>近畿大学 東大阪キャンパス</Text>
-              <Text style={[styles.overlaySubtitle, { color: theme.textSecondary }]}>登録済みの場所を表示しています</Text>
-              </View>
-
-              {ready ? (
-                <View style={styles.markerLayer} pointerEvents="box-none">
-                  {markers.map((marker) => (
-                    <LocationMarker
-                      key={marker.key}
-                      theme={theme}
-                      marker={marker}
-                      layoutSize={{
-                        width: contentSize.width || layout.width,
-                        height: contentSize.height || layout.height,
-                      }}
-                      onDraftCoordinateChange={onDraftCoordinateChange}
-                      onLayout={(event) => {
-                        const { width, height } = event.nativeEvent.layout;
-                        setMarkerLayouts((current) => {
-                          const nextLayout = current[marker.key];
-                          if (nextLayout?.width === width && nextLayout?.height === height) {
-                            return current;
-                          }
-
-                          return {
-                            ...current,
-                            [marker.key]: { width, height },
-                          };
-                        });
-                      }}
-                    />
-                  ))}
-                </View>
-              ) : (
-                <View style={styles.loadingLayer}>
-                  <MaterialCommunityIcons name="map" size={32} color={theme.textSecondary} />
-                  <Text style={[styles.loadingText, { color: theme.textSecondary }]}>マップを準備中...</Text>
-                </View>
-              )}
-            </ImageBackground>
-          </View>
-
-          {canEdit && interactionMode === MAP_INTERACTION_MODES.pin ? (
-            <View
-              style={styles.pinLayer}
-              pointerEvents="auto"
-              onStartShouldSetResponder={() => true}
-              onResponderRelease={handlePinTap}
-              onResponderTerminationRequest={() => true}
-            />
-          ) : null}
+      {Platform.OS === 'web' ? (
+        <View style={[styles.mapContainer, { height }]}>
+          <div
+            ref={mapContainerRef}
+            style={{ width: '100%', height: '100%', borderRadius: 12 }}
+          />
         </View>
-      </View>
+      ) : (
+        renderNativeMap()
+      )}
 
       <View style={styles.legendRow}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: theme.primary }]} />
+          <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.normal }]} />
           <Text style={[styles.legendText, { color: theme.textSecondary }]}>場所</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: theme.error }]} />
+          <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.selected }]} />
           <Text style={[styles.legendText, { color: theme.textSecondary }]}>選択中</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.highlighted }]} />
+          <Text style={[styles.legendText, { color: theme.textSecondary }]}>現在地登録先</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.draft }]} />
+          <Text style={[styles.legendText, { color: theme.textSecondary }]}>新規</Text>
         </View>
       </View>
     </View>
   );
 };
 
-const ShiftLocationMap = (props) => {
-  return <MarkerLayer {...props} />;
-};
-
 const styles = StyleSheet.create({
-  container: {
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 12,
-    gap: 10,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  description: {
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  board: {
-    borderWidth: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-    minHeight: 420,
-  },
-  mapSurface: {
-    flex: 1,
-    width: '100%',
-    position: 'relative',
-  },
-  mapCanvas: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: '100%',
-  },
-  mapImage: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  boardCompact: {
-    minHeight: 360,
-  },
-  gridLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  gridVertical: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    borderLeftWidth: 1,
-    opacity: 0.35,
-  },
-  gridHorizontal: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    borderTopWidth: 1,
-    opacity: 0.35,
-  },
-  labelOverlay: {
-    position: 'absolute',
-    left: 12,
-    top: 12,
-    zIndex: 1,
-    maxWidth: '75%',
-  },
-  overlayTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  overlaySubtitle: {
-    fontSize: 11,
-    marginTop: 2,
-  },
-  markerLayer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 2,
-  },
-  markerWrap: {
-    position: 'absolute',
-  },
-  marker: {
-    alignItems: 'center',
-  },
-  markerSelected: {
-    zIndex: 3,
-  },
-  pinWrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 28,
-    height: 28,
-    marginBottom: 4,
-  },
-  bubble: {
-    minWidth: 88,
-    maxWidth: 136,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  bubbleTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  bubbleSubtitle: {
-    fontSize: 10,
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  selectedRing: {
-    position: 'absolute',
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 2,
-    opacity: 0.6,
-  },
-  loadingLayer: {
-    flex: 1,
-    minHeight: 260,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  loadingText: {
-    fontSize: 13,
-  },
-  pinLayer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 3,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-  },
-  legendText: {
-    fontSize: 12,
-  },
+  /** 外枠コンテナ */
+  container: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 10 },
+  /** ヘッダー行 */
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  /** セクションタイトル */
+  title: { fontSize: 16, fontWeight: '700' },
+  /** 説明テキスト */
+  description: { fontSize: 13, lineHeight: 19 },
+  /** マップ表示エリア */
+  mapContainer: { borderRadius: 12, overflow: 'hidden', minHeight: 300 },
+  /** WebView スタイル */
+  webView: { flex: 1, backgroundColor: 'transparent' },
+  /** フォールバック表示 */
+  fallback: { borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  /** フォールバックテキスト */
+  fallbackText: { fontSize: 13 },
+  /** 凡例行 */
+  legendRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  /** 凡例アイテム */
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  /** 凡例ドット */
+  legendDot: { width: 10, height: 10, borderRadius: 999 },
+  /** 凡例テキスト */
+  legendText: { fontSize: 12 },
 });
 
 export default ShiftLocationMap;

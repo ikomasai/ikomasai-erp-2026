@@ -4,7 +4,7 @@
 
 import { getSupabaseClient } from '../../../services/supabase/client.js';
 import { getUserProfilesByIds } from '../../../shared/services/notificationService.js';
-import { LOCATION_ACTION_TYPES } from '../constants.js';
+import { LOCATION_ACTION_TYPES, MEMBER_STATUS } from '../constants.js';
 
 const uniqueStrings = (values = []) => {
   return Array.from(
@@ -66,7 +66,6 @@ const insertShiftLocationLog = async ({
       action_type: actionType,
       operated_by: operatedBy,
       memo,
-      created_at: new Date().toISOString(),
     })
     .select()
     .single();
@@ -185,7 +184,7 @@ export const selectKoseibuShiftOverview = async ({ includeLogs = true } = {}) =>
     if (profileIds.length > 0) {
       const { profiles, error: profileError } = await getUserProfilesByIds(profileIds);
       if (profileError) {
-        console.warn('厚生部場所管理: プロフィール取得に失敗しました', profileError);
+        /* プロフィール取得失敗は名前未表示になるが、操作には影響しない */
       } else {
         profileMap = buildProfileMap(profiles);
       }
@@ -207,10 +206,14 @@ export const selectKoseibuShiftOverview = async ({ includeLogs = true } = {}) =>
   }
 };
 
+/**
+ * 厚生部シフト場所を新規登録する
+ * @param {Object} payload - 登録データ
+ * @returns {Promise<{location: Object|null, log: Object|null, error: Object|null}>}
+ */
 export const insertKoseibuShiftLocation = async (payload) => {
   try {
     const supabase = getSupabaseClient();
-    const timestamp = new Date().toISOString();
     const { data, error } = await supabase
       .from('koseibu_shift_locations')
       .insert({
@@ -221,8 +224,6 @@ export const insertKoseibuShiftLocation = async (payload) => {
         display_order: payload.displayOrder ?? 0,
         is_active: true,
         created_by: payload.createdBy,
-        created_at: timestamp,
-        updated_at: timestamp,
       })
       .select()
       .single();
@@ -231,26 +232,30 @@ export const insertKoseibuShiftLocation = async (payload) => {
       return { location: null, log: null, error };
     }
 
-    const { log, error: logError } = await insertShiftLocationLog({
+    const { log } = await insertShiftLocationLog({
       locationId: data.id,
       locationNameSnapshot: data.name,
       latitudeSnapshot: data.latitude,
       longitudeSnapshot: data.longitude,
       actionType: LOCATION_ACTION_TYPES.create,
       operatedBy: payload.createdBy,
-      memo: payload.description ?? null,
+      memo: `場所「${data.name}」を新規登録`,
     });
 
-    if (logError) {
-      return { location: data, log: null, error: logError };
-    }
-
-    return { location: data, log, error: null };
+    /* ログ書き込み失敗は警告に留め、操作自体は成功として返す */
+    return { location: data, log: log ?? null, error: null };
   } catch (error) {
     return { location: null, log: null, error };
   }
 };
 
+/**
+ * 厚生部シフト場所を更新する
+ * @param {string} locationId - 更新対象の場所ID
+ * @param {Object} payload - 更新データ
+ * @param {string} operatedBy - 操作者のユーザーID
+ * @returns {Promise<{location: Object|null, log: Object|null, error: Object|null}>}
+ */
 export const updateKoseibuShiftLocation = async (locationId, payload, operatedBy) => {
   try {
     const supabase = getSupabaseClient();
@@ -263,7 +268,6 @@ export const updateKoseibuShiftLocation = async (locationId, payload, operatedBy
         ...(payload.description !== undefined ? { description: payload.description } : {}),
         ...(payload.displayOrder !== undefined ? { display_order: payload.displayOrder } : {}),
         ...(payload.isActive !== undefined ? { is_active: payload.isActive } : {}),
-        updated_at: new Date().toISOString(),
       })
       .eq('id', locationId)
       .select()
@@ -272,6 +276,10 @@ export const updateKoseibuShiftLocation = async (locationId, payload, operatedBy
     if (error) {
       return { location: null, log: null, error };
     }
+
+    /** 更新された項目を記録用メモに含める */
+    const changedFields = Object.keys(payload).filter((key) => payload[key] !== undefined);
+    const updateMemo = `更新項目: ${changedFields.join(', ')}`;
 
     const { log, error: logError } = await insertShiftLocationLog({
       locationId: data.id,
@@ -280,28 +288,29 @@ export const updateKoseibuShiftLocation = async (locationId, payload, operatedBy
       longitudeSnapshot: data.longitude,
       actionType: LOCATION_ACTION_TYPES.update,
       operatedBy,
-      memo: payload.description ?? null,
+      memo: updateMemo,
     });
 
-    if (logError) {
-      return { location: data, log: null, error: logError };
-    }
-
-    return { location: data, log, error: null };
+    /* ログ書き込み失敗は警告に留め、操作自体は成功として返す */
+    return { location: data, log: log ?? null, error: null };
   } catch (error) {
     return { location: null, log: null, error };
   }
 };
 
+/**
+ * 厚生部シフト場所を論理削除する（is_active = false）
+ * 該当場所を現在地として登録しているレコードもクリアする
+ * @param {string} locationId - 削除対象の場所ID
+ * @param {string} operatedBy - 操作者のユーザーID
+ * @returns {Promise<{location: Object|null, log: Object|null, error: Object|null}>}
+ */
 export const deleteKoseibuShiftLocation = async (locationId, operatedBy) => {
   try {
     const supabase = getSupabaseClient();
     const { data, error } = await supabase
       .from('koseibu_shift_locations')
-      .update({
-        is_active: false,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ is_active: false })
       .eq('id', locationId)
       .select()
       .single();
@@ -310,7 +319,13 @@ export const deleteKoseibuShiftLocation = async (locationId, operatedBy) => {
       return { location: null, log: null, error };
     }
 
-    const { log, error: logError } = await insertShiftLocationLog({
+    /* 削除された場所を現在地として登録しているレコードをクリアする */
+    await supabase
+      .from('koseibu_shift_current_locations')
+      .delete()
+      .eq('location_id', locationId);
+
+    const { log } = await insertShiftLocationLog({
       locationId: data.id,
       locationNameSnapshot: data.name,
       latitudeSnapshot: data.latitude,
@@ -320,16 +335,20 @@ export const deleteKoseibuShiftLocation = async (locationId, operatedBy) => {
       memo: '場所マスタを論理削除',
     });
 
-    if (logError) {
-      return { location: data, log: null, error: logError };
-    }
-
-    return { location: data, log, error: null };
+    /* ログ書き込み失敗は警告に留め、操作自体は成功として返す */
+    return { location: data, log: log ?? null, error: null };
   } catch (error) {
     return { location: null, log: null, error };
   }
 };
 
+/**
+ * 厚生部員の現在地を登録する（upsert方式）
+ * @param {string} userId - 対象ユーザーID
+ * @param {string} locationId - 登録する場所ID
+ * @param {string} operatedBy - 操作者のユーザーID
+ * @returns {Promise<{currentLocation: Object|null, log: Object|null, error: Object|null}>}
+ */
 export const registerKoseibuShiftCurrentLocation = async (userId, locationId, operatedBy) => {
   try {
     const supabase = getSupabaseClient();
@@ -344,18 +363,17 @@ export const registerKoseibuShiftCurrentLocation = async (userId, locationId, op
       return { currentLocation: null, log: null, error: locationError };
     }
 
-    const timestamp = new Date().toISOString();
     const { data, error } = await supabase
       .from('koseibu_shift_current_locations')
       .upsert(
         {
           user_id: userId,
+          status: 'stationed',
           location_id: location.id,
           location_name_snapshot: location.name,
           latitude_snapshot: location.latitude,
           longitude_snapshot: location.longitude,
           updated_by: operatedBy,
-          updated_at: timestamp,
         },
         { onConflict: 'user_id' }
       )
@@ -366,7 +384,7 @@ export const registerKoseibuShiftCurrentLocation = async (userId, locationId, op
       return { currentLocation: null, log: null, error };
     }
 
-    const { log, error: logError } = await insertShiftLocationLog({
+    const { log } = await insertShiftLocationLog({
       userId,
       locationId: location.id,
       locationNameSnapshot: location.name,
@@ -374,14 +392,92 @@ export const registerKoseibuShiftCurrentLocation = async (userId, locationId, op
       longitudeSnapshot: location.longitude,
       actionType: LOCATION_ACTION_TYPES.selfRegister,
       operatedBy,
-      memo: '現在地を登録',
+      memo: `現在地を「${location.name}」に登録`,
     });
 
-    if (logError) {
-      return { currentLocation: data, log: null, error: logError };
+    /* ログ書き込み失敗は警告に留め、操作自体は成功として返す */
+    return { currentLocation: data, log: log ?? null, error: null };
+  } catch (error) {
+    return { currentLocation: null, log: null, error };
+  }
+};
+
+/**
+ * 厚生部員のステータスを変更する
+ * - stationed（配置中）: 場所IDが必須。現在地として登録する
+ * - patrolling（巡回中）: 場所IDは不要。巡回中として記録する
+ * - away（離席中）: 場所IDは不要。離席中として記録する
+ *
+ * @param {string} userId - 対象ユーザーID
+ * @param {string} status - ステータス ('stationed' | 'patrolling' | 'away')
+ * @param {string|null} locationId - 場所ID（stationedの場合のみ必須）
+ * @param {string} operatedBy - 操作者のユーザーID
+ * @returns {Promise<{currentLocation: Object|null, log: Object|null, error: Object|null}>}
+ */
+export const updateKoseibuShiftMemberStatus = async (userId, status, locationId, operatedBy) => {
+  try {
+    const supabase = getSupabaseClient();
+
+    /** 配置中の場合は場所情報を取得して検証する */
+    let location = null;
+    if (status === MEMBER_STATUS.stationed) {
+      if (!locationId) {
+        return { currentLocation: null, log: null, error: { message: '配置中は場所を選択してください' } };
+      }
+      const { data: locationData, error: locationError } = await supabase
+        .from('koseibu_shift_locations')
+        .select('*')
+        .eq('id', locationId)
+        .eq('is_active', true)
+        .single();
+
+      if (locationError) {
+        return { currentLocation: null, log: null, error: locationError };
+      }
+      location = locationData;
     }
 
-    return { currentLocation: data, log, error: null };
+    /** upsert用のデータを構築（巡回中・離席中は場所情報をNULLにする） */
+    const upsertData = {
+      user_id: userId,
+      status,
+      location_id: location?.id ?? null,
+      location_name_snapshot: location?.name ?? null,
+      latitude_snapshot: location?.latitude ?? null,
+      longitude_snapshot: location?.longitude ?? null,
+      updated_by: operatedBy,
+    };
+
+    const { data, error } = await supabase
+      .from('koseibu_shift_current_locations')
+      .upsert(upsertData, { onConflict: 'user_id' })
+      .select()
+      .single();
+
+    if (error) {
+      return { currentLocation: null, log: null, error };
+    }
+
+    /** ステータスに応じたログメモを生成する */
+    const statusLabels = { stationed: '配置中', patrolling: '巡回中', away: '離席中' };
+    const statusLabel = statusLabels[status] || status;
+    const memo = location
+      ? `ステータスを「${statusLabel}」に変更（場所: ${location.name}）`
+      : `ステータスを「${statusLabel}」に変更`;
+
+    const { log } = await insertShiftLocationLog({
+      userId,
+      locationId: location?.id ?? null,
+      locationNameSnapshot: location?.name ?? statusLabel,
+      latitudeSnapshot: location?.latitude ?? null,
+      longitudeSnapshot: location?.longitude ?? null,
+      actionType: LOCATION_ACTION_TYPES.statusChange,
+      operatedBy,
+      memo,
+    });
+
+    /* ログ書き込み失敗は警告に留め、操作自体は成功として返す */
+    return { currentLocation: data, log: log ?? null, error: null };
   } catch (error) {
     return { currentLocation: null, log: null, error };
   }
