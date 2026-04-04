@@ -448,21 +448,21 @@ const ELAPSED_DANGER_MINUTES = 30;
 /** HQロール向けタブ定義 */
 const HQ_TABS = [
   { key: 'dashboard', label: '🏠 ダッシュボード' },
-  { key: 'overview', label: '📊 概況確認' },
   { key: 'tickets', label: '📋 連絡案件' },
   { key: 'keys', label: '🔑 鍵管理' },
   { key: 'patrol', label: '🚶 巡回' },
   { key: 'custom_task', label: '📌 独自タスク' },
-  { key: 'evaluation', label: '📝 評価' },
-  { key: 'stats', label: '📈 実績' },
   { key: 'radio', label: '📡 無線' },
-  { key: 'event_orgs', label: '🏢 企画一覧' },
   { key: 'master', label: '⚙️ 鍵マスタ' },
   { key: 'settings', label: '🛠 設定' },
+  { key: 'stats', label: '📈 実績' },
 ];
 
 /** HQタブのデフォルト */
 const HQ_TAB_DEFAULT = 'dashboard';
+
+/** 実績タブのアクセスパスワード */
+const STATS_TAB_PASSWORD = 'admin1234';
 
 /** 経過時間アラート色 */
 const ELAPSED_COLORS = {
@@ -896,6 +896,14 @@ const SupportDeskScreen = ({
   const [taskStatsProfileMap, setTaskStatsProfileMap] = useState({});
   /** タスク実績の並べ替えキー（'total' | 'name'） */
   const [taskStatsSortKey, setTaskStatsSortKey] = useState('total');
+  /** 実績タブのパスワード認証済みフラグ */
+  const [isStatsUnlocked, setIsStatsUnlocked] = useState(false);
+  /** 実績タブのパスワードモーダル表示フラグ */
+  const [isStatsPasswordModalVisible, setIsStatsPasswordModalVisible] = useState(false);
+  /** 実績タブのパスワード入力値 */
+  const [statsPasswordInput, setStatsPasswordInput] = useState('');
+  /** 実績タブのパスワードエラーメッセージ */
+  const [statsPasswordError, setStatsPasswordError] = useState('');
 
   /** 巡回中スタッフ一覧（on_patrol = true のユーザー） */
   const [patrollingUsers, setPatrollingUsers] = useState([]);
@@ -3501,6 +3509,15 @@ const SupportDeskScreen = ({
   }, [isAccountingRole]);
 
   /**
+   * 実績タブから離れたときにパスワード認証をリセットする
+   */
+  useEffect(() => {
+    if (activeTab !== 'stats') {
+      setIsStatsUnlocked(false);
+    }
+  }, [activeTab]);
+
+  /**
    * 独自タスクタブに切り替えたとき、候補が未取得であれば自動読み込みする
    */
   useEffect(() => {
@@ -4229,7 +4246,16 @@ const SupportDeskScreen = ({
                     styles.tabSegmentBarItem,
                     isTabActive && [styles.tabSegmentBarItemActive, { backgroundColor: theme.background }],
                   ]}
-                  onPress={() => setActiveTab(tab.key)}
+                  onPress={() => {
+                    if (tab.key === 'stats' && !isStatsUnlocked) {
+                      /** 実績タブ選択時：未認証なのでパスワードモーダルを表示 */
+                      setStatsPasswordInput('');
+                      setStatsPasswordError('');
+                      setIsStatsPasswordModalVisible(true);
+                    } else {
+                      setActiveTab(tab.key);
+                    }
+                  }}
                 >
                   <Text
                     style={[
@@ -7799,6 +7825,91 @@ const SupportDeskScreen = ({
                 <Text style={styles.dispatchConfirmButtonText}>
                   {isCreatingDispatchTask ? '生成中...' : dispatchAssigneeId ? '割り当てて生成' : '未割当で生成'}
                 </Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ─── 実績タブ パスワード認証モーダル ─── */}
+      <Modal
+        visible={isStatsPasswordModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsStatsPasswordModalVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setIsStatsPasswordModalVisible(false)}
+        >
+          <Pressable
+            style={[styles.dispatchModal, { borderColor: theme.border, backgroundColor: theme.surface }]}
+            onPress={() => {}}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>🔒 実績タブ</Text>
+            <Text style={[styles.helpText, { color: theme.textSecondary, marginBottom: 12 }]}>
+              このタブにアクセスするにはパスワードが必要です。
+            </Text>
+            <TextInput
+              value={statsPasswordInput}
+              onChangeText={(text) => {
+                setStatsPasswordInput(text);
+                setStatsPasswordError('');
+              }}
+              placeholder="パスワードを入力"
+              placeholderTextColor={theme.textSecondary}
+              secureTextEntry={true}
+              style={[
+                styles.replyInput,
+                {
+                  borderColor: statsPasswordError ? '#D1242F' : theme.border,
+                  backgroundColor: theme.background,
+                  color: theme.text,
+                  marginBottom: 4,
+                },
+              ]}
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                /** パスワード確認処理 */
+                if (statsPasswordInput === STATS_TAB_PASSWORD) {
+                  setIsStatsUnlocked(true);
+                  setIsStatsPasswordModalVisible(false);
+                  setActiveTab('stats');
+                  setStatsPasswordInput('');
+                  setStatsPasswordError('');
+                } else {
+                  setStatsPasswordError('パスワードが正しくありません。');
+                }
+              }}
+            />
+            {statsPasswordError ? (
+              <Text style={[styles.helpText, { color: '#D1242F', marginBottom: 8 }]}>
+                {statsPasswordError}
+              </Text>
+            ) : null}
+            <View style={styles.dispatchModalActions}>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: theme.border }]}
+                onPress={() => setIsStatsPasswordModalVisible(false)}
+              >
+                <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>キャンセル</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dispatchConfirmButton, { backgroundColor: theme.primary }]}
+                onPress={() => {
+                  /** パスワード確認処理 */
+                  if (statsPasswordInput === STATS_TAB_PASSWORD) {
+                    setIsStatsUnlocked(true);
+                    setIsStatsPasswordModalVisible(false);
+                    setActiveTab('stats');
+                    setStatsPasswordInput('');
+                    setStatsPasswordError('');
+                  } else {
+                    setStatsPasswordError('パスワードが正しくありません。');
+                  }
+                }}
+              >
+                <Text style={styles.dispatchConfirmButtonText}>確認</Text>
               </TouchableOpacity>
             </View>
           </Pressable>
