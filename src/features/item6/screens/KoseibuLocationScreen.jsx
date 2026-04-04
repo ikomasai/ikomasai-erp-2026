@@ -26,6 +26,8 @@ import { hasRole, isAdmin } from '../../../services/supabase/permissionService';
 import {
   DEFAULT_MAP_REGION,
   MAP_INTERACTION_MODES,
+  MEMBER_STATUS,
+  MEMBER_STATUS_LABELS,
   ROLE_NAMES,
   SCREEN_NAME,
 } from '../constants.js';
@@ -36,6 +38,7 @@ import {
   registerKoseibuShiftCurrentLocation,
   selectKoseibuShiftOverview,
   updateKoseibuShiftLocation,
+  updateKoseibuShiftMemberStatus,
 } from '../services/shiftLocationService.js';
 
 const MOBILE_BREAKPOINT = 768;
@@ -154,6 +157,8 @@ const Item6LocationScreen = ({ navigation }) => {
   const [currentLocations, setCurrentLocations] = useState([]);
   const [selectedCurrentLocationId, setSelectedCurrentLocationId] = useState('');
   const [currentLocationDraftId, setCurrentLocationDraftId] = useState('');
+  /** @type {string} 現在選択中のステータス */
+  const [statusDraft, setStatusDraft] = useState(MEMBER_STATUS.stationed);
   const [currentLocationSearchQuery, setCurrentLocationSearchQuery] = useState('');
   const [currentLocationFilterId, setCurrentLocationFilterId] = useState('');
   const [activeTab, setActiveTab] = useState(ITEM6_TABS.location);
@@ -214,6 +219,13 @@ const Item6LocationScreen = ({ navigation }) => {
     }
     return currentLocations.find((record) => record.user_id === user.id) ?? null;
   }, [currentLocations, user?.id]);
+
+  /** myCurrentLocationのステータスでstatusDraftを初期化する */
+  useEffect(() => {
+    if (myCurrentLocation?.status) {
+      setStatusDraft(myCurrentLocation.status);
+    }
+  }, [myCurrentLocation?.status]);
 
   const selectedCurrentLocation = useMemo(() => {
     return locations.find((location) => location.id === selectedCurrentLocationId) ?? null;
@@ -308,7 +320,7 @@ const Item6LocationScreen = ({ navigation }) => {
         available: canView,
       },
     ];
-  }, [canManageLocations, canRegisterLocations, canRegisterSelf, canView]);
+  }, [canRegisterLocations, canRegisterSelf, canView]);
 
   const visibleTabItems = useMemo(() => tabItems.filter((item) => item.available), [tabItems]);
 
@@ -379,8 +391,16 @@ const Item6LocationScreen = ({ navigation }) => {
     }
 
     const supabase = getSupabaseClient();
-    const reload = () => {
-      refreshOverview();
+
+    /** デバウンス用タイマー。連続的な変更通知を500msにまとめる */
+    let debounceTimer = null;
+    const debouncedReload = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        refreshOverview();
+      }, 500);
     };
 
     const channel = supabase
@@ -388,16 +408,19 @@ const Item6LocationScreen = ({ navigation }) => {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'koseibu_shift_locations' },
-        reload
+        debouncedReload
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'koseibu_shift_current_locations' },
-        reload
+        debouncedReload
       )
       .subscribe();
 
     return () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
       supabase.removeChannel(channel);
     };
   }, [authLoading, canView, refreshOverview]);
@@ -470,8 +493,13 @@ const Item6LocationScreen = ({ navigation }) => {
     }
   };
 
+  /**
+   * マップタップ時のピン配置ハンドラ
+   * 厚生部員（登録権限あり）がマップをタップして座標を指定する
+   * @param {Object} coordinate - タップされた座標 { latitude, longitude }
+   */
   const handleMapBoardPress = (coordinate) => {
-    if (!canManageLocations) {
+    if (!canRegisterLocations) {
       return;
     }
 
@@ -567,13 +595,18 @@ const Item6LocationScreen = ({ navigation }) => {
     }
   };
 
+  /**
+   * 現在地・ステータスを登録するハンドラ
+   * ステータスに応じて適切なサービス関数を呼び出す
+   */
   const handleRegisterCurrentLocation = async () => {
     if (!canRegisterSelf || !user?.id) {
       return;
     }
 
-    if (!currentLocationDraftId) {
-      setErrorMessage('現在地に登録する場所を選択してください');
+    /** 配置中の場合は場所の選択が必須 */
+    if (statusDraft === MEMBER_STATUS.stationed && !currentLocationDraftId) {
+      setErrorMessage('配置中は場所を選択してください');
       return;
     }
 
@@ -581,15 +614,20 @@ const Item6LocationScreen = ({ navigation }) => {
     setErrorMessage('');
 
     try {
-      const result = await registerKoseibuShiftCurrentLocation(user.id, currentLocationDraftId, user.id);
+      const result = await updateKoseibuShiftMemberStatus(
+        user.id,
+        statusDraft,
+        statusDraft === MEMBER_STATUS.stationed ? currentLocationDraftId : null,
+        user.id
+      );
       if (result.error) {
-        setErrorMessage(result.error.message || '現在地登録に失敗しました');
+        setErrorMessage(result.error.message || 'ステータス登録に失敗しました');
         return;
       }
 
       await refreshOverview();
     } catch (error) {
-      setErrorMessage(error.message || '現在地登録に失敗しました');
+      setErrorMessage(error.message || 'ステータス登録に失敗しました');
     } finally {
       setSaving(false);
     }
@@ -628,7 +666,9 @@ const Item6LocationScreen = ({ navigation }) => {
               {record.user_name}
               {isMine ? '（自分）' : ''}
             </Text>
-            <Text style={[styles.rowMeta, { color: theme.textSecondary }]}>{record.location_name_snapshot}</Text>
+            <Text style={[styles.rowMeta, { color: theme.textSecondary }]}>
+              {record.status === 'patrolling' ? '🔄 巡回中' : record.status === 'away' ? '⏸ 離席中' : record.location_name_snapshot || '未設定'}
+            </Text>
             <Text style={[styles.rowMeta, { color: theme.textSecondary }]}>{formatDateTime(record.updated_at)}</Text>
           </View>
           <Badge label={isMine ? '自分' : '登録済み'} color={isMine ? theme.primary : theme.success} backgroundColor={isMine ? `${theme.primary}18` : `${theme.success}20`} />
@@ -666,6 +706,17 @@ const Item6LocationScreen = ({ navigation }) => {
       <ThemedHeader title={SCREEN_NAME} navigation={navigation} />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* エラーバナーはスクロール最上部に表示して見逃しを防ぐ */}
+        {errorMessage ? (
+          <View style={[styles.errorBanner, { borderColor: theme.error, backgroundColor: `${theme.error}12` }]}>
+            <MaterialCommunityIcons name="alert-circle-outline" size={20} color={theme.error} />
+            <Text style={[styles.errorBannerText, { color: theme.error }]}>{errorMessage}</Text>
+            <TouchableOpacity onPress={() => setErrorMessage('')} activeOpacity={0.7}>
+              <MaterialCommunityIcons name="close" size={18} color={theme.error} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         <View style={styles.pageHeader}>
           <View style={styles.pageHeaderRow}>
             <MaterialCommunityIcons name="map-marker-radius" size={24} color={theme.primary} />
@@ -727,7 +778,11 @@ const Item6LocationScreen = ({ navigation }) => {
                         opacity: isDisabled ? 0.45 : 1,
                       },
                     ]}
-                    onPress={() => !isDisabled && setActiveTab(tab.key)}
+                    onPress={() => {
+                      if (isDisabled) return;
+                      setActiveTab(tab.key);
+                      setErrorMessage('');
+                    }}
                     disabled={isDisabled}
                     activeOpacity={0.8}
                   >
@@ -928,72 +983,116 @@ const Item6LocationScreen = ({ navigation }) => {
               <View style={styles.tabPanel}>
                 {canRegisterSelf ? (
                   <SectionCard title="自分の場所登録" subtitle="一覧から選択して登録" theme={theme}>
-                    <View style={styles.choiceGroup}>
-                      {currentLocationOptions.length === 0 ? (
-                        <View style={styles.emptyState}>
-                          <MaterialCommunityIcons name="map-marker-off" size={28} color={theme.textSecondary} />
-                          <Text style={[styles.emptyStateText, { color: theme.textSecondary }]}>
-                            選択できる場所がありません
-                          </Text>
-                        </View>
-                      ) : (
-                        currentLocationOptions.map((option) => {
-                          const selected = currentLocationDraftId === option.value;
-
-                          return (
-                            <TouchableOpacity
-                              key={option.value}
-                              style={[
-                                styles.choiceCard,
-                                {
-                                  backgroundColor: selected ? theme.primary : theme.background,
-                                  borderColor: selected ? theme.primary : theme.border,
-                                },
-                              ]}
-                              onPress={() => setCurrentLocationDraftId(option.value)}
-                              activeOpacity={0.8}
-                            >
-                              <View style={styles.choiceTextWrap}>
-                                <Text style={[styles.choiceTitle, { color: selected ? '#fff' : theme.text }]}>
-                                  {option.label}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.choiceSubtitle,
-                                    { color: selected ? 'rgba(255,255,255,0.82)' : theme.textSecondary },
-                                  ]}
-                                >
-                                  タップして選択
-                                </Text>
-                              </View>
-                              {selected ? <MaterialCommunityIcons name="check" size={18} color="#fff" /> : null}
-                            </TouchableOpacity>
-                          );
-                        })
-                      )}
+                    {/* ステータス切替ボタン */}
+                    <View style={styles.statusRow}>
+                      {Object.entries(MEMBER_STATUS_LABELS).map(([key, label]) => {
+                        const isActive = statusDraft === key;
+                        return (
+                          <TouchableOpacity
+                            key={key}
+                            style={[
+                              styles.statusButton,
+                              {
+                                backgroundColor: isActive ? theme.primary : theme.background,
+                                borderColor: isActive ? theme.primary : theme.border,
+                              },
+                            ]}
+                            onPress={() => setStatusDraft(key)}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={[styles.statusButtonText, { color: isActive ? '#fff' : theme.text }]}>
+                              {label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
 
-                    <ShiftLocationMap
-                      theme={theme}
-                      compact={isCompact}
-                      height={isCompact ? 280 : 340}
-                      locations={activeLocations}
-                      interactionMode={MAP_INTERACTION_MODES.move}
-                      selectedLocationId={currentLocationDraftId}
-                      highlightedLocationId={currentLocationDraftId}
-                      focusLocationId={currentLocationDraftId}
-                      canEdit={false}
-                    />
+                    {statusDraft === MEMBER_STATUS.stationed ? (
+                      <>
+                        <View style={styles.choiceGroup}>
+                          {currentLocationOptions.length === 0 ? (
+                            <View style={styles.emptyState}>
+                              <MaterialCommunityIcons name="map-marker-off" size={28} color={theme.textSecondary} />
+                              <Text style={[styles.emptyStateText, { color: theme.textSecondary }]}>
+                                選択できる場所がありません
+                              </Text>
+                            </View>
+                          ) : (
+                            currentLocationOptions.map((option) => {
+                              const selected = currentLocationDraftId === option.value;
 
-                    <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                      選択した場所はマップ上でも強調表示されます。
-                    </Text>
+                              return (
+                                <TouchableOpacity
+                                  key={option.value}
+                                  style={[
+                                    styles.choiceCard,
+                                    {
+                                      backgroundColor: selected ? theme.primary : theme.background,
+                                      borderColor: selected ? theme.primary : theme.border,
+                                    },
+                                  ]}
+                                  onPress={() => setCurrentLocationDraftId(option.value)}
+                                  activeOpacity={0.8}
+                                >
+                                  <View style={styles.choiceTextWrap}>
+                                    <Text style={[styles.choiceTitle, { color: selected ? '#fff' : theme.text }]}>
+                                      {option.label}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.choiceSubtitle,
+                                        { color: selected ? 'rgba(255,255,255,0.82)' : theme.textSecondary },
+                                      ]}
+                                    >
+                                      タップして選択
+                                    </Text>
+                                  </View>
+                                  {selected ? <MaterialCommunityIcons name="check" size={18} color="#fff" /> : null}
+                                </TouchableOpacity>
+                              );
+                            })
+                          )}
+                        </View>
+
+                        <ShiftLocationMap
+                          theme={theme}
+                          compact={isCompact}
+                          height={isCompact ? 280 : 340}
+                          locations={activeLocations}
+                          interactionMode={MAP_INTERACTION_MODES.move}
+                          selectedLocationId={currentLocationDraftId}
+                          highlightedLocationId={currentLocationDraftId}
+                          focusLocationId={currentLocationDraftId}
+                          canEdit={false}
+                        />
+
+                        <Text style={[styles.helperText, { color: theme.textSecondary }]}>
+                          選択した場所はマップ上でも強調表示されます。
+                        </Text>
+                      </>
+                    ) : null}
+
+                    {statusDraft !== MEMBER_STATUS.stationed ? (
+                      <View style={styles.emptyState}>
+                        <MaterialCommunityIcons
+                          name={statusDraft === MEMBER_STATUS.patrolling ? 'walk' : 'account-clock'}
+                          size={28}
+                          color={theme.textSecondary}
+                        />
+                        <Text style={[styles.emptyStateText, { color: theme.textSecondary }]}>
+                          {statusDraft === MEMBER_STATUS.patrolling
+                            ? '巡回中として登録されます。特定の場所には紐づきません。'
+                            : '離席中として登録されます。一時的に持ち場を離れていることが記録されます。'}
+                        </Text>
+                      </View>
+                    ) : null}
 
                     <ActionButton
-                      label={saving ? '登録中...' : '現在地を登録'}
+                      label={saving ? '登録中...' : `${MEMBER_STATUS_LABELS[statusDraft]}を登録`}
                       onPress={handleRegisterCurrentLocation}
                       theme={theme}
-                      disabled={saving || currentLocationOptions.length === 0}
+                      disabled={saving || (statusDraft === MEMBER_STATUS.stationed && currentLocationOptions.length === 0)}
                     />
                   </SectionCard>
                 ) : (
@@ -1062,12 +1161,6 @@ const Item6LocationScreen = ({ navigation }) => {
           </>
         )}
 
-        {errorMessage ? (
-          <View style={[styles.errorBanner, { borderColor: theme.error, backgroundColor: `${theme.error}12` }]}>
-            <MaterialCommunityIcons name="alert-circle-outline" size={20} color={theme.error} />
-            <Text style={[styles.errorBannerText, { color: theme.error }]}>{errorMessage}</Text>
-          </View>
-        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -1374,6 +1467,29 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  /** ステータス切替行 */
+  statusRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  /** ステータスボタン */
+  statusButton: {
+    flex: 1,
+    minWidth: 80,
+    minHeight: 40,
+    borderWidth: 1,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  /** ステータスボタンテキスト */
+  statusButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   errorBanner: {
     borderWidth: 1,
