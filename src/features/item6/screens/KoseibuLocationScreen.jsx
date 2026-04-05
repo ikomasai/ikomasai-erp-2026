@@ -25,7 +25,6 @@ import { getSupabaseClient } from '../../../services/supabase/client.js';
 import { hasRole, isAdmin } from '../../../services/supabase/permissionService';
 import {
   DEFAULT_MAP_REGION,
-  MAP_INTERACTION_MODES,
   MEMBER_STATUS,
   MEMBER_STATUS_LABELS,
   ROLE_NAMES,
@@ -166,8 +165,8 @@ const Item6LocationScreen = ({ navigation }) => {
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
   const [draftCoordinate, setDraftCoordinate] = useState(DEFAULT_MAP_REGION);
-  const [mapInteractionMode, setMapInteractionMode] = useState(MAP_INTERACTION_MODES.pin);
   const selectionInitializedRef = useRef(false);
+  const currentLocationDraftInitializedRef = useRef(false);
 
   const canView = useMemo(() => {
     const roles = userInfo?.roles || [];
@@ -181,7 +180,7 @@ const Item6LocationScreen = ({ navigation }) => {
 
   const canManageLocations = useMemo(() => {
     const roles = userInfo?.roles || [];
-    return isAdmin(roles) || (hasRole(roles, ROLE_NAMES.welfare) && hasRole(roles, ROLE_NAMES.manager));
+    return isAdmin(roles) || hasRole(roles, ROLE_NAMES.welfare);
   }, [userInfo?.roles]);
 
   const canRegisterSelf = useMemo(() => {
@@ -189,20 +188,7 @@ const Item6LocationScreen = ({ navigation }) => {
     return hasRole(roles, ROLE_NAMES.welfare);
   }, [userInfo?.roles]);
 
-  const canEditLocation = useCallback(
-    (location) => {
-      if (!location) {
-        return false;
-      }
-
-      if (canManageLocations) {
-        return true;
-      }
-
-      return canRegisterLocations && location.created_by === user?.id;
-    },
-    [canManageLocations, canRegisterLocations, user?.id]
-  );
+  const canEditLocation = useCallback(() => canRegisterLocations, [canRegisterLocations]);
 
   const activeLocations = useMemo(() => locations.filter((location) => location.is_active), [locations]);
 
@@ -263,28 +249,27 @@ const Item6LocationScreen = ({ navigation }) => {
   }, [currentLocations]);
 
   const currentLocationFilterOptions = useMemo(() => {
-    const options = new Map();
+    const options = activeLocations
+      .map((location) => ({
+        value: location.id || '',
+        label: location.name || '名称未設定',
+      }))
+      .filter((option) => option.value);
 
-    activeLocations.forEach((location) => {
-      const value = location.id || '';
-      const label = location.name || '名称未設定';
-
-      if (!value || options.has(value)) {
-        return;
-      }
-
-      options.set(value, label);
-    });
-
-    return Array.from(options.entries())
-      .map(([value, label]) => ({ value, label }))
-      .sort((left, right) =>
-        left.label.localeCompare(right.label, 'ja', {
-          numeric: true,
-          sensitivity: 'base',
-        })
-      );
+    return options.sort((left, right) =>
+      left.label.localeCompare(right.label, 'ja', {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    );
   }, [activeLocations]);
+
+  const currentLocationStatusFilterOptions = useMemo(() => {
+    return [
+      { value: 'status:patrolling', label: '巡回中' },
+      { value: 'status:away', label: '離席中' },
+    ];
+  }, []);
 
   const filteredCurrentLocations = useMemo(() => {
     const query = currentLocationSearchQuery.trim().toLocaleLowerCase('ja');
@@ -293,7 +278,10 @@ const Item6LocationScreen = ({ navigation }) => {
       const matchesName =
         query === '' || (record.user_name || '').toLocaleLowerCase('ja').includes(query);
       const matchesLocation =
-        currentLocationFilterId === '' || record.location_id === currentLocationFilterId;
+        currentLocationFilterId === '' ||
+        (currentLocationFilterId.startsWith('status:')
+          ? record.status === currentLocationFilterId.replace('status:', '')
+          : record.location_id === currentLocationFilterId);
 
       return matchesName && matchesLocation;
     });
@@ -333,9 +321,6 @@ const Item6LocationScreen = ({ navigation }) => {
       setActiveTab(visibleTabItems[0].key);
     }
   }, [activeTab, visibleTabItems]);
-
-  const mapModeLabel =
-    mapInteractionMode === MAP_INTERACTION_MODES.move ? '地図移動モード' : 'ピン指定モード';
 
   const summaryCounts = useMemo(() => {
     return {
@@ -445,12 +430,16 @@ const Item6LocationScreen = ({ navigation }) => {
   }, [activeLocations, locations, myCurrentLocation?.location_id, selectedCurrentLocationId]);
 
   useEffect(() => {
-    if (currentLocationDraftId && !locations.some((location) => location.id === currentLocationDraftId)) {
+    if (!currentLocationDraftInitializedRef.current) {
       setCurrentLocationDraftId(myCurrentLocation?.location_id || activeLocations[0]?.id || '');
+      currentLocationDraftInitializedRef.current = true;
       return;
     }
 
-    if (!currentLocationDraftId) {
+    if (
+      currentLocationDraftId &&
+      !locations.some((location) => location.id === currentLocationDraftId)
+    ) {
       setCurrentLocationDraftId(myCurrentLocation?.location_id || activeLocations[0]?.id || '');
     }
   }, [activeLocations, currentLocationDraftId, locations, myCurrentLocation?.location_id]);
@@ -475,16 +464,27 @@ const Item6LocationScreen = ({ navigation }) => {
     setDraftCoordinate(DEFAULT_MAP_REGION);
   }, []);
 
+  const handleClearLocationSelection = useCallback(() => {
+    resetManagerForm();
+    setSelectedCurrentLocationId('');
+    setCurrentLocationDraftId('');
+  }, [resetManagerForm]);
+
+  const handleClearSelfSelection = useCallback(() => {
+    setCurrentLocationDraftId('');
+  }, []);
+
   const handleLocationPress = (location) => {
     if (canEditLocation(location)) {
-      setMapInteractionMode(MAP_INTERACTION_MODES.pin);
       setEditingLocationId(location.id);
+      setSelectedCurrentLocationId(location.id);
       setDraftName(location.name || '');
       setDraftDescription(location.description || '');
       setDraftCoordinate({
         latitude: Number(location.latitude),
         longitude: Number(location.longitude),
       });
+      setActiveTab(ITEM6_TABS.location);
       return;
     }
 
@@ -723,7 +723,7 @@ const Item6LocationScreen = ({ navigation }) => {
             <Text style={[styles.pageHeaderTitle, { color: theme.text }]}>厚生部の現在地を見える化する</Text>
           </View>
           <Text style={[styles.pageHeaderDescription, { color: theme.textSecondary }]}>
-            厚生部員の場所登録と厚生部長の配置確認を、マップと一覧の両方から行えます。
+            厚生部員の場所登録と厚生部の配置確認を、マップと一覧の両方から行えます。
           </Text>
         </View>
 
@@ -742,12 +742,39 @@ const Item6LocationScreen = ({ navigation }) => {
               <SectionCard title="現在の選択" subtitle="選択中の場所" theme={theme}>
                 {focusLocation ? (
                   <>
+                    <View
+                      style={[
+                        styles.selectionBanner,
+                        {
+                          backgroundColor: editingLocationId === focusLocation.id ? `${theme.warning}28` : `${theme.primary}28`,
+                          borderColor: editingLocationId === focusLocation.id ? theme.warning : theme.primary,
+                          borderLeftWidth: 6,
+                          borderLeftColor: editingLocationId === focusLocation.id ? theme.warning : theme.primary,
+                        },
+                      ]}
+                    >
+                      <Badge
+                        label={editingLocationId === focusLocation.id ? '編集対象' : '選択中'}
+                        color={editingLocationId === focusLocation.id ? theme.warning : theme.primary}
+                        backgroundColor={
+                          editingLocationId === focusLocation.id ? `${theme.warning}20` : `${theme.primary}18`
+                        }
+                      />
+                      <Text style={[styles.selectionBannerText, { color: theme.text }]}>
+                        {focusLocation.name}
+                      </Text>
+                    </View>
                     <Text style={[styles.focusTitle, { color: theme.text }]} numberOfLines={1}>
                       {focusLocation.name}
                     </Text>
                     <Text style={[styles.focusMeta, { color: theme.textSecondary }]}>
                       {focusLocation.description || '補足情報なし'}
                     </Text>
+                    {editingLocationId === focusLocation.id ? (
+                      <Text style={[styles.focusMeta, { color: theme.warning }]}>
+                        編集対象として選択中です
+                      </Text>
+                    ) : null}
                     {myCurrentLocation ? (
                       <Text style={[styles.focusMeta, { color: theme.textSecondary }]}>
                         あなたの登録: {myCurrentLocation.location_name_snapshot}
@@ -805,33 +832,7 @@ const Item6LocationScreen = ({ navigation }) => {
 
             {activeTab === ITEM6_TABS.location ? (
               <View style={styles.tabPanel}>
-                <SectionCard title="マップ" subtitle="モードを切り替えて操作" theme={theme}>
-                  <View style={styles.mapModeRow}>
-                    {[
-                      { key: MAP_INTERACTION_MODES.move, label: '地図移動' },
-                      { key: MAP_INTERACTION_MODES.pin, label: 'ピン指定' },
-                    ].map((mode) => {
-                      const isSelected = mapInteractionMode === mode.key;
-                      return (
-                        <TouchableOpacity
-                          key={mode.key}
-                          style={[
-                            styles.mapModeButton,
-                            {
-                              backgroundColor: isSelected ? theme.primary : theme.surface,
-                              borderColor: isSelected ? theme.primary : theme.border,
-                            },
-                          ]}
-                          onPress={() => setMapInteractionMode(mode.key)}
-                        >
-                          <Text style={{ color: isSelected ? '#fff' : theme.text }}>{mode.label}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                  <Text style={[styles.mapModeHint, { color: theme.textSecondary }]}>
-                    現在: {mapModeLabel}
-                  </Text>
+                <SectionCard title="マップ" subtitle="場所をタップして登録位置を指定" theme={theme}>
                   <ShiftLocationMap
                     theme={theme}
                     compact={isCompact}
@@ -839,12 +840,13 @@ const Item6LocationScreen = ({ navigation }) => {
                     locations={locations}
                     draftCoordinate={draftCoordinate}
                     onDraftCoordinateChange={setDraftCoordinate}
-                    interactionMode={mapInteractionMode}
                     selectedLocationId={editingLocationId}
                     highlightedLocationId={currentLocationDraftId}
                     canEdit={canRegisterLocations}
                     onLocationPress={handleLocationPress}
                     onBoardPress={handleMapBoardPress}
+                    onClearSelection={handleClearLocationSelection}
+                    showClearSelectionButton={Boolean(editingLocationId || currentLocationDraftId)}
                   />
                 </SectionCard>
 
@@ -916,7 +918,7 @@ const Item6LocationScreen = ({ navigation }) => {
                           まだ場所が登録されていません
                         </Text>
                       </View>
-                    ) : (
+                      ) : (
                       activeLocations.map((location) => {
                         const isEditing = editingLocationId === location.id;
                         const editable = canEditLocation(location);
@@ -928,16 +930,31 @@ const Item6LocationScreen = ({ navigation }) => {
                               styles.rowItem,
                               {
                                 borderColor: isEditing ? theme.warning : theme.border,
-                                backgroundColor: theme.background,
+                                borderLeftWidth: isEditing ? 6 : 1,
+                                borderLeftColor: isEditing ? theme.warning : theme.border,
+                                backgroundColor: isEditing ? `${theme.warning}28` : theme.background,
+                                shadowColor: isEditing ? theme.warning : 'transparent',
                               },
+                              isEditing && styles.rowItemSelected,
                             ]}
                           >
                             <View style={styles.rowMain}>
-                              <Text style={[styles.rowTitle, { color: theme.text }]}>{location.name}</Text>
-                              <Text style={[styles.rowMeta, { color: theme.textSecondary }]}>
+                              <View style={styles.rowTitleLine}>
+                                <Text style={[styles.rowTitle, { color: theme.text }]}>
+                                  {location.name}
+                                </Text>
+                                {isEditing ? (
+                                  <Badge
+                                    label="選択中"
+                                    color={theme.warning}
+                                    backgroundColor={`${theme.warning}20`}
+                                  />
+                                ) : null}
+                              </View>
+                              <Text style={[styles.rowMeta, { color: isEditing ? theme.text : theme.textSecondary }]}>
                                 {location.description || '補足情報なし'}
                               </Text>
-                              <Text style={[styles.rowMeta, { color: theme.textSecondary }]}>
+                              <Text style={[styles.rowMeta, { color: isEditing ? theme.text : theme.textSecondary }]}>
                                 登録者: {location.created_by_name || '不明'}
                               </Text>
                             </View>
@@ -972,7 +989,7 @@ const Item6LocationScreen = ({ navigation }) => {
                     )}
                     {!canManageLocations ? (
                       <Text style={[styles.helperText, { color: theme.textSecondary, marginTop: 12 }]}>
-                        場所の新規登録は {ROLE_NAMES.welfare} が行えます。編集は登録者本人、削除は {ROLE_NAMES.manager} を含む厚生部長のみです。
+                        場所の新規登録・編集・削除は {ROLE_NAMES.welfare} と {ROLE_NAMES.admin} が行えます。
                       </Text>
                     ) : null}
                 </SectionCard>
@@ -983,6 +1000,28 @@ const Item6LocationScreen = ({ navigation }) => {
               <View style={styles.tabPanel}>
                 {canRegisterSelf ? (
                   <SectionCard title="自分の場所登録" subtitle="一覧から選択して登録" theme={theme}>
+                    {currentLocationDraftId ? (
+                      <View
+                        style={[
+                          styles.selectionBanner,
+                          {
+                            backgroundColor: `${theme.primary}28`,
+                            borderColor: theme.primary,
+                            borderLeftWidth: 6,
+                            borderLeftColor: theme.primary,
+                          },
+                        ]}
+                      >
+                        <Badge
+                          label="選択中"
+                          color={theme.primary}
+                          backgroundColor={`${theme.primary}18`}
+                        />
+                        <Text style={[styles.selectionBannerText, { color: theme.text }]}>
+                          {currentLocationOptions.find((option) => option.value === currentLocationDraftId)?.label || '場所'} を選択中
+                        </Text>
+                      </View>
+                    ) : null}
                     {/* ステータス切替ボタン */}
                     <View style={styles.statusRow}>
                       {Object.entries(MEMBER_STATUS_LABELS).map(([key, label]) => {
@@ -1032,7 +1071,9 @@ const Item6LocationScreen = ({ navigation }) => {
                                       borderColor: selected ? theme.primary : theme.border,
                                     },
                                   ]}
-                                  onPress={() => setCurrentLocationDraftId(option.value)}
+                                  onPress={() => {
+                                    setCurrentLocationDraftId(option.value);
+                                  }}
                                   activeOpacity={0.8}
                                 >
                                   <View style={styles.choiceTextWrap}>
@@ -1060,11 +1101,12 @@ const Item6LocationScreen = ({ navigation }) => {
                           compact={isCompact}
                           height={isCompact ? 280 : 340}
                           locations={activeLocations}
-                          interactionMode={MAP_INTERACTION_MODES.move}
                           selectedLocationId={currentLocationDraftId}
                           highlightedLocationId={currentLocationDraftId}
                           focusLocationId={currentLocationDraftId}
                           canEdit={false}
+                          onClearSelection={handleClearSelfSelection}
+                          showClearSelectionButton={Boolean(currentLocationDraftId)}
                         />
 
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
@@ -1116,42 +1158,68 @@ const Item6LocationScreen = ({ navigation }) => {
                       placeholder="名前で検索"
                       placeholderTextColor={theme.textSecondary}
                     />
-                    <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>場所で絞り込み</Text>
+                    <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>場所・状態で絞り込み</Text>
                     <View style={styles.filterChipRow}>
-                      <TouchableOpacity
-                        style={[
-                          styles.filterChip,
-                          {
-                            backgroundColor: currentLocationFilterId === '' ? theme.primary : theme.surface,
-                            borderColor: currentLocationFilterId === '' ? theme.primary : theme.border,
-                          },
-                        ]}
-                        onPress={() => setCurrentLocationFilterId('')}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={{ color: currentLocationFilterId === '' ? '#fff' : theme.text }}>全て</Text>
-                      </TouchableOpacity>
-                      {currentLocationFilterOptions.map((option) => {
-                        const selected = currentLocationFilterId === option.value;
-                        return (
-                          <TouchableOpacity
-                            key={option.value}
-                            style={[
-                              styles.filterChip,
-                              {
-                                backgroundColor: selected ? theme.primary : theme.surface,
-                                borderColor: selected ? theme.primary : theme.border,
-                              },
-                            ]}
-                            onPress={() => setCurrentLocationFilterId(option.value)}
-                            activeOpacity={0.8}
-                          >
-                            <Text style={{ color: selected ? '#fff' : theme.text }} numberOfLines={1}>
-                              {option.label}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
+                      <View style={styles.locationFilterGroup}>
+                        <TouchableOpacity
+                          style={[
+                            styles.filterChip,
+                            {
+                              backgroundColor: currentLocationFilterId === '' ? theme.primary : theme.surface,
+                              borderColor: currentLocationFilterId === '' ? theme.primary : theme.border,
+                            },
+                          ]}
+                          onPress={() => setCurrentLocationFilterId('')}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={{ color: currentLocationFilterId === '' ? '#fff' : theme.text }}>全て</Text>
+                        </TouchableOpacity>
+                        {currentLocationFilterOptions.map((option) => {
+                          const selected = currentLocationFilterId === option.value;
+                          return (
+                            <TouchableOpacity
+                              key={option.value}
+                              style={[
+                                styles.filterChip,
+                                {
+                                  backgroundColor: selected ? theme.primary : theme.surface,
+                                  borderColor: selected ? theme.primary : theme.border,
+                                },
+                              ]}
+                              onPress={() => setCurrentLocationFilterId(option.value)}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={{ color: selected ? '#fff' : theme.text }} numberOfLines={1}>
+                                {option.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                      <View style={styles.statusFilterGroup}>
+                        {currentLocationStatusFilterOptions.map((option) => {
+                          const selected = currentLocationFilterId === option.value;
+                          return (
+                            <TouchableOpacity
+                              key={option.value}
+                              style={[
+                                styles.filterChip,
+                                styles.statusFilterChip,
+                                {
+                                  backgroundColor: selected ? theme.primary : theme.surface,
+                                  borderColor: selected ? theme.primary : theme.border,
+                                },
+                              ]}
+                              onPress={() => setCurrentLocationFilterId(option.value)}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={{ color: selected ? '#fff' : theme.text }} numberOfLines={1}>
+                                {option.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
                     </View>
                   </View>
                   {renderCurrentLocationList()}
@@ -1281,23 +1349,6 @@ const styles = StyleSheet.create({
   layoutGridCompact: {
     flexDirection: 'column',
   },
-  mapModeRow: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  mapModeButton: {
-    minHeight: 36,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mapModeHint: {
-    fontSize: 12,
-    marginTop: -2,
-  },
   leftColumn: {
     width: '100%',
     gap: 12,
@@ -1370,13 +1421,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  rowItemSelected: {
+    borderWidth: 2,
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
   rowMain: {
     flex: 1,
     gap: 4,
   },
+  rowTitleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
   rowTitle: {
     fontSize: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   rowMeta: {
     fontSize: 12,
@@ -1456,8 +1521,16 @@ const styles = StyleSheet.create({
   },
   filterChipRow: {
     flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+    width: '100%',
+  },
+  locationFilterGroup: {
+    flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    alignItems: 'flex-start',
+    flexShrink: 1,
   },
   filterChip: {
     minHeight: 34,
@@ -1467,6 +1540,16 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  statusFilterGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'flex-start',
+    marginLeft: 8,
+  },
+  statusFilterChip: {
+    minWidth: 88,
   },
   /** ステータス切替行 */
   statusRow: {
@@ -1502,6 +1585,21 @@ const styles = StyleSheet.create({
   errorBannerText: {
     flex: 1,
     fontSize: 13,
+  },
+  selectionBanner: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  selectionBannerText: {
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
   },
 });
 

@@ -6,15 +6,15 @@
  * - iOS/Android: WebView 内で Leaflet を描画し postMessage で通信
  *
  * 仕様: docs/プロジェクト仕様書_厚生部場所機能.md
- * - 厚生部長: マップ上でピンを指定して場所を登録・更新・削除
+ * - 厚生部員: マップ上でピンを指定して場所を登録・更新・削除
  * - 厚生部員: 有効な場所から現在地を選択して登録
  * - 管理者: 閲覧のみ
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { MaterialCommunityIcons } from '../../../shared/components/icons';
-import { CAMPUS_BOUNDS, MAP_INTERACTION_MODES } from '../constants.js';
+import { CAMPUS_BOUNDS } from '../constants.js';
 
 /** マップ画像のサイズ（ピクセル） */
 const MAP_IMAGE_WIDTH = 1191;
@@ -124,13 +124,14 @@ const createColorIcon = (L, colorName) => {
  * @param {Array} props.locations - 場所マスタの配列
  * @param {Object} [props.draftCoordinate] - ドラフト座標 { latitude, longitude }
  * @param {Function} [props.onDraftCoordinateChange] - ドラフト座標変更コールバック
- * @param {string} [props.interactionMode] - 操作モード ('pin' | 'move')
  * @param {string} [props.selectedLocationId] - 選択中の場所ID
  * @param {string} [props.highlightedLocationId] - ハイライト中の場所ID
  * @param {string} [props.focusLocationId] - フォーカス対象の場所ID
  * @param {boolean} [props.canEdit] - 編集モード有効フラグ
  * @param {Function} [props.onLocationPress] - マーカータップコールバック
  * @param {Function} [props.onBoardPress] - マップタップコールバック
+ * @param {Function} [props.onClearSelection] - 選択解除コールバック
+ * @param {boolean} [props.showClearSelectionButton] - 選択解除ボタンを表示するか
  * @returns {React.ReactElement}
  */
 const ShiftLocationMap = ({
@@ -140,13 +141,14 @@ const ShiftLocationMap = ({
   locations = [],
   draftCoordinate,
   onDraftCoordinateChange,
-  interactionMode = MAP_INTERACTION_MODES.pin,
   selectedLocationId = '',
   highlightedLocationId = '',
   focusLocationId = null,
   canEdit = false,
   onLocationPress,
   onBoardPress,
+  onClearSelection,
+  showClearSelectionButton = false,
 }) => {
   /** @type {React.MutableRefObject<HTMLDivElement|null>} マップコンテナのDOM参照 */
   const mapContainerRef = useRef(null);
@@ -158,10 +160,10 @@ const ShiftLocationMap = ({
   const draftMarkerRef = useRef(null);
   /** @type {React.MutableRefObject<boolean>} Leaflet初期化済みフラグ */
   const initializedRef = useRef(false);
+  /** @type {boolean} マップ初期化完了フラグ */
+  const [mapReady, setMapReady] = useState(false);
   /** @type {React.MutableRefObject<Object>} 最新のコールバック参照（stale closure回避） */
   const callbacksRef = useRef({ onLocationPress, onBoardPress, onDraftCoordinateChange });
-  /** @type {React.MutableRefObject<Object>} 最新のモード参照（初期化時のclosure問題回避） */
-  const modeRef = useRef({ canEdit, interactionMode });
   /** @type {boolean} Leaflet CSS/JS の読み込み完了状態 */
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   /** @type {boolean} エラー状態 */
@@ -171,11 +173,6 @@ const ShiftLocationMap = ({
   useEffect(() => {
     callbacksRef.current = { onLocationPress, onBoardPress, onDraftCoordinateChange };
   }, [onLocationPress, onBoardPress, onDraftCoordinateChange]);
-
-  /* モード参照を常に最新に保つ */
-  useEffect(() => {
-    modeRef.current = { canEdit, interactionMode };
-  }, [canEdit, interactionMode]);
 
   /**
    * Leaflet CSS/JS を動的に読み込む（Web版、1回だけ実行）
@@ -234,38 +231,25 @@ const ShiftLocationMap = ({
 
     mapInstanceRef.current = map;
     initializedRef.current = true;
-
-    /* 初期化直後に操作モードを適用（refから最新の値を読む） */
-    const currentMode = modeRef.current;
-    if (currentMode.canEdit && currentMode.interactionMode === MAP_INTERACTION_MODES.pin) {
-      map.dragging.disable();
-      map.getContainer().style.cursor = 'crosshair';
-    }
+    setMapReady(true);
 
     return () => {
       map.remove();
       mapInstanceRef.current = null;
       initializedRef.current = false;
+      setMapReady(false);
       markersRef.current = {};
       draftMarkerRef.current = null;
     };
   }, [leafletLoaded]);
 
-  /**
-   * 操作モードに応じてドラッグ操作を切り替える
-   */
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    if (canEdit && interactionMode === MAP_INTERACTION_MODES.pin) {
-      map.dragging.disable();
-      map.getContainer().style.cursor = 'crosshair';
-    } else {
-      map.dragging.enable();
-      map.getContainer().style.cursor = '';
-    }
-  }, [canEdit, interactionMode]);
+    map.dragging.enable();
+    map.getContainer().style.cursor = canEdit ? 'grab' : '';
+  }, [canEdit]);
 
   /**
    * マーカーを更新する
@@ -286,8 +270,6 @@ const ShiftLocationMap = ({
 
       const isSelected = loc.id === selectedLocationId;
       const isHighlighted = loc.id === highlightedLocationId;
-      const isDraggable = isSelected && canEdit;
-
       /** 選択中（編集中）のマーカーはドラフト座標を使う */
       const coordinate = (isSelected && canEdit && draftCoordinate)
         ? draftCoordinate
@@ -302,7 +284,7 @@ const ShiftLocationMap = ({
 
       const marker = L.marker(pos, {
         icon,
-        draggable: isDraggable,
+        draggable: false,
       }).addTo(map);
 
       /** 場所名をツールチップとして常時表示 */
@@ -318,16 +300,9 @@ const ShiftLocationMap = ({
         callbacksRef.current.onLocationPress?.(loc);
       });
 
-      /** マーカードラッグ終了時に座標を更新 */
-      marker.on('dragend', (e) => {
-        const latlng = e.target.getLatLng();
-        const newCoordinate = pixelToGeo(latlng.lat, latlng.lng);
-        callbacksRef.current.onDraftCoordinateChange?.(newCoordinate);
-      });
-
       markersRef.current[loc.id] = marker;
     });
-  }, [locations, selectedLocationId, highlightedLocationId, canEdit, draftCoordinate]);
+  }, [locations, selectedLocationId, highlightedLocationId, canEdit, draftCoordinate, mapReady]);
 
   /**
    * ドラフトマーカーを更新する
@@ -353,7 +328,7 @@ const ShiftLocationMap = ({
       map.removeLayer(draftMarkerRef.current);
       draftMarkerRef.current = null;
     }
-  }, [draftCoordinate, canEdit, selectedLocationId]);
+  }, [draftCoordinate, canEdit, selectedLocationId, mapReady]);
 
   /**
    * フォーカス対象の場所にマップをパンする
@@ -369,7 +344,7 @@ const ShiftLocationMap = ({
 
     const pos = geoToPixel(Number(loc.latitude), Number(loc.longitude));
     map.setView(pos, 1, { animate: true });
-  }, [focusLocationId, locations]);
+  }, [focusLocationId, locations, mapReady]);
 
   /**
    * Native版のLeafletマップを描画する（WebView使用）
@@ -384,8 +359,8 @@ const ShiftLocationMap = ({
     } catch (error) {
       return (
         <View style={[styles.fallback, { height, backgroundColor: theme.surface }]}>
-          <MaterialCommunityIcons name="map-marker-alert" size={32} color={theme.textSecondary} />
-          <Text style={[styles.fallbackText, { color: theme.textSecondary }]}>
+          <MaterialCommunityIcons name="map-marker-alert" size={32} color={theme.text} />
+          <Text style={[styles.fallbackText, { color: theme.text }]}>
             マップの表示にはreact-native-webviewが必要です
           </Text>
         </View>
@@ -417,8 +392,8 @@ const ShiftLocationMap = ({
   if (loadError) {
     return (
       <View style={[styles.fallback, { height, backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <MaterialCommunityIcons name="map-marker-alert" size={32} color={theme.textSecondary} />
-        <Text style={[styles.fallbackText, { color: theme.textSecondary }]}>
+        <MaterialCommunityIcons name="map-marker-alert" size={32} color={theme.text} />
+        <Text style={[styles.fallbackText, { color: theme.text }]}>
           マップの読み込みに失敗しました
         </Text>
       </View>
@@ -434,39 +409,56 @@ const ShiftLocationMap = ({
 
       <Text style={[styles.description, { color: theme.textSecondary }]}>
         {canEdit
-          ? interactionMode === MAP_INTERACTION_MODES.move
-            ? 'マップをドラッグして位置を調整できます。ピンチで拡大・縮小できます。'
-            : 'マップをタップしてピンを配置できます。ピンチで拡大・縮小できます。'
+          ? 'マップをドラッグして移動し、タップでピンを配置できます。ピンチで拡大・縮小できます。'
           : '登録済みの場所と現在地を確認できます。ピンチで拡大・縮小できます。'}
       </Text>
 
-      {Platform.OS === 'web' ? (
-        <View style={[styles.mapContainer, { height }]}>
-          <div
-            ref={mapContainerRef}
-            style={{ width: '100%', height: '100%', borderRadius: 12 }}
-          />
-        </View>
-      ) : (
-        renderNativeMap()
-      )}
+      <View style={[styles.mapShell, { height }]}>
+        {Platform.OS === 'web' ? (
+          <View style={[styles.mapContainer, { height }]}>
+            <div
+              ref={mapContainerRef}
+              style={{ width: '100%', height: '100%', borderRadius: 12 }}
+            />
+          </View>
+        ) : (
+          renderNativeMap()
+        )}
+
+        {showClearSelectionButton && onClearSelection ? (
+          <TouchableOpacity
+            style={[
+              styles.clearSelectionButton,
+              {
+                backgroundColor: `${theme.primary}18`,
+                borderColor: theme.primary,
+              },
+            ]}
+            onPress={onClearSelection}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="close-circle-outline" size={18} color={theme.primary} />
+            <Text style={[styles.clearSelectionText, { color: theme.primary }]}>選択解除</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
 
       <View style={styles.legendRow}>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.normal }]} />
-          <Text style={[styles.legendText, { color: theme.textSecondary }]}>場所</Text>
+          <Text style={[styles.legendText, { color: theme.text }]}>場所</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.selected }]} />
-          <Text style={[styles.legendText, { color: theme.textSecondary }]}>選択中</Text>
+          <Text style={[styles.legendText, { color: theme.text }]}>選択中</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.highlighted }]} />
-          <Text style={[styles.legendText, { color: theme.textSecondary }]}>現在地登録先</Text>
+          <Text style={[styles.legendText, { color: theme.text }]}>現在地登録先</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.draft }]} />
-          <Text style={[styles.legendText, { color: theme.textSecondary }]}>新規</Text>
+          <Text style={[styles.legendText, { color: theme.text }]}>新規</Text>
         </View>
       </View>
     </View>
@@ -483,7 +475,33 @@ const styles = StyleSheet.create({
   /** 説明テキスト */
   description: { fontSize: 13, lineHeight: 19 },
   /** マップ表示エリア */
+  mapShell: { position: 'relative' },
+  /** マップ表示エリア */
   mapContainer: { borderRadius: 12, overflow: 'hidden', minHeight: 300 },
+  /** 選択解除ボタン */
+  clearSelectionButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  /** 選択解除テキスト */
+  clearSelectionText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
   /** WebView スタイル */
   webView: { flex: 1, backgroundColor: 'transparent' },
   /** フォールバック表示 */

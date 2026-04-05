@@ -72,24 +72,13 @@ CREATE POLICY "koseibu_shift_locations_insert_policy" ON public.koseibu_shift_lo
 DROP POLICY IF EXISTS "koseibu_shift_locations_update_policy" ON public.koseibu_shift_locations;
 CREATE POLICY "koseibu_shift_locations_update_policy" ON public.koseibu_shift_locations
   FOR UPDATE
-  USING (
-    public.is_koseibu_manager()
-    OR public.has_role('管理者')
-    OR (
-      public.has_role('厚生部')
-      AND created_by = auth.uid()
-      AND is_active = TRUE
-    )
-  )
-  WITH CHECK (
-    public.is_koseibu_manager()
-    OR public.has_role('管理者')
-    OR (
-      public.has_role('厚生部')
-      AND created_by = auth.uid()
-      AND is_active = TRUE
-    )
-  );
+  USING (public.has_role('厚生部') OR public.has_role('管理者'))
+  WITH CHECK (public.has_role('厚生部') OR public.has_role('管理者'));
+
+DROP POLICY IF EXISTS "koseibu_shift_locations_delete_policy" ON public.koseibu_shift_locations;
+CREATE POLICY "koseibu_shift_locations_delete_policy" ON public.koseibu_shift_locations
+  FOR DELETE
+  USING (public.has_role('厚生部') OR public.has_role('管理者'));
 
 COMMENT ON TABLE public.koseibu_shift_locations IS '厚生部シフトで使用する場所マスタ';
 

@@ -98,8 +98,6 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
       var markers = {};
       /** @type {L.Marker|null} ドラフト（新規登録用）マーカー */
       var draftMarker = null;
-      /** @type {string} 現在の操作モード（'pin' or 'move'） */
-      var interactionMode = 'pin';
       /** @type {boolean} 編集モードが有効か */
       var canEdit = false;
 
@@ -179,10 +177,6 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
 
         if (data.type === 'updateMarkers') {
           updateMarkers(data.payload);
-        } else if (data.type === 'updateMode') {
-          interactionMode = data.payload.interactionMode || 'pin';
-          canEdit = !!data.payload.canEdit;
-          applyInteractionMode();
         } else if (data.type === 'focusLocation') {
           focusOnLocation(data.payload);
         } else if (data.type === 'updateDraft') {
@@ -213,17 +207,11 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
           var isSelected = loc.id === selectedId;
           var isHighlighted = loc.id === highlightedId;
           var icon = createIcon(loc.name, isSelected, isHighlighted, false);
-          var m = L.marker(pos, { icon: icon, draggable: isSelected && canEdit })
+          var m = L.marker(pos, { icon: icon, draggable: false })
             .addTo(map);
 
           m.on('click', function() {
             sendToRN({ type: 'locationPress', payload: { id: loc.id } });
-          });
-
-          m.on('dragend', function(e) {
-            var latlng = e.target.getLatLng();
-            var geo = pixelToGeo(latlng.lat, latlng.lng, campusBounds);
-            sendToRN({ type: 'draftCoordinateChange', payload: geo });
           });
 
           markers[loc.id] = m;
@@ -284,19 +272,9 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
         }
       }
 
-      /**
-       * 操作モードに応じてマップのドラッグ・ズーム操作を切り替える
-       * - ピン指定モード: ドラッグ無効（タップでピンを配置可能に）、ズームは有効
-       * - 地図移動モード: ドラッグ有効（通常のマップ操作）
-       */
       function applyInteractionMode() {
-        if (canEdit && interactionMode === 'pin') {
-          map.dragging.disable();
-          map.getContainer().style.cursor = 'crosshair';
-        } else {
-          map.dragging.enable();
-          map.getContainer().style.cursor = '';
-        }
+        map.dragging.enable();
+        map.getContainer().style.cursor = canEdit ? 'grab' : '';
       }
 
       /* 初回のモード適用 */
@@ -304,7 +282,7 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
 
       /* マップタップでピンを立てるイベント */
       map.on('click', function(e) {
-        if (!canEdit || interactionMode !== 'pin') return;
+        if (!canEdit) return;
         sendToRN({ type: 'boardPress', payload: pixelToGeo(e.latlng.lat, e.latlng.lng, window._campusBounds || {}) });
       });
 
@@ -315,7 +293,6 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
       /* グローバルAPI: Web版から直接呼べるようにする */
       window.leafletMap = {
         updateMarkers: function(payload) { updateMarkers(payload); window._campusBounds = payload.campusBounds; },
-        updateMode: function(payload) { interactionMode = payload.interactionMode || 'pin'; canEdit = !!payload.canEdit; applyInteractionMode(); },
         focusLocation: function(payload) { focusOnLocation(payload); },
         updateDraft: function(payload) { updateDraftMarker(payload); },
         getMap: function() { return map; }

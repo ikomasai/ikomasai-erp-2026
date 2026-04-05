@@ -20,11 +20,6 @@ export const LOCATION_ACTION_TYPES = {
   statusChange: 'status_change',
 };
 
-export const MAP_INTERACTION_MODES = {
-  move: 'move',
-  pin: 'pin',
-};
-
 /**
  * 厚生部員のステータス
  * 厚生部長が配置状況を把握するための3つの状態
