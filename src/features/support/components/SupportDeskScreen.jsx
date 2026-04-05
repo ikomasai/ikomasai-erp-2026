@@ -43,7 +43,6 @@ import OfflineBanner from '../../../shared/components/OfflineBanner';
 import { createRadioLog, listRadioLogs } from '../../../services/supabase/radioLogService';
 import {
   assignPatrolTask,
-  createCustomPatrolTask,
   createDispatchPatrolTask,
   createEvaluationPatrolTask,
   deletePatrolTask,
@@ -451,7 +450,6 @@ const HQ_TABS = [
   { key: 'tickets', label: '📋 連絡案件' },
   { key: 'keys', label: '🔑 鍵管理' },
   { key: 'patrol', label: '🚶 巡回' },
-  { key: 'custom_task', label: '📌 独自タスク' },
   { key: 'radio', label: '📡 無線' },
   { key: 'master', label: '⚙️ 鍵マスタ' },
   { key: 'settings', label: '🛠 設定' },
@@ -880,13 +878,6 @@ const SupportDeskScreen = ({
   const [dispatchCandidates, setDispatchCandidates] = useState([]);
   /** 振り分けタスク候補読み込み中フラグ */
   const [isLoadingDispatchCandidates, setIsLoadingDispatchCandidates] = useState(false);
-
-  /** 独自タスクのタスク内容入力 */
-  const [customTaskNotes, setCustomTaskNotes] = useState('');
-  /** 独自タスクの担当者ユーザーID（空文字＝未割当） */
-  const [customTaskAssigneeId, setCustomTaskAssigneeId] = useState('');
-  /** 独自タスク作成中フラグ */
-  const [isCreatingCustomTask, setIsCreatingCustomTask] = useState(false);
 
   /** タスク実績データ（担当者別集計元） */
   const [taskStatsData, setTaskStatsData] = useState([]);
@@ -2936,41 +2927,6 @@ const SupportDeskScreen = ({
   };
 
   /**
-   * 独自タスクを作成して指定した巡回者に割り当てる
-   * @returns {Promise<void>} 作成処理
-   */
-  const handleCreateCustomTask = async () => {
-    if (!customTaskNotes.trim()) {
-      showMessage('エラー', 'タスク内容を入力してください');
-      return;
-    }
-    if (!user?.id) {
-      showMessage('エラー', 'ログイン情報が取得できません');
-      return;
-    }
-
-    setIsCreatingCustomTask(true);
-    const { error } = await createCustomPatrolTask({
-      notes: customTaskNotes.trim(),
-      assignedTo: customTaskAssigneeId || null,
-      creatorUserId: user.id,
-    });
-    setIsCreatingCustomTask(false);
-
-    if (error) {
-      showMessage('エラー', error.message || 'タスク作成に失敗しました');
-      return;
-    }
-
-    /** 割当状態を保存してからリセット */
-    const wasAssigned = !!customTaskAssigneeId;
-    setCustomTaskNotes('');
-    setCustomTaskAssigneeId('');
-    await loadHqPatrolTasks();
-    showMessage('タスク作成完了', wasAssigned ? '担当者へ通知を送信しました' : 'タスクを作成しました（担当者未割当）');
-  };
-
-  /**
    * タスク実績データを取得して担当者ごとに集計する
    * @returns {Promise<void>} 取得処理
    */
@@ -3516,18 +3472,6 @@ const SupportDeskScreen = ({
       setIsStatsUnlocked(false);
     }
   }, [activeTab]);
-
-  /**
-   * 独自タスクタブに切り替えたとき、候補が未取得であれば自動読み込みする
-   */
-  useEffect(() => {
-    if (!isHQRole || activeTab !== 'custom_task') {
-      return;
-    }
-    if (dispatchCandidates.length === 0 && !isLoadingDispatchCandidates) {
-      loadDispatchCandidates();
-    }
-  }, [isHQRole, activeTab]);
 
   /**
    * 概況タブ表示時に施錠確認一覧を取得する
@@ -4233,7 +4177,8 @@ const SupportDeskScreen = ({
         <View style={[styles.tabSegmentBar, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <ScrollView
             horizontal
-            showsHorizontalScrollIndicator={Platform.OS !== 'web'}
+            showsHorizontalScrollIndicator={true}
+            decelerationRate="fast"
             contentContainerStyle={[styles.tabSegmentBarContent, { backgroundColor: `${theme.border}55` }]}
           >
             {HQ_TABS.map((tab) => {
@@ -7443,158 +7388,6 @@ const SupportDeskScreen = ({
           </View>
         ) : null}
 
-        {/* ─── 独自タスクタブ ─── */}
-        {isHQRole && activeTab === 'custom_task' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface }]}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>独自タスクを作成</Text>
-            </View>
-            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-              巡回者を選択してタスクを投げることができます。担当者は未割当のままにすることもできます。
-            </Text>
-
-            {/* 担当者選択 */}
-            <Text style={[styles.label, { color: theme.text }]}>担当者を選択（企画管理部）</Text>
-            {isLoadingDispatchCandidates ? (
-              <Text style={[styles.helpText, { color: theme.textSecondary }]}>読み込み中...</Text>
-            ) : dispatchCandidates.length === 0 ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-                  企画管理部のメンバーが見つかりません
-                </Text>
-                <TouchableOpacity
-                  style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
-                  onPress={loadDispatchCandidates}
-                >
-                  <Text style={[styles.refreshButtonText, { color: theme.primary }]}>読み込む</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <ScrollView
-                style={[styles.dispatchAssigneeList, { marginBottom: 12 }]}
-                contentContainerStyle={{ gap: 6 }}
-              >
-                {/* 未割当オプション */}
-                <Pressable
-                  style={[
-                    styles.dispatchAssigneeItem,
-                    {
-                      borderColor: !customTaskAssigneeId ? theme.primary : theme.border,
-                      backgroundColor: !customTaskAssigneeId ? `${theme.primary}14` : theme.background,
-                    },
-                  ]}
-                  onPress={() => setCustomTaskAssigneeId('')}
-                >
-                  <Text style={[styles.dispatchAssigneeText, { color: !customTaskAssigneeId ? theme.primary : theme.text }]}>
-                    未割当のまま作成
-                  </Text>
-                </Pressable>
-
-                {dispatchCandidates.map((candidate) => {
-                  /** 選択中かどうか */
-                  const isSelected = customTaskAssigneeId === candidate.userId;
-                  /** アクティブタスク（稼働中）を持つかどうか */
-                  const activeTasks = getAssignedActivePatrolTasks(hqPatrolTasks, candidate.userId);
-                  /** アクティブタスクのラベル */
-                  const activeTaskLabel =
-                    activeTasks.length > 0
-                      ? PATROL_TASK_TYPE_LABELS[getPatrolTaskDisplayType(activeTasks[0])] || '対応中'
-                      : '';
-                  /** 対応中タスクを持つかどうか */
-                  const hasActiveTask = activeTasks.length > 0;
-                  return (
-                    <Pressable
-                      key={candidate.userId}
-                      style={[
-                        styles.dispatchAssigneeItem,
-                        {
-                          borderColor: isSelected ? theme.primary : hasActiveTask ? '#D1242F' : theme.border,
-                          backgroundColor: isSelected
-                            ? `${theme.primary}14`
-                            : hasActiveTask
-                              ? '#D1242F0A'
-                              : theme.background,
-                        },
-                      ]}
-                      onPress={() => {
-                        if (hasActiveTask) {
-                          return;
-                        }
-                        setCustomTaskAssigneeId(candidate.userId);
-                      }}
-                      disabled={hasActiveTask}
-                    >
-                      <Text
-                        style={[
-                          styles.dispatchAssigneeText,
-                          {
-                            color: hasActiveTask
-                              ? '#D1242F'
-                              : isSelected
-                                ? theme.primary
-                                : theme.text,
-                          },
-                        ]}
-                      >
-                        {candidate.name}
-                        {hasActiveTask ? `（対応中: ${activeTaskLabel}）` : ''}
-                      </Text>
-                      {candidate.organization ? (
-                        <Text style={[styles.dispatchAssigneeSub, { color: theme.textSecondary }]}>
-                          {candidate.organization}
-                        </Text>
-                      ) : null}
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            )}
-
-            {/* タスク内容入力 */}
-            <Text style={[styles.label, { color: theme.text }]}>タスク内容 *</Text>
-            <TextInput
-              value={customTaskNotes}
-              onChangeText={setCustomTaskNotes}
-              placeholder="例：A棟3Fの出展団体に企画ルール変更を伝えてください"
-              placeholderTextColor={theme.textSecondary}
-              style={[
-                styles.textArea,
-                {
-                  borderColor: theme.border,
-                  backgroundColor: theme.background,
-                  color: theme.text,
-                  minHeight: 90,
-                },
-              ]}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-            />
-
-            {/* 作成ボタン */}
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                {
-                  backgroundColor:
-                    customTaskNotes.trim() && !isCreatingCustomTask ? theme.primary : theme.border,
-                  marginTop: 8,
-                },
-              ]}
-              onPress={handleCreateCustomTask}
-              disabled={!customTaskNotes.trim() || isCreatingCustomTask}
-            >
-              <Text style={styles.primaryButtonText}>
-                {isCreatingCustomTask
-                  ? '作成中...'
-                  : customTaskAssigneeId
-                    ? '割り当てて作成'
-                    : '未割当で作成'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
         {/* ─── 設定タブ ─── */}
         {isHQRole && activeTab === 'settings' ? (
           <>
@@ -7938,22 +7731,26 @@ const styles = StyleSheet.create({
   /** HQロール向けタブバー外枠: ThemedHeader 直下に固定 */
   tabSegmentBar: {
     borderBottomWidth: 1,
-    paddingVertical: 8,
+    paddingTop: 10,
+    paddingBottom: 10,
     paddingHorizontal: 12,
   },
   /** Segmented Control コンテナ: 薄いグレー背景 + 角丸 */
   tabSegmentBarContent: {
     flexDirection: 'row',
-    gap: 3,
+    gap: 4,
     paddingHorizontal: 4,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 14,
   },
-  /** 個々のタブアイテム: 非アクティブは透明 */
+  /** 個々のタブアイテム: 非アクティブは透明 / タップ領域を広く確保 */
   tabSegmentBarItem: {
     borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   /** アクティブタブ: 白カード + shadow */
   tabSegmentBarItemActive: {
@@ -7965,7 +7762,7 @@ const styles = StyleSheet.create({
   },
   /** タブテキスト */
   tabSegmentBarText: {
-    fontSize: 14,
+    fontSize: 13,
   },
   content: {
     padding: 16,
@@ -9240,28 +9037,6 @@ const styles = StyleSheet.create({
   evalReviewSummaryText: {
     fontSize: 12,
     lineHeight: 18,
-  },
-  /** 独自タスク用: 複数行テキスト入力 */
-  textArea: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  /** 独自タスク用: 確定ボタン */
-  primaryButton: {
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  /** 独自タスク用: 確定ボタンテキスト */
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
   },
 });
 
