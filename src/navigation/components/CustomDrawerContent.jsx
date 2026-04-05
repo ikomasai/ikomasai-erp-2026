@@ -3,7 +3,7 @@
  * サイドバーのUI・スタイルをカスタマイズ
  */
 
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,16 @@ import {
   ScrollView,
   TouchableOpacity,
   useWindowDimensions,
+  PanResponder,
 } from 'react-native';
 import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { useTheme } from '../../shared/hooks/useTheme';
-import { canAccessScreen, hasRole, isAdmin } from '../../services/supabase/permissionService';
+import {
+  canAccessManagementSupportScreen,
+  canAccessScreen,hasRole, isAdmin
+} from '../../services/supabase/permissionService';
 
 /**
  * ドロワーアイテムコンポーネント
@@ -60,8 +64,40 @@ const DrawerItem = ({ label, isActive, onPress, theme }) => {
 const CustomDrawerContent = (props) => {
   /** 画面サイズを取得 */
   const { width } = useWindowDimensions();
+  /** モバイル判定 */
+  const isMobile = width < 768;
   /** SafeAreaのInsets */
   const insets = useSafeAreaInsets();
+
+  /**
+   * navigationをrefで保持してPanResponder内から最新状態を参照可能にする
+   */
+  const navigationRef = useRef(props.navigation);
+  navigationRef.current = props.navigation;
+
+  /**
+   * ドロワー右端の左スワイプ検知ハンドラー
+   * 左方向に50px以上スワイプするとドロワーを閉じる
+   */
+  const closePanResponder = useRef(
+    PanResponder.create({
+      /** タップは奪わない */
+      onStartShouldSetPanResponder: () => false,
+      /** 左方向の水平スワイプのみ引き受ける */
+      onMoveShouldSetPanResponder: (_evt, gestureState) => {
+        return (
+          gestureState.dx < -5 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy)
+        );
+      },
+      /** 左スワイプ距離が十分ならドロワーを閉じる */
+      onPanResponderRelease: (_evt, gestureState) => {
+        if (gestureState.dx < -50) {
+          navigationRef.current.closeDrawer();
+        }
+      },
+    })
+  ).current;
   /** 現在のルート名 */
   const currentRouteName = props.state.routeNames[props.state.index];
   /** 認証コンテキスト */
@@ -104,10 +140,18 @@ const CustomDrawerContent = (props) => {
     1: '企画・屋台一覧',
     3: 'チケット配布率',
     4: '落とし物検索',
+    5: '迷子検索',
     6: '厚生部場所管理',
+    7: 'アクセス権限制御',
+    8: '臨時ヘルプ',
     9: '実長機能',
     10: '本部',
     11: '当日部員',
+    12: '巡回サポート',
+    13: '本部サポート',
+    14: '会計対応',
+    15: '物品対応',
+    16: '企画者サポート',
   };
 
   /**
@@ -130,17 +174,28 @@ const CustomDrawerContent = (props) => {
   const PERMISSION_NAME_MAP = {
     1: '企画・屋台一覧',
     4: '落とし物検索',
+    5: '迷子検索',
     6: '厚生部場所管理',
+    9: '実長機能',
+    10: '本部',
     11: '当日部員',
   };
 
-  const accessibleItems = Array.from({ length: 11 }, (_, index) => {
+  const accessibleItems = Array.from({ length: 16 }, (_, index) => {
     const itemNumber = index + 1;
     // カスタム権限名があればそれを使用、なければデフォルト
     const permissionName = PERMISSION_NAME_MAP[itemNumber] || `item${itemNumber}`;
-    const isKoseibuScreen = itemNumber === 6;
-    const isAccessible = isKoseibuScreen
-      ? canAccessAdmin || hasRole(userInfo?.roles || [], '厚生部')
+   const isKoseibuScreen = itemNumber === 6;
+  const isManagementSupportScreen = ['item12', 'item13', 'item14', 'item15'].includes(permissionName);
+
+  let isAccessible;
+  if (isKoseibuScreen) {
+  isAccessible = canAccessAdmin || hasRole(userInfo?.roles || [], '厚生部');
+  } else if (isManagementSupportScreen) {
+  isAccessible = canAccessManagementSupportScreen(userInfo?.roles || [], permissionName);
+  } else {
+  isAccessible = canAccessScreen(userInfo?.roles || [], permissionName);
+  }
       : canAccessScreen(userInfo?.roles || [], permissionName);
     // カスタムラベルがあればそれを使用、なければデフォルト
     const label = ITEM_LABELS[itemNumber] || `項目${itemNumber}`;
@@ -156,7 +211,11 @@ const CustomDrawerContent = (props) => {
   }).filter((item) => item.isAccessible);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}>
+    /* モバイル時のみコンテナ全体に左スワイプ検知を付与（タップは子要素が優先して受け取る） */
+    <View
+      style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.surface }]}
+      {...(isMobile ? closePanResponder.panHandlers : {})}
+    >
       {/* ヘッダー */}
       <View style={[styles.header, { borderBottomColor: theme.border }]}>
         <Text style={[styles.headerTitle, { color: theme.text }]}>生駒祭 ERP</Text>
@@ -181,15 +240,27 @@ const CustomDrawerContent = (props) => {
       >
         {/* アクセス可能な項目のみ表示 */}
         {accessibleItems.length > 0 ? (
-          accessibleItems.map((item) => (
-            <DrawerItem
-              key={item.screenName}
-              label={item.label}
-              isActive={currentRouteName === item.screenName}
-              onPress={() => navigateTo(item.screenName)}
-              theme={theme}
-            />
-          ))
+          <>
+            {accessibleItems.map((item) => (
+              <React.Fragment key={item.screenName}>
+                <DrawerItem
+                  label={item.label}
+                  isActive={currentRouteName === item.screenName}
+                  onPress={() => navigateTo(item.screenName)}
+                  theme={theme}
+                />
+
+                {item.screenName === '01_Events&Stalls_list' && (
+                  <DrawerItem
+                    label="タイムスケジュール"
+                    isActive={currentRouteName === 'TimeSchedule'}
+                    onPress={() => navigateTo('TimeSchedule')}
+                    theme={theme}
+                  />
+                )}
+              </React.Fragment>
+            ))}
+          </>
         ) : (
           <View style={styles.noAccessContainer}>
             <Text style={[styles.noAccessText, { color: theme.textSecondary }]}>
@@ -202,19 +273,11 @@ const CustomDrawerContent = (props) => {
         <View style={[styles.settingsSection, { borderTopColor: theme.border }]}>
           <Text style={[styles.settingsSectionTitle, { color: theme.textSecondary }]}>設定</Text>
           <DrawerItem
-            label="⚙️ テーマ設定"
-            isActive={currentRouteName === 'SettingsTheme'}
-            onPress={() => navigateTo('SettingsTheme')}
+            label="設定"
+            isActive={currentRouteName === 'Settings'}
+            onPress={() => navigateTo('Settings')}
             theme={theme}
           />
-          {canAccessAdmin && (
-            <DrawerItem
-              label="🔔 通知送信（管理者）"
-              isActive={currentRouteName === 'AdminTestNotification'}
-              onPress={() => navigateTo('AdminTestNotification')}
-              theme={theme}
-            />
-          )}
         </View>
       </ScrollView>
 
@@ -233,6 +296,15 @@ const CustomDrawerContent = (props) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  /** ドロワー全体の左スワイプ検知オーバーレイ */
+  closeSwipeOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 999,
   },
   header: {
     paddingHorizontal: 20,

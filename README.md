@@ -63,6 +63,8 @@ cd react-native-expo-template-2026
 npm install
 ```
 
+`fuse.js`（企画・屋台一覧の検索で使用）は `package.json` の依存関係に含まれているため、この手順で一緒にインストールされます。
+
 ### 3. 環境変数を設定
 
 ```bash

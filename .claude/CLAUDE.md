@@ -5,9 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 必読ドキュメント
 
 コードを書く前に必ず確認:
+- `docs/AI用プロンプト/AGENTS.md` — AI 共通入口。必読順と現在の編集対象
+- `docs/アプリ理解.md` — アプリ全体の理解を集約した基準ドキュメント
+- `docs/管理部統合システム仕様書.md` — 現在の主開発対象である企画管理部統合システムの仕様
 - `docs/プロジェクト仕様書.md` — 機能要件・画面設計・DB設計・API設計
 - `docs/AI用プロンプト/supabaseスキーマ参照.md` — 全49テーブルの詳細スキーマ
 - `.mcp.json` — 利用可能なMCPサーバー設定（下記「MCP サーバー活用ガイド」参照）
+
+現在ここで主に開発しているのは企画管理部統合システムであり、通常編集対象は `item12`〜`item16` と `src/features/support`。
 
 ## 技術スタック
 
@@ -36,7 +41,7 @@ npm run build          # Web版ビルド（expo export --platform web）
 
 ```
 index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
-  └→ 認証済み: DrawerNavigator（Item1〜10, JimuShift, Settings, Admin, Notifications）
+  └→ 認証済み: DrawerNavigator（企画・屋台一覧, Item2〜10, Item12〜16, JimuShift, Settings, Admin, Notifications）
   └→ 未認証: LoginScreen
   └→ 初回ログイン: PasswordChangeModal
 ```
@@ -50,7 +55,7 @@ index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
 - `hooks/` — カスタムフック
 - `constants.js` — 機能固有の定数
 
-現在の機能一覧: item1〜item10, auth, jimu-shift, settings, admin, notifications
+現在の機能一覧: 01_Events&Stalls_list, item2〜item10, item12〜item16, auth, support, jimu-shift, settings, admin, notifications
 
 ### 共有レイヤー
 

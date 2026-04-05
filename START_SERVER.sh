@@ -5,8 +5,12 @@ echo "Expo開発サーバー + 地震監視サービス起動"
 echo "=========================================="
 echo ""
 
-# プロジェクトディレクトリに移動
-cd /Users/shiraishuugou/Documents/GitHub/ikomasai-erp-2026
+# プロジェクトディレクトリに移動（スクリプト配置場所を基準にする）
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR" || {
+    echo "❌ エラー: プロジェクトディレクトリへ移動できません: $SCRIPT_DIR"
+    exit 1
+}
 
 # .envファイルの存在確認と読み込み
 if [ -f .env ]; then
@@ -66,4 +70,3 @@ echo ""
 
 # Webサーバーと地震監視サービスを同時起動
 npm run web
-

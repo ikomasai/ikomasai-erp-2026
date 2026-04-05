@@ -15,6 +15,7 @@ const LATE_JOIN_ALLOW = 'allow';
 const LATE_JOIN_DENY = 'deny';
 const TIME_DROPDOWN_MIN_WIDTH = 280;
 const TIME_DROPDOWN_MAX_HEIGHT = 360;
+const TOGGLE_ACTIVE_COLOR = '#2563EB';
 
 /**
  * フォームの空状態。
@@ -54,7 +55,8 @@ const withAlpha = (hexColor, alpha) => {
  *   initialValues?: Record<string, any>,
  *   submitLabel?: string,
  *   onSubmit?: (payload: Record<string, any>) => void,
- *   disabled?: boolean
+ *   disabled?: boolean,
+ *   resetDraftToken?: number
  * }} props
  * @returns {JSX.Element}
  */
@@ -63,9 +65,11 @@ export const RecruitForm = ({
   submitLabel = '作成',
   onSubmit,
   disabled = false,
+  resetDraftToken = 0,
 }) => {
   const { theme } = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isEditing = Boolean(initialValues?.id);
 
   const [form, setForm] = useState({ ...emptyForm, ...initialValues });
   const [errors, setErrors] = useState({});
@@ -84,6 +88,8 @@ export const RecruitForm = ({
   const [meetMinute, setMeetMinute] = useState('');
   const [isImmediateMeetTime, setIsImmediateMeetTime] = useState(false);
   const [containerLayout, setContainerLayout] = useState(null);
+  const [notifyAllOnCreate, setNotifyAllOnCreate] = useState(true);
+  const [notifyApplicantsOnUpdate, setNotifyApplicantsOnUpdate] = useState(true);
 
   const dateOptions = [
     { label: '2026/11/1', value: '2026-11-01' },
@@ -173,7 +179,50 @@ export const RecruitForm = ({
     setIsImmediateMeetTime(Boolean(parsedMeet?.immediate));
     setMeetHour(parsedMeet?.hour || '');
     setMeetMinute(parsedMeet?.minute || '');
-  }, [initialValues]);
+    setNotifyAllOnCreate(
+      initialValues?.notify_all_on_create === undefined
+        ? true
+        : Boolean(initialValues?.notify_all_on_create)
+    );
+    setNotifyApplicantsOnUpdate(
+      initialValues?.notify_applicants_on_update === undefined
+        ? Boolean(initialValues?.id)
+        : Boolean(initialValues?.notify_applicants_on_update)
+    );
+  }, [
+    initialValues?.id,
+    initialValues?.headcount,
+    initialValues?.work_date,
+    initialValues?.work_time,
+    initialValues?.location,
+    initialValues?.meet_time,
+    initialValues?.meet_place,
+    initialValues?.description,
+    initialValues?.reward,
+    initialValues?.belongings,
+    initialValues?.department_id,
+    initialValues?.notify_all_on_create,
+    initialValues?.notify_applicants_on_update,
+  ]);
+
+  useEffect(() => {
+    if (isEditing) return;
+    setForm({ ...emptyForm });
+    setErrors({});
+    setDatePickerOpen(false);
+    setTimePickerOpen(false);
+    setMeetTimePickerOpen(false);
+    setStartHour('');
+    setStartMinute('');
+    setIsImmediateTime(false);
+    setMeetHour('');
+    setMeetMinute('');
+    setIsImmediateMeetTime(false);
+    setDurationMinutes('未定');
+    setLateJoin(LATE_JOIN_ALLOW);
+    setNotifyAllOnCreate(true);
+    setNotifyApplicantsOnUpdate(false);
+  }, [isEditing, resetDraftToken]);
 
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -271,6 +320,8 @@ export const RecruitForm = ({
         form.meet_time ||
         (isImmediateTime ? IMMEDIATE_TIME_LABEL : `${startHour}:${startMinute}`),
       belongings: form.belongings || OPTIONAL_FIELD_DEFAULTS.belongings,
+      notify_all_on_create: notifyAllOnCreate,
+      notify_applicants_on_update: notifyApplicantsOnUpdate,
     };
     onSubmit?.(payload);
   };
@@ -505,6 +556,55 @@ export const RecruitForm = ({
 
       {/* 行5: 業務内容 */}
       {renderInput('業務内容', 'description', { multiline: true, inputStyle: styles.textarea })}
+      {!isEditing ? (
+        <View style={styles.notifyToggleRow}>
+          <Text style={styles.notifyToggleLabel}>作成時に全員への通知を行う</Text>
+          <Pressable
+            style={[
+              styles.customToggleTrack,
+              { backgroundColor: notifyAllOnCreate ? withAlpha(TOGGLE_ACTIVE_COLOR, '55') : withAlpha(theme.textSecondary, '55') },
+              disabled && styles.customToggleDisabled,
+            ]}
+            onPress={() => setNotifyAllOnCreate((prev) => !prev)}
+            disabled={disabled}
+          >
+            <View
+              style={[
+                styles.customToggleThumb,
+                {
+                  backgroundColor: notifyAllOnCreate ? TOGGLE_ACTIVE_COLOR : theme.surface,
+                  borderColor: notifyAllOnCreate ? TOGGLE_ACTIVE_COLOR : withAlpha(theme.textSecondary, '88'),
+                  transform: [{ translateX: notifyAllOnCreate ? 18 : 0 }],
+                },
+              ]}
+            />
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.notifyToggleRow}>
+          <Text style={styles.notifyToggleLabel}>変更時に応募済みの人へ通知する</Text>
+          <Pressable
+            style={[
+              styles.customToggleTrack,
+              { backgroundColor: notifyApplicantsOnUpdate ? withAlpha(TOGGLE_ACTIVE_COLOR, '55') : withAlpha(theme.textSecondary, '55') },
+              disabled && styles.customToggleDisabled,
+            ]}
+            onPress={() => setNotifyApplicantsOnUpdate((prev) => !prev)}
+            disabled={disabled}
+          >
+            <View
+              style={[
+                styles.customToggleThumb,
+                {
+                  backgroundColor: notifyApplicantsOnUpdate ? TOGGLE_ACTIVE_COLOR : theme.surface,
+                  borderColor: notifyApplicantsOnUpdate ? TOGGLE_ACTIVE_COLOR : withAlpha(theme.textSecondary, '88'),
+                  transform: [{ translateX: notifyApplicantsOnUpdate ? 18 : 0 }],
+                },
+              ]}
+            />
+          </Pressable>
+        </View>
+      )}
       <Button title={submitLabel} onPress={handleSubmit} disabled={disabled} color={theme.primary} />
       {datePickerOpen && (
         <>
@@ -760,6 +860,39 @@ const createStyles = (theme) =>
     textarea: {
       minHeight: 100,
       textAlignVertical: 'top',
+    },
+    notifyToggleRow: {
+      marginTop: 2,
+      marginBottom: 10,
+      paddingVertical: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-start',
+      gap: 8,
+      borderTopWidth: 1,
+      borderTopColor: withAlpha(theme.border, 'BB'),
+    },
+    notifyToggleLabel: {
+      fontSize: 13,
+      color: theme.text,
+    },
+    customToggleTrack: {
+      width: 44,
+      height: 26,
+      borderRadius: 999,
+      paddingHorizontal: 3,
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: withAlpha(theme.border, 'BB'),
+    },
+    customToggleThumb: {
+      width: 18,
+      height: 18,
+      borderRadius: 999,
+      borderWidth: 1,
+    },
+    customToggleDisabled: {
+      opacity: 0.6,
     },
     dropdownItem: {
       paddingVertical: 8,

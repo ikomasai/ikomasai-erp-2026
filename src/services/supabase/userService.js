@@ -130,3 +130,82 @@ export const updateUserProfile = async (userId, updates) => {
     return { profile: null, error };
   }
 };
+
+/**
+ * 全ユーザープロフィール一覧を取得（借受人プルダウン用）
+ * user_profiles は RLS OFF のため認証済みユーザーなら全件取得可能
+ * @returns {Promise<{data: Array, error: Error|null}>}
+ *   data: [{ id, user_id, name, organization }]
+ */
+export const selectAllUserProfiles = async () => {
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_profiles')
+      .select('id,user_id,name,organization')
+      .order('name');
+
+    if (error) {
+      console.error('全ユーザープロフィール取得エラー:', error.message);
+      return { data: [], error };
+    }
+
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('全ユーザープロフィール取得処理でエラーが発生:', error);
+    return { data: [], error };
+  }
+};
+
+/**
+ * 巡回中フラグを更新
+ * on_patrol = true にすると本部ダッシュボードに「巡回中」として表示される
+ * @param {String} userId - ユーザーID
+ * @param {boolean} onPatrol - 巡回中フラグ
+ * @returns {Promise<Object>} 更新結果（profile, error）
+ */
+export const updatePatrolStatus = async (userId, onPatrol) => {
+  return updateUserProfile(userId, { on_patrol: Boolean(onPatrol) });
+};
+
+/**
+ * 現在巡回中のユーザー一覧を取得（on_patrol = true）
+ * @returns {Promise<{data: Array, error: Error|null}>}
+ *   data: [{ id, user_id, name, organization }]
+ */
+export const selectPatrollingUsers = async () => {
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_profiles')
+      .select('id,user_id,name,organization')
+      .eq('on_patrol', true)
+      .order('name');
+
+    if (error) {
+      console.error('巡回中ユーザー取得エラー:', error.message);
+      return { data: [], error };
+    }
+
+    return { data: data || [], error: null };
+  } catch (error) {
+    console.error('巡回中ユーザー取得処理でエラーが発生:', error);
+    return { data: [], error };
+  }
+};
+
+/**
+ * 企画者サポートの企画情報をプロフィールへ保存
+ * @param {String} userId - ユーザーID
+ * @param {Object} input - 企画情報
+ * @param {String|null|undefined} input.eventName - 企画名
+ * @param {String|null|undefined} input.eventLocation - 企画場所
+ * @returns {Promise<Object>} 更新結果（profile, error）
+ */
+export const updateExhibitorEventProfile = async (userId, { eventName, eventLocation }) => {
+  const normalizedEventName = (eventName || '').trim() || null;
+  const normalizedEventLocation = (eventLocation || '').trim() || null;
+
+  return updateUserProfile(userId, {
+    exhibitor_event_name: normalizedEventName,
+    exhibitor_event_location: normalizedEventLocation,
+  });
+};

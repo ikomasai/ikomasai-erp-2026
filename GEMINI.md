@@ -2,7 +2,16 @@
 
 ## 必読ドキュメント
 
-実装前に `docs/プロジェクト仕様書.md` を確認し、画面・DB・API要件に沿って変更する。
+コードを書く前に次をこの順で確認する。
+
+- `docs/AI用プロンプト/AGENTS.md`
+- `docs/アプリ理解.md`
+- `docs/管理部統合システム仕様書.md`（`item12`〜`item16` / `support` を触る場合は最優先）
+- `docs/プロジェクト仕様書.md`
+- `docs/AI用プロンプト/supabaseスキーマ参照.md`
+- `.mcp.json`
+
+現在ここで主に開発しているのは企画管理部統合システムであり、通常編集対象は `item12`〜`item16` と `src/features/support`。
 
 ## 技術スタック
 
@@ -18,7 +27,7 @@
 
 ```
 index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
-  └→ 認証済み: DrawerNavigator（Item1〜10, JimuShift, Settings, Admin, Notifications）
+  └→ 認証済み: DrawerNavigator（企画・屋台一覧, Item2〜10, Item12〜16, JimuShift, Settings, Admin, Notifications）
   └→ 未認証: LoginScreen
   └→ 初回ログイン: PasswordChangeModal
 ```
@@ -32,7 +41,7 @@ index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
 - `hooks/` — カスタムフック
 - `constants.js` — 機能固有定数
 
-機能一覧: item1〜item10, auth, jimu-shift, settings, admin, notifications
+機能一覧: 01_Events&Stalls_list, item2〜item10, item12〜item16, auth, support, jimu-shift, settings, admin, notifications
 
 ### 共有レイヤー
 
@@ -116,12 +125,13 @@ DrawerNavigator でブレークポイント768px。PC版は常時サイドバー
 1. **仕様確認** → `docs/プロジェクト仕様書.md` の該当セクション
 2. **探索** → 関連ファイル・既存パターン・ナビゲーション構造を把握
 3. **計画** → 変更ファイル一覧・新規ファイル命名・DB変更計画
-   - 3ファイル以上の変更: 計画を提示し承認を得てから実装
+   - **コード変更を伴う全ての作業**: 3ファイル未満であっても、グローバルルールに従い `ai_tasks/` 内に実装計画を作成し承認を得ること。
 4. **実装** → 規約遵守・エラーハンドリング・1機能内完結
    - 全関数に JSDoc 日本語コメントを記載（処理内容・引数・戻り値）
    - 変数宣言にもコメントを付与し、人間がコードリーディングで処理を理解できる状態にする
    - 複雑なロジックにはインラインコメントで「なぜ」を説明
 5. **コミット** → `[add/fix/update/remove/docs]` 形式・論理単位で原子的
+
 
 ### Edge Function 変更時
 
@@ -159,3 +169,4 @@ DrawerNavigator でブレークポイント768px。PC版は常時サイドバー
 10. StyleSheet 以外のスタイリング
 11. ライブラリAPIの推測使用（公式ドキュメントを確認すること）
 12. 計画なしの大規模変更（3ファイル以上の変更は計画を提示すること）
+13. 物理的な `ai_tasks/` フォルダへのドキュメント出力を伴わないコード変更

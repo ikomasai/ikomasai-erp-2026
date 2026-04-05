@@ -30,6 +30,8 @@ const EventsStallsList01Screen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [selectedArea, setSelectedArea] = useState(AREA_ALL);
+  const [selectedBuilding, setSelectedBuilding] = useState('すべて');
+  const [selectedStallLetter, setSelectedStallLetter] = useState('すべて');
   const [sortOrder, setSortOrder] = useState(SORT_OPTIONS.NAME_ASC);
   const [showFilters, setShowFilters] = useState(false);
 
@@ -38,13 +40,22 @@ const EventsStallsList01Screen = ({ navigation }) => {
   const [isModalVisible, setIsModalVisible] = useState(false);
 
   // カスタムフックでデータ取得
-  const { data, stallCategories, eventCategories, areas, loading, error } = useEventsStallsList01Data(
+  const { data, stallCategories, eventCategories, areas, buildings, stallAreaLetters, loading, error } = useEventsStallsList01Data(
     activeTab,
     searchQuery,
     selectedCategories,
     sortOrder,
-    selectedArea
+    selectedArea,
+    selectedBuilding,
+    selectedStallLetter
   );
+
+  // エリア変更ハンドラ（詳細建物をリセットする）
+  const handleAreaChange = useCallback((areaId) => {
+    setSelectedArea(areaId);
+    setSelectedBuilding('すべて');
+    setSelectedStallLetter('すべて');
+  }, []);
 
   // タブ切り替えハンドラ
   const handleTabChange = (tab) => {
@@ -117,8 +128,14 @@ const EventsStallsList01Screen = ({ navigation }) => {
         stallCategories={stallCategories}
         eventCategories={eventCategories}
         selectedArea={selectedArea}
-        onAreaChange={setSelectedArea}
+        onAreaChange={handleAreaChange}
         areas={areas}
+        buildings={buildings}
+        selectedBuilding={selectedBuilding}
+        onBuildingChange={setSelectedBuilding}
+        stallAreaLetters={stallAreaLetters}
+        selectedStallLetter={selectedStallLetter}
+        onStallLetterChange={setSelectedStallLetter}
         showFilters={showFilters}
         onToggleFilters={() => setShowFilters(prev => !prev)}
       />
@@ -142,45 +159,13 @@ const EventsStallsList01Screen = ({ navigation }) => {
         ))}
       </View>
 
-      {/* 並べ替え＋件数（モバイル：チップ形式 / デスクトップ：カラムヘッダー） */}
+      {/* 並べ替え＋件数（モバイル：件数のみ / デスクトップ：並べ替えラベル＋件数） */}
       <View style={[styles.sortInfoRow, { borderBottomColor: theme.border }]}>
-        <Text style={[styles.sortInfoLabel, { color: theme.textSecondary }]}>並べ替え</Text>
-        <Text style={[styles.sortInfoCount, { color: theme.textSecondary }]}>{data.length}件表示</Text>
+        {!isMobile && <Text style={[styles.sortInfoLabel, { color: theme.textSecondary }]}>並べ替え</Text>}
+        <Text style={[styles.sortInfoCount, { color: theme.textSecondary, marginLeft: isMobile ? 0 : 'auto' }]}>{data.length}件表示</Text>
       </View>
 
-      {isMobile ? (
-        /* モバイル：横並びソートチップ */
-        <View style={[styles.mobileSortRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-          {SORT_COLUMNS
-            .filter(col => col.key === SORT_OPTIONS.NAME_ASC || col.key === SORT_OPTIONS.GROUP_ASC)
-            .map((col) => {
-              const isActive = sortOrder === col.key;
-              return (
-                <TouchableOpacity
-                  key={col.key}
-                  style={[
-                    styles.sortChip,
-                    {
-                      backgroundColor: isActive ? theme.primary : theme.surface,
-                    }
-                  ]}
-                  onPress={() => handleSortChange(col.key)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.sortChipText,
-                    { color: isActive ? 'white' : theme.text }
-                  ]}>
-                    {col.label}
-                  </Text>
-                  {isActive && (
-                    <Ionicons name="chevron-down" size={11} color="white" style={{ marginLeft: 2 }} />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-        </View>
-      ) : (
+      {!isMobile && (
         /* デスクトップ：カラムヘッダー（カードと同じ構造で配置） */
         <View style={[styles.columnHeaderOuter, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <View style={styles.columnHeaderInner}>

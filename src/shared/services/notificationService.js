@@ -4,6 +4,11 @@
  */
 
 import { getSupabaseClient } from '../../services/supabase/client.js';
+import {
+  getEdgeFunctionAccessToken,
+  isUnauthorizedFunctionError,
+  recoverEdgeFunctionAccessToken,
+} from './edgeFunctionAuthService.js';
 
 const notificationEventTarget = new EventTarget();
 
@@ -17,42 +22,13 @@ export const emitNotificationUpdate = () => {
 };
 
 /**
- * 現在有効なアクセストークンを取得する
- *
- * getSession() のみを使用し、手動 refreshSession() は一切呼ばない。
- * refreshSession() を手動で呼ぶと autoRefreshToken との競合でリフレッシュトークンが
- * 使用済みになり、Supabase JS クライアントが 400 を受けた際に内部でサインアウトを
- * 発火させる (_removeSession → SIGNED_OUT) ため使用しない。
- *
- * @returns {Promise<string|null>}
+ * ブラウザコンソールへ通知送信ログを出す
+ * @param {string} phase - ログ段階
+ * @param {Object} detail - ログ詳細
+ * @returns {void}
  */
-const getValidAccessToken = async () => {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.getSession();
-  if (error) {
-    return null;
-  }
-  return data?.session?.access_token ?? null;
-};
-
-/**
- * Edge Functionエラーが401かどうか
- * @param {unknown} error
- * @returns {boolean}
- */
-const isUnauthorizedFunctionError = (error) => {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  const maybeError = /** @type {{ context?: { status?: number }; status?: number; message?: string }} */ (error);
-  const status = maybeError.context?.status ?? maybeError.status;
-  if (status === 401) {
-    return true;
-  }
-
-  const message = (maybeError.message ?? '').toLowerCase();
-  return message.includes('401') || message.includes('unauthorized');
+const logBrowserNotificationDispatch = (phase, detail) => {
+  console.info(`[notification][browser][${phase}]`, detail);
 };
 
 /**
@@ -185,21 +161,31 @@ export const getUserProfilesByIds = async (userIds) => {
  */
 const dispatchNotification = async (payload) => {
   try {
-    const accessToken = await getValidAccessToken();
+    logBrowserNotificationDispatch('request', {
+      targetType: payload?.targetType ?? null,
+      senderUserId: payload?.senderUserId ?? null,
+      userId: payload?.userId ?? null,
+      roleIds: payload?.roleIds ?? [],
+      roleNames: payload?.roleNames ?? [],
+      organizationIds: payload?.organizationIds ?? [],
+      organizationNames: payload?.organizationNames ?? [],
+      title: payload?.title ?? '',
+      metadata: payload?.metadata ?? {},
+    });
+
+    const accessToken = await getEdgeFunctionAccessToken();
 
     if (!accessToken) {
       return { data: null, error: new Error('ログインセッションが見つかりません。再ログインしてください。') };
     }
 
-    const invokeDispatch = async (token) =>
+    const invokeDispatch = async () =>
       getSupabaseClient().functions.invoke('dispatch-notification', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
         body: payload,
       });
 
-    let { data, error } = await invokeDispatch(accessToken);
+
+    let { data, error } = await invokeDispatch();
 
     if (error && isUnauthorizedFunctionError(error)) {
       // アクセストークンが期限切れの場合、autoRefreshToken の完了を待ってから再試行する。
@@ -208,11 +194,28 @@ const dispatchNotification = async (payload) => {
       await new Promise((resolve) => setTimeout(resolve, 600));
       const newToken = await getValidAccessToken();
       if (newToken) {
-        ({ data, error } = await invokeDispatch(newToken));
+        ({ data, error } = await invokeDispatch());
+
       }
     }
 
     if (error) {
+      logBrowserNotificationDispatch('error', {
+        targetType: payload?.targetType ?? null,
+        senderUserId: payload?.senderUserId ?? null,
+        userId: payload?.userId ?? null,
+        roleIds: payload?.roleIds ?? [],
+        roleNames: payload?.roleNames ?? [],
+        organizationIds: payload?.organizationIds ?? [],
+        organizationNames: payload?.organizationNames ?? [],
+        message: recoveryError?.message ?? error.message ?? '通知送信に失敗しました',
+      });
+      if (recoveryError) {
+        return {
+          data: null,
+          error: recoveryError,
+        };
+      }
       return {
         data: null,
         error: await normalizeFunctionError(error, '通知送信に失敗しました'),
@@ -222,6 +225,15 @@ const dispatchNotification = async (payload) => {
     if (data?.error) {
       return { data: null, error: new Error(data.error) };
     }
+
+    logBrowserNotificationDispatch('response', {
+      traceId: data?.traceId ?? null,
+      notificationId: data?.notificationId ?? null,
+      sender: data?.sender ?? null,
+      recipients: data?.recipients ?? [],
+      recipientsCount: data?.recipientsCount ?? 0,
+      push: data?.push ?? null,
+    });
 
     return { data: data ?? null, error: null };
   } catch (error) {
@@ -247,6 +259,65 @@ export const sendNotificationToUser = async (userId, title, body, metadata = {},
     const { data, error } = await dispatchNotification({
       targetType: 'user',
       userId,
+      title,
+      body,
+      metadata,
+      senderUserId,
+    });
+
+    if (error) {
+      return { notification: null, recipientsCount: 0, error };
+    }
+
+    emitNotificationUpdate();
+    return {
+      notification: { id: data?.notificationId ?? '' },
+      recipientsCount: data?.recipientsCount ?? 0,
+      push: data?.push ?? null,
+      error: null,
+    };
+  } catch (error) {
+    return { notification: null, recipientsCount: 0, error };
+  }
+};
+
+/**
+ * 組織に所属するユーザー全員へ通知を送信
+ * @param {Object} input - 送信パラメータ
+ * @param {string|null} [input.organizationId=null] - 対象組織ID
+ * @param {string[]} [input.organizationIds=[]] - 対象組織ID一覧
+ * @param {string|null} [input.organizationName=null] - 対象組織名
+ * @param {string[]} [input.organizationNames=[]] - 対象組織名一覧
+ * @param {string} input.title - タイトル
+ * @param {string} input.body - 本文
+ * @param {Object} [input.metadata={}] - メタデータ
+ * @param {string|null} [input.senderUserId=null] - 送信者ユーザーID
+ * @returns {Promise<Object>} notification, recipientsCount, error
+ */
+export const sendNotificationToOrganization = async ({
+  organizationId = null,
+  organizationIds = [],
+  organizationName = null,
+  organizationNames = [],
+  title,
+  body,
+  metadata = {},
+  senderUserId = null,
+}) => {
+  try {
+    /** 正規化済み組織ID一覧 */
+    const normalizedOrganizationIds = [organizationId, ...(organizationIds || [])].filter(Boolean);
+    /** 正規化済み組織名一覧 */
+    const normalizedOrganizationNames = [organizationName, ...(organizationNames || [])].filter(Boolean);
+
+    if (normalizedOrganizationIds.length === 0 && normalizedOrganizationNames.length === 0) {
+      return { notification: null, recipientsCount: 0, error: new Error('通知先組織が未指定です') };
+    }
+
+    const { data, error } = await dispatchNotification({
+      targetType: 'organization',
+      organizationIds: normalizedOrganizationIds,
+      organizationNames: normalizedOrganizationNames,
       title,
       body,
       metadata,
@@ -300,6 +371,112 @@ export const sendNotificationToRoles = async (roleIds, title, body, metadata = {
     const { data, error } = await dispatchNotification({
       targetType: 'roles',
       roleIds,
+      title,
+      body,
+      metadata,
+      senderUserId,
+    });
+
+    if (error) {
+      return { notification: null, recipientsCount: 0, error };
+    }
+
+    emitNotificationUpdate();
+    return {
+      notification: { id: data?.notificationId ?? '' },
+      recipientsCount: data?.recipientsCount ?? 0,
+      push: data?.push ?? null,
+      error: null,
+    };
+  } catch (error) {
+    return { notification: null, recipientsCount: 0, error };
+  }
+};
+
+/**
+ * ロール名一覧のユーザーへ通知を送信
+ * @param {string[]} roleNames
+ * @param {string} title
+ * @param {string} body
+ * @param {Object} metadata
+ * @param {string|null} senderUserId
+ * @returns {Promise<Object>} notification, recipientsCount, error
+ */
+export const sendNotificationToRoleNames = async (roleNames, title, body, metadata = {}, senderUserId = null) => {
+  try {
+    if (!Array.isArray(roleNames) || roleNames.length === 0) {
+      return { notification: null, recipientsCount: 0, error: new Error('通知先ロール名が未指定です') };
+    }
+
+    const { data, error } = await dispatchNotification({
+      targetType: 'roles',
+      roleNames,
+      title,
+      body,
+      metadata,
+      senderUserId,
+    });
+
+    if (error) {
+      return { notification: null, recipientsCount: 0, error };
+    }
+
+    emitNotificationUpdate();
+    return {
+      notification: { id: data?.notificationId ?? '' },
+      recipientsCount: data?.recipientsCount ?? 0,
+      push: data?.push ?? null,
+      error: null,
+    };
+  } catch (error) {
+    return { notification: null, recipientsCount: 0, error };
+  }
+};
+
+/**
+ * 指定組織に所属するロール名一覧のユーザーへ通知を送信
+ * @param {Object} input - 送信パラメータ
+ * @param {string|null|undefined} input.organizationId - 対象組織ID
+ * @param {string[]|undefined} input.organizationIds - 対象組織ID一覧
+ * @param {string|null|undefined} input.organizationName - 対象組織名
+ * @param {string[]|undefined} input.organizationNames - 対象組織名一覧
+ * @param {string[]} input.roleNames - 通知先ロール名一覧
+ * @param {string} input.title - 通知タイトル
+ * @param {string} input.body - 通知本文
+ * @param {Object} [input.metadata={}] - 通知メタデータ
+ * @param {string|null} [input.senderUserId=null] - 送信者ユーザーID
+ * @returns {Promise<Object>} notification, recipientsCount, error
+ */
+export const sendNotificationToOrganizationRoleNames = async ({
+  organizationId = null,
+  organizationIds = [],
+  organizationName = null,
+  organizationNames = [],
+  roleNames,
+  title,
+  body,
+  metadata = {},
+  senderUserId = null,
+}) => {
+  try {
+    if (!Array.isArray(roleNames) || roleNames.length === 0) {
+      return { notification: null, recipientsCount: 0, error: new Error('通知先ロール名が未指定です') };
+    }
+
+    /** 正規化済み組織ID一覧 */
+    const normalizedOrganizationIds = [organizationId, ...(organizationIds || [])].filter(Boolean);
+    /** 正規化済み組織名一覧 */
+    const normalizedOrganizationNames = [organizationName, ...(organizationNames || [])].filter(Boolean);
+
+    if (normalizedOrganizationIds.length === 0 && normalizedOrganizationNames.length === 0) {
+      return { notification: null, recipientsCount: 0, error: new Error('通知先組織が未指定です') };
+    }
+
+    const { data, error } = await dispatchNotification({
+      targetType: 'roles',
+      roleNames,
+      organizationIds: normalizedOrganizationIds,
+      organizationNames: normalizedOrganizationNames,
       title,
       body,
       metadata,
