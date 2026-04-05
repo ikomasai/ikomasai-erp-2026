@@ -1,6 +1,6 @@
 /**
  * 定常巡回チェックフォームコンポーネント
- * 本部評価と同じ企画マスタを巡回対象として選び、設問ごとの回答と項目別メモを記録する
+ * 本部評価と同じ企画マスタを巡回対象として選び、確認項目の一覧を見たうえで巡回記録を残す
  */
 
 import React, { useMemo, useState } from 'react';
@@ -20,51 +20,30 @@ import {
 } from '../../../shared/utils/organizationEventList';
 
 /**
- * 巡回チェック項目の選択肢
- * DB の patrol_checks.check_items (jsonb) に
+ * 巡回チェック項目の一覧
+ * DB の patrol_checks.check_items (jsonb) には
  * { key, label, answerKey, answerLabel, memo } の配列として保存する
  */
 export const PATROL_CHECK_ITEM_OPTIONS = [
   {
     key: 'progress_status',
     label: '企画書通り進行中か',
-    options: [
-      { key: 'good', label: 'よく進行している' },
-      { key: 'normal', label: '普通に進行している' },
-      { key: 'bad', label: 'うまくいっていない' },
-    ],
   },
   {
     key: 'health_issue',
     label: '体調不良はいるか',
-    options: [
-      { key: 'present', label: 'いる' },
-      { key: 'none', label: 'いない' },
-    ],
   },
   {
     key: 'trouble',
     label: '困りごとはあるか',
-    options: [
-      { key: 'present', label: 'ある' },
-      { key: 'none', label: 'ない' },
-    ],
   },
   {
     key: 'nuisance_visitor',
     label: '迷惑来場者はいるか',
-    options: [
-      { key: 'present', label: 'いる' },
-      { key: 'none', label: 'いない' },
-    ],
   },
   {
     key: 'unlocked_room',
     label: '無人・未施錠教室はあるか',
-    options: [
-      { key: 'present', label: 'ある' },
-      { key: 'none', label: 'ない' },
-    ],
   },
 ];
 
@@ -111,12 +90,9 @@ const normalizeHistoryCheckItems = (value) => {
  * @param {string} props.selectedPatrolLocationId - 選択中企画ID
  * @param {Function} props.onSelectLocation - 企画選択コールバック
  * @param {string} props.patrolLocationText - 選択中企画表示文字列
- * @param {Object} props.patrolCheckItems - 項目別評価状態
- * @param {Function} props.onChangeCheckAnswer - 項目別回答変更コールバック
- * @param {Function} props.onChangeCheckMemo - 項目別メモ変更コールバック
+ * @param {boolean} props.isChecklistConfirmed - 確認済みチェック状態
+ * @param {Function} props.onToggleChecklistConfirmed - 確認済み切り替えコールバック
  * @param {Function} props.onClearSelectedLocation - 選択中企画の解除コールバック
- * @param {string} props.patrolCheckMemo - 全体メモ文字列
- * @param {Function} props.onChangeSummaryMemo - 全体メモ変更コールバック
  * @param {boolean} props.isSubmittingPatrolCheck - 登録中フラグ
  * @param {Function} props.onSubmitPatrolCheck - 登録ボタン押下コールバック
  * @param {Array} props.recentPatrolChecks - 直近巡回チェック履歴配列
@@ -130,12 +106,9 @@ const PatrolCheckForm = ({
   selectedPatrolLocationId,
   onSelectLocation,
   patrolLocationText,
-  patrolCheckItems,
-  onChangeCheckAnswer,
-  onChangeCheckMemo,
+  isChecklistConfirmed,
+  onToggleChecklistConfirmed,
   onClearSelectedLocation,
-  patrolCheckMemo,
-  onChangeSummaryMemo,
   isSubmittingPatrolCheck,
   onSubmitPatrolCheck,
   recentPatrolChecks,
@@ -181,9 +154,6 @@ const PatrolCheckForm = ({
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>定常巡回チェック</Text>
-          <Text style={[styles.sectionSubTitle, { color: theme.textSecondary }]}>
-            団体名で絞り込み、企画を1件選んでから各項目の状況を記録します。
-          </Text>
         </View>
         <View style={styles.sectionHeaderActions}>
           <TouchableOpacity
@@ -319,95 +289,68 @@ const PatrolCheckForm = ({
       )}
 
       <Text style={[styles.label, { color: theme.text }]}>チェック項目</Text>
-      <Text style={[styles.subLabel, { color: theme.textSecondary }]}>
-        各項目について当てはまる選択肢を選んでください。必要なら各項目にメモを残せます。
-      </Text>
-      <View style={styles.checkItemList}>
-        {PATROL_CHECK_ITEM_OPTIONS.map((item) => {
-          /** 現在の回答 */
-          const answerKey = patrolCheckItems[item.key]?.answerKey || '';
-          /** 現在の項目別メモ */
-          const memo = patrolCheckItems[item.key]?.memo || '';
-
-          return (
-            <View
-              key={item.key}
-              style={[
-                styles.checkCard,
-                { borderColor: theme.border, backgroundColor: theme.background },
-              ]}
-            >
-              <Text style={[styles.checkCardTitle, { color: theme.text }]}>{item.label}</Text>
-              <View style={styles.answerRow}>
-                {item.options.map((option) => {
-                  /** 選択中かどうか */
-                  const isActive = option.key === answerKey;
-
-                  return (
-                    <Pressable
-                      key={`${item.key}-${option.key}`}
-                      style={[
-                        styles.answerButton,
-                        {
-                          borderColor: isActive ? theme.primary : theme.border,
-                          backgroundColor: isActive ? theme.primary : theme.surface,
-                        },
-                      ]}
-                      onPress={() => onChangeCheckAnswer(item.key, option.key, option.label)}
-                    >
-                      <Text
-                        style={[
-                          styles.answerButtonText,
-                          { color: isActive ? '#FFFFFF' : theme.textSecondary },
-                        ]}
-                      >
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <TextInput
-                value={memo}
-                onChangeText={(value) => onChangeCheckMemo(item.key, value)}
-                multiline
-                placeholder="この項目の気づきや補足"
-                placeholderTextColor={theme.textSecondary}
-                style={[
-                  styles.itemMemoInput,
-                  {
-                    borderColor: theme.border,
-                    backgroundColor: theme.surface,
-                    color: theme.text,
-                  },
-                ]}
-              />
+      <View
+        style={[
+          styles.checkCard,
+          { borderColor: theme.border, backgroundColor: theme.background },
+        ]}
+      >
+        {PATROL_CHECK_ITEM_OPTIONS.map((item, index) => (
+          <View key={item.key} style={styles.checkBulletRow}>
+            <View style={[styles.checkBullet, { backgroundColor: `${theme.primary}15` }]}>
+              <Text style={[styles.checkBulletText, { color: theme.primary }]}>
+                {index + 1}
+              </Text>
             </View>
-          );
-        })}
+            <Text style={[styles.checkCardTitle, styles.checkBulletLabel, { color: theme.text }]}>
+              {item.label}
+            </Text>
+          </View>
+        ))}
       </View>
 
-      <Text style={[styles.label, { color: theme.text }]}>全体メモ（任意）</Text>
-      <TextInput
-        value={patrolCheckMemo}
-        onChangeText={onChangeSummaryMemo}
-        multiline
-        placeholder="全体として残したい補足があれば入力"
-        placeholderTextColor={theme.textSecondary}
+      <Pressable
         style={[
-          styles.summaryMemoInput,
+          styles.confirmCard,
           {
             borderColor: theme.border,
             backgroundColor: theme.background,
-            color: theme.text,
           },
         ]}
-      />
+        onPress={() => onToggleChecklistConfirmed(!isChecklistConfirmed)}
+      >
+        <View style={styles.confirmRow}>
+          <View
+            style={[
+              styles.confirmCheckbox,
+              {
+                borderColor: isChecklistConfirmed ? theme.primary : theme.border,
+                backgroundColor: isChecklistConfirmed ? theme.primary : theme.surface,
+              },
+            ]}
+          >
+            {isChecklistConfirmed ? (
+              <Text style={styles.confirmCheckboxText}>✓</Text>
+            ) : null}
+          </View>
+          <View style={styles.confirmTextBlock}>
+            <Text style={[styles.checkCardTitle, { color: theme.text }]}>
+              上記のチェック項目を確認しました
+            </Text>
+            <Text style={[styles.supportNoticeText, { color: theme.textSecondary }]}>
+              何かあったら本部に連絡してください
+            </Text>
+          </View>
+        </View>
+      </Pressable>
 
       <TouchableOpacity
-        style={[styles.actionButton, { backgroundColor: theme.primary }]}
+        style={[
+          styles.actionButton,
+          { backgroundColor: isChecklistConfirmed ? theme.primary : theme.border },
+        ]}
         onPress={onSubmitPatrolCheck}
-        disabled={isSubmittingPatrolCheck}
+        disabled={isSubmittingPatrolCheck || !isChecklistConfirmed}
       >
         <Text style={styles.actionButtonText}>
           {isSubmittingPatrolCheck ? '登録中...' : '巡回チェックを記録'}
@@ -511,10 +454,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
-  sectionSubTitle: {
-    fontSize: 12,
-    lineHeight: 18,
-  },
   label: {
     fontSize: 13,
     fontWeight: '800',
@@ -610,9 +549,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  checkItemList: {
-    gap: 10,
-  },
   /** チェックカード: borderWidth 1.5 + shadow */
   checkCard: {
     borderWidth: 1.5,
@@ -630,41 +566,57 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
-  answerRow: {
+  checkBulletRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 8,
+    alignItems: 'flex-start',
   },
-  /** 回答ボタン: pill型 (borderRadius 12→999) / アクティブ時fill */
-  answerButton: {
-    borderWidth: 1.5,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
+  checkBullet: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  answerButtonText: {
-    fontSize: 13,
+  checkBulletText: {
+    fontSize: 12,
     fontWeight: '800',
   },
-  itemMemoInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    minHeight: 64,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    fontSize: 13,
-    textAlignVertical: 'top',
+  checkBulletLabel: {
+    flex: 1,
+    lineHeight: 22,
   },
-  /** 全体メモ入力: borderRadius 14→12 */
-  summaryMemoInput: {
+  confirmCard: {
     borderWidth: 1,
     borderRadius: 12,
-    minHeight: 88,
     paddingHorizontal: 12,
     paddingVertical: 12,
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  confirmCheckbox: {
+    width: 24,
+    height: 24,
+    borderWidth: 1.5,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmCheckboxText: {
+    color: '#FFFFFF',
     fontSize: 14,
-    textAlignVertical: 'top',
+    fontWeight: '900',
+  },
+  confirmTextBlock: {
+    flex: 1,
+    gap: 4,
+  },
+  supportNoticeText: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   /** 登録ボタン: pill型 (borderRadius 14→24) */
   actionButton: {

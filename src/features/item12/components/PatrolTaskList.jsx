@@ -136,11 +136,9 @@ const PatrolTaskList = ({
   onSelectTask,
   onRefresh,
   title = '巡回タスク一覧',
-  subTitle = '優先度の高い順に選んで、そのまま詳細確認へ進みます。',
   searchPlaceholder = '企画名・場所・種別・鍵名で検索',
   emptyTitle = '巡回タスクはありません',
   emptyDescription = '現在対応が必要なタスクはありません',
-  defaultHelpText = '種別ごとに折りたたみできます。タップすると詳細へ進みます。',
 }) => {
   /** 画面幅（レスポンシブ対応用） */
   const { width: windowWidth } = useWindowDimensions();
@@ -279,9 +277,6 @@ const PatrolTaskList = ({
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
-          <Text style={[styles.sectionSubTitle, { color: theme.textSecondary }]}>
-            {subTitle}
-          </Text>
         </View>
         <TouchableOpacity
           style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
@@ -355,11 +350,11 @@ const PatrolTaskList = ({
         ) : null}
       </View>
 
-      <Text style={[styles.searchMetaText, { color: theme.textSecondary }]}>
-        {normalizedSearchKeyword
-          ? `${filteredTaskCount}件ヒット。検索中は該当グループを自動で展開します。`
-          : defaultHelpText}
-      </Text>
+      {normalizedSearchKeyword ? (
+        <Text style={[styles.searchMetaText, { color: theme.textSecondary }]}>
+          {filteredTaskCount}件ヒット
+        </Text>
+      ) : null}
 
       {isLoadingTasks ? (
         <SkeletonLoader lines={3} baseColor={theme.border} />
@@ -545,17 +540,6 @@ const PatrolTaskList = ({
                               🔑 {task.notes.includes(':') ? task.notes.split(':').slice(1).join(':').trim() : task.notes}
                             </Text>
                           ) : null}
-                          <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                            受付:{' '}
-                            {isMobile
-                              ? new Date(task.created_at).toLocaleString('ja-JP', {
-                                  month: 'numeric',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : new Date(task.created_at).toLocaleString('ja-JP')}
-                          </Text>
                         </Pressable>
                       );
                     })}
@@ -601,10 +585,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     letterSpacing: 0.2,
-  },
-  sectionSubTitle: {
-    fontSize: 12,
-    lineHeight: 18,
   },
   /** 更新ボタン: primary薄め背景 */
   refreshButton: {
