@@ -196,7 +196,6 @@ const CustomDrawerContent = (props) => {
   } else {
   isAccessible = canAccessScreen(userInfo?.roles || [], permissionName);
   }
-      : canAccessScreen(userInfo?.roles || [], permissionName);
     // カスタムラベルがあればそれを使用、なければデフォルト
     const label = ITEM_LABELS[itemNumber] || `項目${itemNumber}`;
     // カスタム画面名があればそれを使用、なければデフォルト
