@@ -6,7 +6,8 @@
  * - iOS/Android: WebView 内で Leaflet を描画し postMessage で通信
  *
  * 仕様: docs/プロジェクト仕様書_厚生部場所機能.md
- * - 厚生部員: マップ上でピンを指定して場所を登録・更新・削除
+ * - 厚生部員: マップ上でピンを指定して場所を登録
+ * - 厚生部長: 場所の更新・削除
  * - 厚生部員: 有効な場所から現在地を選択して登録
  * - 管理者: 閲覧のみ
  */
@@ -114,6 +115,16 @@ const createColorIcon = (L, colorName) => {
   });
 };
 
+const escapeHtml = (value = '') => {
+  return value
+    .toString()
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
 /**
  * Leaflet ベースのキャンパスマップコンポーネント
  *
@@ -121,7 +132,7 @@ const createColorIcon = (L, colorName) => {
  * @param {Object} props.theme - テーマオブジェクト
  * @param {boolean} props.compact - コンパクト表示モード
  * @param {number} props.height - マップの高さ
- * @param {Array} props.locations - 場所マスタの配列
+ * @param {Array} props.locations - 場所一覧の配列
  * @param {Object} [props.draftCoordinate] - ドラフト座標 { latitude, longitude }
  * @param {Function} [props.onDraftCoordinateChange] - ドラフト座標変更コールバック
  * @param {string} [props.selectedLocationId] - 選択中の場所ID
@@ -132,6 +143,7 @@ const createColorIcon = (L, colorName) => {
  * @param {Function} [props.onBoardPress] - マップタップコールバック
  * @param {Function} [props.onClearSelection] - 選択解除コールバック
  * @param {boolean} [props.showClearSelectionButton] - 選択解除ボタンを表示するか
+ * @param {boolean} [props.showMemberNames] - 場所ごとの登録者名を表示するか
  * @returns {React.ReactElement}
  */
 const ShiftLocationMap = ({
@@ -149,6 +161,7 @@ const ShiftLocationMap = ({
   onBoardPress,
   onClearSelection,
   showClearSelectionButton = false,
+  showMemberNames = false,
 }) => {
   /** @type {React.MutableRefObject<HTMLDivElement|null>} マップコンテナのDOM参照 */
   const mapContainerRef = useRef(null);
@@ -281,6 +294,9 @@ const ShiftLocationMap = ({
         : isHighlighted ? MARKER_COLORS.highlighted
         : MARKER_COLORS.normal;
       const icon = createColorIcon(L, colorName);
+      const labelText = showMemberNames && loc.registeredMemberSummary && loc.registeredMemberSummary !== '表示なし'
+        ? `${escapeHtml(loc.name)}<br /><span style="font-size:10px;opacity:0.92;">${escapeHtml(loc.registeredMemberSummary)}</span>`
+        : escapeHtml(loc.name);
 
       const marker = L.marker(pos, {
         icon,
@@ -288,11 +304,12 @@ const ShiftLocationMap = ({
       }).addTo(map);
 
       /** 場所名をツールチップとして常時表示 */
-      marker.bindTooltip(loc.name, {
+      marker.bindTooltip(labelText, {
         permanent: true,
         direction: 'top',
         offset: [0, -42],
         className: 'leaflet-tooltip-custom',
+        opacity: 0.98,
       });
 
       /** マーカークリック */
@@ -302,7 +319,7 @@ const ShiftLocationMap = ({
 
       markersRef.current[loc.id] = marker;
     });
-  }, [locations, selectedLocationId, highlightedLocationId, canEdit, draftCoordinate, mapReady]);
+  }, [locations, selectedLocationId, highlightedLocationId, canEdit, draftCoordinate, mapReady, showMemberNames]);
 
   /**
    * ドラフトマーカーを更新する

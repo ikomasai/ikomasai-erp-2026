@@ -52,6 +52,20 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
       text-overflow: ellipsis;
       text-align: center;
     }
+    .marker-pin .pin-subtitle {
+      margin-top: 2px;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      white-space: nowrap;
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
+    }
     .marker-pin.selected .pin-label {
       background: #E53935;
     }
@@ -139,7 +153,7 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
        * @param {boolean} isDraft - ドラフトか（オレンジ）
        * @returns {L.DivIcon}
        */
-      function createIcon(name, isSelected, isHighlighted, isDraft) {
+      function createIcon(name, subtitle, isSelected, isHighlighted, isDraft) {
         var color = isDraft ? '#FF9800'
           : isSelected ? '#E53935'
           : isHighlighted ? '#43A047'
@@ -153,14 +167,24 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
           + '<path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="' + color + '"/>'
           + '<circle cx="12" cy="12" r="5" fill="#fff"/>'
           + '</svg>'
-          + '<span class="pin-label">' + name + '</span>'
+          + '<span class="pin-label">' + escapeHtml(name) + '</span>'
+          + (subtitle ? '<span class="pin-subtitle">' + escapeHtml(subtitle) + '</span>' : '')
           + '</div>';
         return L.divIcon({
           className: '',
           html: html,
-          iconSize: [32, 52],
-          iconAnchor: [16, 44]
+          iconSize: subtitle ? [120, 70] : [32, 52],
+          iconAnchor: subtitle ? [60, 54] : [16, 44]
         });
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
       }
 
       /**
@@ -206,7 +230,7 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
           var pos = geoToPixel(Number(loc.latitude), Number(loc.longitude), campusBounds);
           var isSelected = loc.id === selectedId;
           var isHighlighted = loc.id === highlightedId;
-          var icon = createIcon(loc.name, isSelected, isHighlighted, false);
+          var icon = createIcon(loc.name, loc.memberSummary || '', isSelected, isHighlighted, false);
           var m = L.marker(pos, { icon: icon, draggable: false })
             .addTo(map);
 
@@ -235,7 +259,7 @@ export const buildLeafletHtml = ({ mapImageBase64, imgWidth, imgHeight }) => {
           Number(payload.coordinate.longitude),
           payload.campusBounds
         );
-        var icon = createIcon(payload.label || '選択中の位置', false, false, true);
+        var icon = createIcon(payload.label || '選択中の位置', '', false, false, true);
 
         if (draftMarker) {
           draftMarker.setLatLng(pos);

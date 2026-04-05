@@ -221,6 +221,7 @@ export const insertKoseibuShiftLocation = async (payload) => {
         latitude: payload.latitude,
         longitude: payload.longitude,
         description: payload.description ?? null,
+        display_member_count: payload.displayMemberCount ?? 3,
         display_order: payload.displayOrder ?? 0,
         is_active: true,
         created_by: payload.createdBy,
@@ -266,6 +267,7 @@ export const updateKoseibuShiftLocation = async (locationId, payload, operatedBy
         ...(payload.latitude !== undefined ? { latitude: payload.latitude } : {}),
         ...(payload.longitude !== undefined ? { longitude: payload.longitude } : {}),
         ...(payload.description !== undefined ? { description: payload.description } : {}),
+        ...(payload.displayMemberCount !== undefined ? { display_member_count: payload.displayMemberCount } : {}),
         ...(payload.displayOrder !== undefined ? { display_order: payload.displayOrder } : {}),
         ...(payload.isActive !== undefined ? { is_active: payload.isActive } : {}),
       })
@@ -332,7 +334,7 @@ export const deleteKoseibuShiftLocation = async (locationId, operatedBy) => {
       longitudeSnapshot: data.longitude,
       actionType: LOCATION_ACTION_TYPES.delete,
       operatedBy,
-      memo: '場所マスタを論理削除',
+      memo: '場所情報を論理削除',
     });
 
     /* ログ書き込み失敗は警告に留め、操作自体は成功として返す */

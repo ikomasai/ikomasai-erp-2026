@@ -53,11 +53,13 @@ CREATE TABLE IF NOT EXISTS public.koseibu_shift_locations (
   latitude double precision NOT NULL,
   longitude double precision NOT NULL,
   description text,
+  display_member_count integer NOT NULL DEFAULT 3,
   display_order integer NOT NULL DEFAULT 0,
   is_active boolean NOT NULL DEFAULT true,
   created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (display_member_count BETWEEN 0 AND 10)
 );
 
 ALTER TABLE public.koseibu_shift_locations
@@ -65,6 +67,7 @@ ALTER TABLE public.koseibu_shift_locations
   ADD COLUMN IF NOT EXISTS latitude double precision,
   ADD COLUMN IF NOT EXISTS longitude double precision,
   ADD COLUMN IF NOT EXISTS description text,
+  ADD COLUMN IF NOT EXISTS display_member_count integer,
   ADD COLUMN IF NOT EXISTS display_order integer,
   ADD COLUMN IF NOT EXISTS is_active boolean,
   ADD COLUMN IF NOT EXISTS created_by uuid,
@@ -74,6 +77,7 @@ ALTER TABLE public.koseibu_shift_locations
 UPDATE public.koseibu_shift_locations
 SET
   display_order = COALESCE(display_order, 0),
+  display_member_count = COALESCE(display_member_count, 3),
   is_active = COALESCE(is_active, true),
   created_at = COALESCE(created_at, now()),
   updated_at = COALESCE(updated_at, now())

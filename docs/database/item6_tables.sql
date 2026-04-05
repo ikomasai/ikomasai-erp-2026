@@ -38,18 +38,20 @@ AS $$
   SELECT public.has_role('厚生部') AND public.has_role('部長');
 $$;
 
--- 1. 厚生部場所マスタ
+-- 1. 厚生部場所情報
 CREATE TABLE IF NOT EXISTS public.koseibu_shift_locations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   latitude DOUBLE PRECISION NOT NULL,
   longitude DOUBLE PRECISION NOT NULL,
   description TEXT,
+  display_member_count INTEGER NOT NULL DEFAULT 3,
   display_order INTEGER NOT NULL DEFAULT 0,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (display_member_count BETWEEN 0 AND 10)
 );
 
 CREATE INDEX IF NOT EXISTS idx_koseibu_shift_locations_is_active
@@ -67,20 +69,20 @@ CREATE POLICY "koseibu_shift_locations_select_policy" ON public.koseibu_shift_lo
 DROP POLICY IF EXISTS "koseibu_shift_locations_insert_policy" ON public.koseibu_shift_locations;
 CREATE POLICY "koseibu_shift_locations_insert_policy" ON public.koseibu_shift_locations
   FOR INSERT
-  WITH CHECK (public.has_role('厚生部') OR public.has_role('管理者'));
+  WITH CHECK (public.has_role('厚生部'));
 
 DROP POLICY IF EXISTS "koseibu_shift_locations_update_policy" ON public.koseibu_shift_locations;
 CREATE POLICY "koseibu_shift_locations_update_policy" ON public.koseibu_shift_locations
   FOR UPDATE
-  USING (public.has_role('厚生部') OR public.has_role('管理者'))
-  WITH CHECK (public.has_role('厚生部') OR public.has_role('管理者'));
+  USING (public.is_koseibu_manager())
+  WITH CHECK (public.is_koseibu_manager());
 
 DROP POLICY IF EXISTS "koseibu_shift_locations_delete_policy" ON public.koseibu_shift_locations;
 CREATE POLICY "koseibu_shift_locations_delete_policy" ON public.koseibu_shift_locations
   FOR DELETE
-  USING (public.has_role('厚生部') OR public.has_role('管理者'));
+  USING (public.is_koseibu_manager());
 
-COMMENT ON TABLE public.koseibu_shift_locations IS '厚生部シフトで使用する場所マスタ';
+COMMENT ON TABLE public.koseibu_shift_locations IS '厚生部シフトで使用する場所情報';
 
 -- 2. 厚生部メンバーの現在地
 CREATE TABLE IF NOT EXISTS public.koseibu_shift_current_locations (

@@ -1,6 +1,6 @@
 /**
  * 厚生部場所管理画面
- * 厚生部の場所マスタ、現在地登録、履歴確認をまとめて提供する。
+ * 厚生部の場所情報、現在地登録、履歴確認をまとめて提供する。
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -159,12 +159,14 @@ const Item6LocationScreen = ({ navigation }) => {
   /** @type {string} 現在選択中のステータス */
   const [statusDraft, setStatusDraft] = useState(MEMBER_STATUS.stationed);
   const [currentLocationSearchQuery, setCurrentLocationSearchQuery] = useState('');
-  const [currentLocationFilterId, setCurrentLocationFilterId] = useState('');
+  const [currentLocationStatusFilterId, setCurrentLocationStatusFilterId] = useState('');
+  const [currentLocationLocationFilterId, setCurrentLocationLocationFilterId] = useState('');
   const [activeTab, setActiveTab] = useState(ITEM6_TABS.location);
   const [editingLocationId, setEditingLocationId] = useState('');
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
   const [draftCoordinate, setDraftCoordinate] = useState(DEFAULT_MAP_REGION);
+  const [draftDisplayMemberCount, setDraftDisplayMemberCount] = useState('3');
   const selectionInitializedRef = useRef(false);
   const currentLocationDraftInitializedRef = useRef(false);
 
@@ -175,12 +177,12 @@ const Item6LocationScreen = ({ navigation }) => {
 
   const canRegisterLocations = useMemo(() => {
     const roles = userInfo?.roles || [];
-    return hasRole(roles, ROLE_NAMES.welfare) || isAdmin(roles);
+    return hasRole(roles, ROLE_NAMES.welfare);
   }, [userInfo?.roles]);
 
   const canManageLocations = useMemo(() => {
     const roles = userInfo?.roles || [];
-    return isAdmin(roles) || hasRole(roles, ROLE_NAMES.welfare);
+    return hasRole(roles, ROLE_NAMES.welfare) && hasRole(roles, ROLE_NAMES.manager);
   }, [userInfo?.roles]);
 
   const canRegisterSelf = useMemo(() => {
@@ -188,9 +190,64 @@ const Item6LocationScreen = ({ navigation }) => {
     return hasRole(roles, ROLE_NAMES.welfare);
   }, [userInfo?.roles]);
 
-  const canEditLocation = useCallback(() => canRegisterLocations, [canRegisterLocations]);
+  const canEditLocation = useCallback(() => canManageLocations, [canManageLocations]);
 
   const activeLocations = useMemo(() => locations.filter((location) => location.is_active), [locations]);
+
+  const currentLocationNameComparator = useMemo(() => {
+    return (left = '', right = '') =>
+      left.toString().localeCompare(right.toString(), 'ja', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+  }, []);
+
+  const locationsWithRegisteredMembers = useMemo(() => {
+    const membersByLocationId = new Map();
+
+    currentLocations.forEach((record) => {
+      if (record.status !== MEMBER_STATUS.stationed || !record.location_id) {
+        return;
+      }
+
+      const list = membersByLocationId.get(record.location_id) || [];
+      list.push({
+        name: record.user_name || '（名前なし）',
+        updatedAt: record.updated_at || '',
+      });
+      membersByLocationId.set(record.location_id, list);
+    });
+
+    return activeLocations.map((location) => {
+      const members = (membersByLocationId.get(location.id) || []).sort((left, right) => {
+        const primary = currentLocationNameComparator(left.name, right.name);
+        if (primary !== 0) {
+          return primary;
+        }
+
+        return currentLocationNameComparator(right.updatedAt, left.updatedAt);
+      });
+
+      const displayCount = Math.max(0, Number(location.display_member_count ?? 3));
+      const visibleMembers = members.slice(0, displayCount);
+      const hiddenCount = Math.max(0, members.length - visibleMembers.length);
+      let summary = '登録者なし';
+      if (members.length > 0) {
+        if (displayCount === 0) {
+          summary = '表示なし';
+        } else {
+          summary = `${visibleMembers.map((member) => member.name).join('、')}${hiddenCount > 0 ? ` ほか${hiddenCount}名` : ''}`;
+        }
+      }
+
+      return {
+        ...location,
+        registeredMemberCount: members.length,
+        registeredMemberNames: members.map((member) => member.name),
+        registeredMemberSummary: summary,
+      };
+    });
+  }, [activeLocations, currentLocations, currentLocationNameComparator]);
 
   const currentLocationOptions = useMemo(() => {
     return activeLocations.map((location) => ({
@@ -266,8 +323,10 @@ const Item6LocationScreen = ({ navigation }) => {
 
   const currentLocationStatusFilterOptions = useMemo(() => {
     return [
-      { value: 'status:patrolling', label: '巡回中' },
-      { value: 'status:away', label: '離席中' },
+      { value: '', label: '全て' },
+      { value: MEMBER_STATUS.stationed, label: 'シフト' },
+      { value: MEMBER_STATUS.patrolling, label: '巡回中' },
+      { value: MEMBER_STATUS.away, label: '離席中' },
     ];
   }, []);
 
@@ -277,22 +336,26 @@ const Item6LocationScreen = ({ navigation }) => {
     return sortedCurrentLocations.filter((record) => {
       const matchesName =
         query === '' || (record.user_name || '').toLocaleLowerCase('ja').includes(query);
+      const matchesStatus =
+        currentLocationStatusFilterId === '' || record.status === currentLocationStatusFilterId;
       const matchesLocation =
-        currentLocationFilterId === '' ||
-        (currentLocationFilterId.startsWith('status:')
-          ? record.status === currentLocationFilterId.replace('status:', '')
-          : record.location_id === currentLocationFilterId);
+        currentLocationLocationFilterId === '' || record.location_id === currentLocationLocationFilterId;
 
-      return matchesName && matchesLocation;
+      return matchesName && matchesStatus && matchesLocation;
     });
-  }, [currentLocationFilterId, currentLocationSearchQuery, sortedCurrentLocations]);
+  }, [
+    currentLocationLocationFilterId,
+    currentLocationSearchQuery,
+    currentLocationStatusFilterId,
+    sortedCurrentLocations,
+  ]);
 
   const tabItems = useMemo(() => {
     return [
       {
         key: ITEM6_TABS.location,
         label: '場所を登録する',
-        description: 'マップと場所マスタ',
+        description: 'マップと場所一覧',
         available: canRegisterLocations,
       },
       {
@@ -451,6 +514,7 @@ const Item6LocationScreen = ({ navigation }) => {
 
     setDraftName(editingLocation.name || '');
     setDraftDescription(editingLocation.description || '');
+    setDraftDisplayMemberCount(String(editingLocation.display_member_count ?? 3));
     setDraftCoordinate({
       latitude: Number(editingLocation.latitude),
       longitude: Number(editingLocation.longitude),
@@ -461,6 +525,7 @@ const Item6LocationScreen = ({ navigation }) => {
     setEditingLocationId('');
     setDraftName('');
     setDraftDescription('');
+    setDraftDisplayMemberCount('3');
     setDraftCoordinate(DEFAULT_MAP_REGION);
   }, []);
 
@@ -480,6 +545,7 @@ const Item6LocationScreen = ({ navigation }) => {
       setSelectedCurrentLocationId(location.id);
       setDraftName(location.name || '');
       setDraftDescription(location.description || '');
+      setDraftDisplayMemberCount(String(location.display_member_count ?? 3));
       setDraftCoordinate({
         latitude: Number(location.latitude),
         longitude: Number(location.longitude),
@@ -527,6 +593,12 @@ const Item6LocationScreen = ({ navigation }) => {
       return;
     }
 
+    const displayMemberCount = Number.parseInt(draftDisplayMemberCount, 10);
+    if (!Number.isInteger(displayMemberCount) || displayMemberCount < 0 || displayMemberCount > 10) {
+      setErrorMessage('名前を表示する人数は0〜10で指定してください');
+      return;
+    }
+
     setSaving(true);
     setErrorMessage('');
 
@@ -536,6 +608,7 @@ const Item6LocationScreen = ({ navigation }) => {
         latitude: Number(draftCoordinate.latitude),
         longitude: Number(draftCoordinate.longitude),
         description: draftDescription.trim() || null,
+        displayMemberCount,
       };
 
       const result = editingLocationId
@@ -639,7 +712,7 @@ const Item6LocationScreen = ({ navigation }) => {
         <View style={styles.emptyState}>
           <MaterialCommunityIcons name="map-marker-off" size={28} color={theme.textSecondary} />
           <Text style={[styles.emptyStateText, { color: theme.textSecondary }]}>
-            {currentLocationSearchQuery.trim() || currentLocationFilterId
+            {currentLocationSearchQuery.trim() || currentLocationStatusFilterId || currentLocationLocationFilterId
               ? '条件に一致する現在地がありません'
               : 'まだ現在地の登録はありません'}
           </Text>
@@ -889,6 +962,21 @@ const Item6LocationScreen = ({ navigation }) => {
                     />
                   </View>
 
+                  <View style={styles.formGroup}>
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>名前を表示する人数</Text>
+                    <TextInput
+                      style={[styles.textInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+                      value={draftDisplayMemberCount}
+                      onChangeText={setDraftDisplayMemberCount}
+                      placeholder="3"
+                      placeholderTextColor={theme.textSecondary}
+                      keyboardType="number-pad"
+                    />
+                    <Text style={[styles.formHint, { color: theme.textSecondary }]}>
+                      登録者名を場所一覧やマップで表示する人数を指定します（0〜10、0で非表示）
+                    </Text>
+                  </View>
+
                   <View style={styles.buttonRow}>
                     <ActionButton
                       label={saving ? '保存中...' : editingLocationId ? '更新する' : '登録する'}
@@ -907,7 +995,7 @@ const Item6LocationScreen = ({ navigation }) => {
                 </SectionCard>
 
                 <SectionCard
-                  title="場所マスタ一覧"
+                  title="場所一覧"
                   subtitle={canManageLocations ? '編集・削除' : '登録内容の確認'}
                   theme={theme}
                 >
@@ -919,7 +1007,7 @@ const Item6LocationScreen = ({ navigation }) => {
                         </Text>
                       </View>
                       ) : (
-                      activeLocations.map((location) => {
+                      locationsWithRegisteredMembers.map((location) => {
                         const isEditing = editingLocationId === location.id;
                         const editable = canEditLocation(location);
                         const deletable = canManageLocations;
@@ -955,7 +1043,10 @@ const Item6LocationScreen = ({ navigation }) => {
                                 {location.description || '補足情報なし'}
                               </Text>
                               <Text style={[styles.rowMeta, { color: isEditing ? theme.text : theme.textSecondary }]}>
-                                登録者: {location.created_by_name || '不明'}
+                                登録者: {location.registeredMemberSummary || '登録者なし'}
+                              </Text>
+                              <Text style={[styles.rowMeta, { color: isEditing ? theme.text : theme.textSecondary }]}>
+                                作成者: {location.created_by_name || '不明'}
                               </Text>
                             </View>
                             <View style={styles.rowActions}>
@@ -989,7 +1080,7 @@ const Item6LocationScreen = ({ navigation }) => {
                     )}
                     {!canManageLocations ? (
                       <Text style={[styles.helperText, { color: theme.textSecondary, marginTop: 12 }]}>
-                        場所の新規登録・編集・削除は {ROLE_NAMES.welfare} と {ROLE_NAMES.admin} が行えます。
+                        場所の新規登録は {ROLE_NAMES.welfare} が行えます。編集・削除は 厚生部長 が行えます。
                       </Text>
                     ) : null}
                 </SectionCard>
@@ -1150,6 +1241,18 @@ const Item6LocationScreen = ({ navigation }) => {
             {activeTab === ITEM6_TABS.current ? (
               <View style={styles.tabPanel}>
                 <SectionCard title="現在地一覧" subtitle="厚生部メンバーの最新状態" theme={theme}>
+                  <View style={styles.currentMapSection}>
+                    <SectionCard title="現在地マップ" subtitle="場所ごとの登録者名を表示" theme={theme}>
+                      <ShiftLocationMap
+                        theme={theme}
+                        compact={isCompact}
+                        height={isCompact ? 300 : 420}
+                        locations={locationsWithRegisteredMembers}
+                        canEdit={false}
+                        showMemberNames
+                      />
+                    </SectionCard>
+                  </View>
                   <View style={styles.filterPanel}>
                     <TextInput
                       style={[styles.searchInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
@@ -1158,35 +1261,23 @@ const Item6LocationScreen = ({ navigation }) => {
                       placeholder="名前で検索"
                       placeholderTextColor={theme.textSecondary}
                     />
-                    <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>場所・状態で絞り込み</Text>
-                    <View style={styles.filterChipRow}>
-                      <View style={styles.locationFilterGroup}>
-                        <TouchableOpacity
-                          style={[
-                            styles.filterChip,
-                            {
-                              backgroundColor: currentLocationFilterId === '' ? theme.primary : theme.surface,
-                              borderColor: currentLocationFilterId === '' ? theme.primary : theme.border,
-                            },
-                          ]}
-                          onPress={() => setCurrentLocationFilterId('')}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={{ color: currentLocationFilterId === '' ? '#fff' : theme.text }}>全て</Text>
-                        </TouchableOpacity>
-                        {currentLocationFilterOptions.map((option) => {
-                          const selected = currentLocationFilterId === option.value;
+                    <View style={styles.filterSection}>
+                      <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>状態で絞り込み</Text>
+                      <View style={styles.statusFilterGroup}>
+                        {currentLocationStatusFilterOptions.map((option) => {
+                          const selected = currentLocationStatusFilterId === option.value;
                           return (
                             <TouchableOpacity
-                              key={option.value}
+                              key={option.value || 'all-status'}
                               style={[
                                 styles.filterChip,
+                                styles.statusFilterChip,
                                 {
                                   backgroundColor: selected ? theme.primary : theme.surface,
                                   borderColor: selected ? theme.primary : theme.border,
                                 },
                               ]}
-                              onPress={() => setCurrentLocationFilterId(option.value)}
+                              onPress={() => setCurrentLocationStatusFilterId(option.value)}
                               activeOpacity={0.8}
                             >
                               <Text style={{ color: selected ? '#fff' : theme.text }} numberOfLines={1}>
@@ -1196,21 +1287,36 @@ const Item6LocationScreen = ({ navigation }) => {
                           );
                         })}
                       </View>
-                      <View style={styles.statusFilterGroup}>
-                        {currentLocationStatusFilterOptions.map((option) => {
-                          const selected = currentLocationFilterId === option.value;
+                    </View>
+                    <View style={styles.filterSection}>
+                      <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>場所で絞り込み</Text>
+                      <View style={styles.locationFilterGroup}>
+                        <TouchableOpacity
+                          style={[
+                            styles.filterChip,
+                            {
+                              backgroundColor: currentLocationLocationFilterId === '' ? theme.primary : theme.surface,
+                              borderColor: currentLocationLocationFilterId === '' ? theme.primary : theme.border,
+                            },
+                          ]}
+                          onPress={() => setCurrentLocationLocationFilterId('')}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={{ color: currentLocationLocationFilterId === '' ? '#fff' : theme.text }}>全て</Text>
+                        </TouchableOpacity>
+                        {currentLocationFilterOptions.map((option) => {
+                          const selected = currentLocationLocationFilterId === option.value;
                           return (
                             <TouchableOpacity
                               key={option.value}
                               style={[
                                 styles.filterChip,
-                                styles.statusFilterChip,
                                 {
                                   backgroundColor: selected ? theme.primary : theme.surface,
                                   borderColor: selected ? theme.primary : theme.border,
                                 },
                               ]}
-                              onPress={() => setCurrentLocationFilterId(option.value)}
+                              onPress={() => setCurrentLocationLocationFilterId(option.value)}
                               activeOpacity={0.8}
                             >
                               <Text style={{ color: selected ? '#fff' : theme.text }} numberOfLines={1}>
@@ -1460,6 +1566,10 @@ const styles = StyleSheet.create({
   formGroup: {
     gap: 6,
   },
+  formHint: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
   fieldLabel: {
     fontSize: 12,
     fontWeight: '600',
@@ -1507,6 +1617,12 @@ const styles = StyleSheet.create({
   },
   filterPanel: {
     gap: 10,
+  },
+  filterSection: {
+    gap: 8,
+  },
+  currentMapSection: {
+    marginBottom: 4,
   },
   searchInput: {
     minHeight: 42,
