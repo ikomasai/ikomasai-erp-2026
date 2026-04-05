@@ -5,6 +5,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { DISTRIBUTION_TYPES, STATUS_COLORS } from '../constants';
+import { useTheme } from '../../../shared/hooks/useTheme';
 
 /**
  * 日付を日本語表示に整形する
@@ -55,29 +56,32 @@ const getStatusColor = (status) => {
  * @returns {JSX.Element} 表示
  */
 const SequentialInfo = ({ sequential }) => {
+  /** テーマ */
+  const { theme } = useTheme();
+
   return (
     <View>
-      <View style={styles.waitTimeBox}>
-        <Text style={styles.waitTimeLabel}>待ち時間</Text>
-        <Text style={styles.waitTimeValue}>{sequential.estimatedWaitMinutes}分</Text>
+      <View style={[styles.waitTimeBox, { backgroundColor: theme.background, borderRadius: theme.borderRadius }]}>
+        <Text style={[styles.waitTimeLabel, { color: theme.primary }]}>待ち時間</Text>
+        <Text style={[styles.waitTimeValue, { color: theme.text }]}>{sequential.estimatedWaitMinutes}分</Text>
       </View>
       <View style={styles.infoGrid}>
-      <View style={styles.infoItem}>
-        <Text style={styles.infoLabel}>現在呼び出し</Text>
-        <Text style={styles.infoValue}>{sequential.currentCallNumber}</Text>
-      </View>
-      <View style={styles.infoItem}>
-        <Text style={styles.infoLabel}>最後尾番号</Text>
-        <Text style={styles.infoValue}>{sequential.lastTicketNumber}</Text>
-      </View>
-      <View style={styles.infoItem}>
-        <Text style={styles.infoLabel}>待ち人数(人)</Text>
-        <Text style={styles.infoValue}>{sequential.waitingCount}</Text>
-      </View>
-      <View style={styles.infoItem}>
-        <Text style={styles.infoLabel}>1番号あたり</Text>
-        <Text style={styles.infoValue}>{sequential.estimatedWaitPerNumber}分</Text>
-      </View>
+        <View style={[styles.infoItem, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
+          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>現在呼び出し</Text>
+          <Text style={[styles.infoValue, { color: theme.text }]}>{sequential.currentCallNumber}</Text>
+        </View>
+        <View style={[styles.infoItem, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
+          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>最後尾番号</Text>
+          <Text style={[styles.infoValue, { color: theme.text }]}>{sequential.lastTicketNumber}</Text>
+        </View>
+        <View style={[styles.infoItem, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
+          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>待ち人数(人)</Text>
+          <Text style={[styles.infoValue, { color: theme.text }]}>{sequential.waitingCount}</Text>
+        </View>
+        <View style={[styles.infoItem, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
+          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>1番号あたり</Text>
+          <Text style={[styles.infoValue, { color: theme.text }]}>{sequential.estimatedWaitPerNumber}分</Text>
+        </View>
       </View>
     </View>
   );
@@ -90,8 +94,11 @@ const SequentialInfo = ({ sequential }) => {
  * @returns {JSX.Element} 表示
  */
 const TimeSlotInfo = ({ timeSlots }) => {
+  /** テーマ */
+  const { theme } = useTheme();
+
   if (!timeSlots.length) {
-    return <Text style={styles.emptyText}>時間枠が登録されていません</Text>;
+    return <Text style={[styles.emptyText, { color: theme.textSecondary }]}>時間枠が登録されていません</Text>;
   }
 
   return (
@@ -99,7 +106,7 @@ const TimeSlotInfo = ({ timeSlots }) => {
       {timeSlots.map((slot) => (
         <View key={slot.id} style={styles.timeSlotCard}>
           <View style={styles.timeSlotHeader}>
-            <Text style={styles.timeSlotTitle}>
+            <Text style={[styles.timeSlotTitle, { color: theme.text }]}>
               {formatTimeLabel(slot.startTime)} - {formatTimeLabel(slot.endTime)}
             </Text>
             <View
@@ -112,21 +119,21 @@ const TimeSlotInfo = ({ timeSlots }) => {
             </View>
           </View>
           <View style={styles.infoGrid}>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>定員(人)</Text>
-              <Text style={styles.infoValue}>{slot.capacityPerSlot}</Text>
+            <View style={[styles.infoItem, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
+              <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>定員(人)</Text>
+              <Text style={[styles.infoValue, { color: theme.text }]}>{slot.capacityPerSlot}</Text>
             </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>発券済み(人)</Text>
-              <Text style={styles.infoValue}>{slot.currentCount}</Text>
+            <View style={[styles.infoItem, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
+              <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>発券済み(人)</Text>
+              <Text style={[styles.infoValue, { color: theme.text }]}>{slot.currentCount}</Text>
             </View>
-            <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>残り枠(人)</Text>
-              <Text style={styles.infoValue}>{slot.remainingCount}</Text>
+            <View style={[styles.infoItem, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
+              <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>残り枠(人)</Text>
+              <Text style={[styles.infoValue, { color: theme.text }]}>{slot.remainingCount}</Text>
             </View>
           </View>
           {slot.isClosed && (
-            <Text style={styles.closedText}>受付終了</Text>
+            <Text style={[styles.closedText, { color: theme.error }]}>受付終了</Text>
           )}
         </View>
       ))}
@@ -145,6 +152,8 @@ const TicketDistributionCard = ({ item }) => {
   const distributionType = item.type;
   /** 時間枠の折りたたみ状態 */
   const [isTimeSlotCollapsed, setIsTimeSlotCollapsed] = useState(false);
+  /** テーマ */
+  const { theme } = useTheme();
 
   /** 時間枠一覧を開閉する */
   const toggleTimeSlotCollapse = () => {
@@ -152,11 +161,11 @@ const TicketDistributionCard = ({ item }) => {
   };
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { backgroundColor: theme.surface, borderRadius: theme.borderRadius, shadowOpacity: theme.shadowOpacity }]}>
       <View style={styles.cardHeader}>
         <View>
-          <Text style={styles.cardTitle}>{item.eventName}</Text>
-          <Text style={styles.cardSubtitle}>{item.location || '場所未設定'}</Text>
+          <Text style={[styles.cardTitle, { color: theme.text }]}>{item.eventName}</Text>
+          <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>{item.location || '場所未設定'}</Text>
         </View>
         <View
           style={[
@@ -168,8 +177,8 @@ const TicketDistributionCard = ({ item }) => {
         </View>
       </View>
 
-      <Text style={styles.dateText}>開催日: {formatDateLabel(item.date)}</Text>
-      <Text style={styles.typeText}>
+      <Text style={[styles.dateText, { color: theme.textSecondary }]}>開催日: {formatDateLabel(item.date)}</Text>
+      <Text style={[styles.typeText, { color: theme.primary }]}>
         配布方式: {distributionType === DISTRIBUTION_TYPES.SEQUENTIAL ? '順次案内制' : '時間枠定員制'}
       </Text>
 
@@ -178,8 +187,8 @@ const TicketDistributionCard = ({ item }) => {
       ) : (
         <View>
           <View style={styles.timeSlotToggleRow}>
-            <Text style={styles.timeSlotToggleLabel}>時間枠一覧</Text>
-            <Text style={styles.timeSlotToggleButton} onPress={toggleTimeSlotCollapse}>
+            <Text style={[styles.timeSlotToggleLabel, { color: theme.text }]}>時間枠一覧</Text>
+            <Text style={[styles.timeSlotToggleButton, { color: theme.primary }]} onPress={toggleTimeSlotCollapse}>
               {isTimeSlotCollapsed ? '開く' : '閉じる'}
             </Text>
           </View>
@@ -188,7 +197,7 @@ const TicketDistributionCard = ({ item }) => {
       )}
 
       {item.updatedAt && (
-        <Text style={styles.updatedText}>
+        <Text style={[styles.updatedText, { color: theme.textSecondary }]}>
           更新: {new Date(item.updatedAt).toLocaleString('ja-JP')}
         </Text>
       )}

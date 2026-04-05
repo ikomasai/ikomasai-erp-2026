@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
   ScrollView,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import TicketDistributionCard from '../components/TicketDistributionCard';
 import useTicketDistributionData from '../hooks/useTicketDistributionData';
@@ -20,6 +21,8 @@ import {
   DISTRIBUTION_TYPES,
   SCREEN_LABELS,
 } from '../constants';
+import { useTheme } from '../../../shared/hooks/useTheme';
+import { ThemedHeader } from '../../../shared/components/ThemedHeader';
 
 /** ブレークポイント（スマホ/PC切り替え） */
 const MOBILE_BREAKPOINT = 768;
@@ -45,16 +48,18 @@ const Item3Screen = ({ navigation }) => {
   const { width } = useWindowDimensions();
   /** モバイル判定 */
   const isMobile = width < MOBILE_BREAKPOINT;
+  /** テーマ情報 */
+  const { theme } = useTheme();
   /** フィルタ状態 */
   const [selectedFilter, setSelectedFilter] = useState(FILTER_TYPES.ALL);
   /** 日付検索文字列 */
   const [dateQuery, setDateQuery] = useState('');
-  /** 日付プルダウン表示 */
-  const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false);
+  /** 日付モーダル表示 */
+  const [isDateModalOpen, setIsDateModalOpen] = useState(false);
   /** 開始時間フィルタ */
   const [selectedStartTime, setSelectedStartTime] = useState('');
-  /** 開始時間プルダウン表示 */
-  const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
+  /** 時間モーダル表示 */
+  const [isTimeModalOpen, setIsTimeModalOpen] = useState(false);
 
   /** 日付プルダウン候補 */
   const dateOptions = [
@@ -193,13 +198,6 @@ const Item3Screen = ({ navigation }) => {
   }, [dateQuery, selectedStartTime]);
 
   /**
-   * ドロワーを開く
-   */
-  const openDrawer = () => {
-    navigation.openDrawer();
-  };
-
-  /**
    * フィルタを切り替える
    * @param {string} filterType - フィルタ種別
    */
@@ -211,7 +209,6 @@ const Item3Screen = ({ navigation }) => {
       filterType !== FILTER_TYPES.ALL
     ) {
       setSelectedStartTime('');
-      setIsTimeDropdownOpen(false);
     }
   };
 
@@ -221,14 +218,21 @@ const Item3Screen = ({ navigation }) => {
    */
   const handleDateSelect = (value) => {
     setDateQuery(value);
-    setIsDateDropdownOpen(false);
+    setIsDateModalOpen(false);
   };
 
   /**
-   * 日付プルダウンを開閉する
+   * 日付モーダルを開く
    */
-  const toggleDateDropdown = () => {
-    setIsDateDropdownOpen((prev) => !prev);
+  const openDateModal = () => {
+    setIsDateModalOpen(true);
+  };
+
+  /**
+   * 日付モーダルを閉じる
+   */
+  const closeDateModal = () => {
+    setIsDateModalOpen(false);
   };
 
   /**
@@ -237,60 +241,63 @@ const Item3Screen = ({ navigation }) => {
    */
   const handleStartTimeSelect = (value) => {
     setSelectedStartTime(value);
-    setIsTimeDropdownOpen(false);
+    setIsTimeModalOpen(false);
   };
 
   /**
-   * 開始時間プルダウンを開閉する
+   * 時間モーダルを開く
    */
-  const toggleTimeDropdown = () => {
-    setIsTimeDropdownOpen((prev) => !prev);
+  const openTimeModal = () => {
+    setIsTimeModalOpen(true);
+  };
+
+  /**
+   * 時間モーダルを閉じる
+   */
+  const closeTimeModal = () => {
+    setIsTimeModalOpen(false);
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       {/* ヘッダー */}
-      <View style={styles.header}>
-        <View style={styles.headerSide}>
-          {isMobile && (
-            <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
-              <Text style={styles.menuButtonText}>☰</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-        <Text style={styles.headerTitle}>{SCREEN_LABELS.title}</Text>
-        <TouchableOpacity style={styles.refreshIconButton} onPress={refresh}>
-          <Text style={styles.refreshIconText}>更新</Text>
-        </TouchableOpacity>
-      </View>
+      <ThemedHeader title={SCREEN_LABELS.title} navigation={navigation} />
 
       {/* コンテンツ */}
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.sectionTitle}>{SCREEN_LABELS.summaryTitle}</Text>
+        <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderRadius: theme.borderRadius, shadowOpacity: theme.shadowOpacity }]}> 
+          <View style={styles.summaryHeaderRow}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{SCREEN_LABELS.summaryTitle}</Text>
+            <TouchableOpacity
+              style={[styles.summaryRefreshButton, { backgroundColor: theme.primary, borderRadius: theme.borderRadius }]}
+              onPress={refresh}
+            >
+              <Text style={styles.summaryRefreshText}>更新</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.summaryGrid}>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>{SCREEN_LABELS.summaryActiveEvents}</Text>
-              <Text style={styles.summaryValue}>{summaryData.activeEventCount}</Text>
+            <View style={[styles.summaryItem, { backgroundColor: theme.background, borderRadius: theme.borderRadius }]}>
+              <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.summaryActiveEvents}</Text>
+              <Text style={[styles.summaryValue, { color: theme.text }]}>{summaryData.activeEventCount}</Text>
             </View>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>{SCREEN_LABELS.summaryFullSlots}</Text>
-              <Text style={styles.summaryValue}>{summaryData.fullSlotCount}</Text>
+            <View style={[styles.summaryItem, { backgroundColor: theme.background, borderRadius: theme.borderRadius }]}>
+              <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.summaryFullSlots}</Text>
+              <Text style={[styles.summaryValue, { color: theme.text }]}>{summaryData.fullSlotCount}</Text>
             </View>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>{SCREEN_LABELS.summaryActiveSlots}</Text>
-              <Text style={styles.summaryValue}>{summaryData.activeSlotCount}</Text>
+            <View style={[styles.summaryItem, { backgroundColor: theme.background, borderRadius: theme.borderRadius }]}>
+              <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.summaryActiveSlots}</Text>
+              <Text style={[styles.summaryValue, { color: theme.text }]}>{summaryData.activeSlotCount}</Text>
             </View>
           </View>
-          <Text style={styles.lastUpdatedText}>
+          <Text style={[styles.lastUpdatedText, { color: theme.textSecondary }]}>
             最終更新: {lastUpdatedAt ? lastUpdatedAt.toLocaleString('ja-JP') : '取得中'}
           </Text>
         </View>
 
-        <View style={styles.filterContainer}>
+        <View style={[styles.filterContainer, { backgroundColor: theme.surface, borderRadius: theme.borderRadius, shadowOpacity: theme.shadowOpacity }]}>
           <View style={styles.filterRow}>
             <View style={styles.filterGroup}>
-              <Text style={styles.searchLabel}>{SCREEN_LABELS.filterLabel}</Text>
+              <Text style={[styles.searchLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.filterLabel}</Text>
               <View style={styles.filterButtons}>
                 {[
                   { label: SCREEN_LABELS.all, value: FILTER_TYPES.ALL },
@@ -301,13 +308,15 @@ const Item3Screen = ({ navigation }) => {
                     key={filter.value}
                     style={[
                       styles.filterButton,
-                      selectedFilter === filter.value && styles.filterButtonActive,
+                      { backgroundColor: theme.surface, borderRadius: theme.borderRadius, borderColor: theme.border, borderWidth: 1 },
+                      selectedFilter === filter.value && [styles.filterButtonActive, { backgroundColor: theme.primary, borderColor: theme.primary }],
                     ]}
                     onPress={() => handleFilterChange(filter.value)}
                   >
                     <Text
                       style={[
                         styles.filterButtonText,
+                        { color: theme.text },
                         selectedFilter === filter.value && styles.filterButtonTextActive,
                       ]}
                     >
@@ -319,71 +328,31 @@ const Item3Screen = ({ navigation }) => {
             </View>
 
             <View style={styles.dropdownGroup}>
-              <Text style={styles.searchLabel}>{SCREEN_LABELS.dateSearch}</Text>
+              <Text style={[styles.searchLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.dateSearch}</Text>
               <TouchableOpacity
-                style={styles.dropdownButton}
-                onPress={toggleDateDropdown}
+                style={[styles.dropdownButton, { backgroundColor: theme.background, borderColor: theme.border, borderRadius: theme.borderRadius }]}
+                onPress={openDateModal}
               >
-                <Text style={styles.dropdownButtonText}>
+                <Text style={[styles.dropdownButtonText, { color: theme.text }]}>
                   {dateQuery
                     ? dateOptions.find((option) => option.value === dateQuery)?.label
                     : SCREEN_LABELS.allDates}
                 </Text>
-                <Text style={styles.dropdownIcon}>{isDateDropdownOpen ? '▲' : '▼'}</Text>
+                <Text style={[styles.dropdownIcon, { color: theme.textSecondary }]}>▼</Text>
               </TouchableOpacity>
-              {isDateDropdownOpen && (
-                <View style={styles.dropdownMenu}>
-                  <TouchableOpacity
-                    style={styles.dropdownItem}
-                    onPress={() => handleDateSelect('')}
-                  >
-                    <Text style={styles.dropdownItemText}>{SCREEN_LABELS.allDates}</Text>
-                  </TouchableOpacity>
-                  {dateOptions.map((option) => (
-                    <TouchableOpacity
-                      key={option.value}
-                      style={styles.dropdownItem}
-                      onPress={() => handleDateSelect(option.value)}
-                    >
-                      <Text style={styles.dropdownItemText}>
-                        {option.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
             </View>
 
             <View style={styles.dropdownGroup}>
-              <Text style={styles.searchLabel}>{SCREEN_LABELS.timeSearch}</Text>
+              <Text style={[styles.searchLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.timeSearch}</Text>
               <TouchableOpacity
-                style={styles.dropdownButton}
-                onPress={toggleTimeDropdown}
+                style={[styles.dropdownButton, { backgroundColor: theme.background, borderColor: theme.border, borderRadius: theme.borderRadius }]}
+                onPress={openTimeModal}
               >
-                <Text style={styles.dropdownButtonText}>
+                <Text style={[styles.dropdownButtonText, { color: theme.text }]}>
                   {selectedStartTime || SCREEN_LABELS.allTimes}
                 </Text>
-                <Text style={styles.dropdownIcon}>{isTimeDropdownOpen ? '▲' : '▼'}</Text>
+                <Text style={[styles.dropdownIcon, { color: theme.textSecondary }]}>▼</Text>
               </TouchableOpacity>
-              {isTimeDropdownOpen && (
-                <View style={styles.dropdownMenu}>
-                  <TouchableOpacity
-                    style={styles.dropdownItem}
-                    onPress={() => handleStartTimeSelect('')}
-                  >
-                    <Text style={styles.dropdownItemText}>{SCREEN_LABELS.allTimes}</Text>
-                  </TouchableOpacity>
-                  {startTimeOptions.map((timeValue) => (
-                    <TouchableOpacity
-                      key={timeValue}
-                      style={styles.dropdownItem}
-                      onPress={() => handleStartTimeSelect(timeValue)}
-                    >
-                      <Text style={styles.dropdownItemText}>{timeValue}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
             </View>
           </View>
 
@@ -409,17 +378,18 @@ const Item3Screen = ({ navigation }) => {
         )}
 
         {!isLoading && errorMessage ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{errorMessage}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={refresh}>
+          <View style={[styles.errorBox, { backgroundColor: theme.surface }]}
+          >
+            <Text style={[styles.errorText, { color: theme.error }]}>{errorMessage}</Text>
+            <TouchableOpacity style={[styles.retryButton, { backgroundColor: theme.primary, borderRadius: theme.borderRadius }]} onPress={refresh}>
               <Text style={styles.retryButtonText}>再取得</Text>
             </TouchableOpacity>
           </View>
         ) : null}
 
         {!isLoading && !errorMessage && filteredList.length === 0 && (
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>{emptyMessage}</Text>
+          <View style={[styles.emptyBox, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>{emptyMessage}</Text>
           </View>
         )}
 
@@ -437,6 +407,106 @@ const Item3Screen = ({ navigation }) => {
         )}
       </ScrollView>
 
+      <Modal
+        transparent
+        visible={isDateModalOpen}
+        animationType="slide"
+        onRequestClose={closeDateModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { backgroundColor: theme.surface }]}
+          >
+            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}
+            >
+              <TouchableOpacity onPress={closeDateModal}>
+                <Text style={[styles.modalActionText, { color: theme.primary }]}
+                >
+                  キャンセル
+                </Text>
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: theme.text }]}
+              >
+                {SCREEN_LABELS.dateSearch}
+              </Text>
+              <View style={styles.modalSpacer} />
+            </View>
+            <ScrollView style={styles.modalList}>
+              <TouchableOpacity
+                style={[styles.modalOption, { borderBottomColor: theme.border }]}
+                onPress={() => handleDateSelect('')}
+              >
+                <Text style={[styles.modalOptionText, { color: theme.text }]}
+                >
+                  {SCREEN_LABELS.allDates}
+                </Text>
+              </TouchableOpacity>
+              {dateOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.modalOption, { borderBottomColor: theme.border }]}
+                  onPress={() => handleDateSelect(option.value)}
+                >
+                  <Text style={[styles.modalOptionText, { color: theme.text }]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        transparent
+        visible={isTimeModalOpen}
+        animationType="slide"
+        onRequestClose={closeTimeModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { backgroundColor: theme.surface }]}
+          >
+            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}
+            >
+              <TouchableOpacity onPress={closeTimeModal}>
+                <Text style={[styles.modalActionText, { color: theme.primary }]}
+                >
+                  キャンセル
+                </Text>
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: theme.text }]}
+              >
+                {SCREEN_LABELS.timeSearch}
+              </Text>
+              <View style={styles.modalSpacer} />
+            </View>
+            <ScrollView style={styles.modalList}>
+              <TouchableOpacity
+                style={[styles.modalOption, { borderBottomColor: theme.border }]}
+                onPress={() => handleStartTimeSelect('')}
+              >
+                <Text style={[styles.modalOptionText, { color: theme.text }]}
+                >
+                  {SCREEN_LABELS.allTimes}
+                </Text>
+              </TouchableOpacity>
+              {startTimeOptions.map((timeValue) => (
+                <TouchableOpacity
+                  key={timeValue}
+                  style={[styles.modalOption, { borderBottomColor: theme.border }]}
+                  onPress={() => handleStartTimeSelect(timeValue)}
+                >
+                  <Text style={[styles.modalOptionText, { color: theme.text }]}
+                  >
+                    {timeValue}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 };
@@ -445,45 +515,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f7',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  headerSide: {
-    width: 44,
-  },
-  menuButton: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuButtonText: {
-    fontSize: 24,
-    color: '#333333',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  refreshIconButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    backgroundColor: '#007AFF',
-  },
-  refreshIconText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
   },
   content: {
     padding: 16,
@@ -494,6 +525,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#2c3e50',
     marginBottom: 8,
+  },
+  summaryHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  summaryRefreshButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: '#007AFF',
+    marginTop: -12,
+  },
+  summaryRefreshText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   summaryCard: {
     backgroundColor: '#FFFFFF',
@@ -604,34 +652,54 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#7f8c8d',
   },
-  dropdownMenu: {
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#dfe6e9',
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    overflow: 'hidden',
-    position: 'relative',
-    zIndex: 10,
-    elevation: 10,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
   },
-  dropdownMenuOverlay: {
-    position: 'absolute',
-    bottom: 48,
-    left: 0,
-    right: 0,
-    marginTop: 0,
-    zIndex: 10,
+  modalSheet: {
+    backgroundColor: '#1e1e1e',
+    paddingBottom: 16,
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 360,
   },
-  dropdownItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
-  dropdownItemText: {
-    fontSize: 13,
-    color: '#2c3e50',
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  modalActionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ff9f0a',
+  },
+  modalSpacer: {
+    width: 60,
+  },
+  modalList: {
+    maxHeight: 240,
+  },
+  modalOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  modalOptionText: {
+    color: '#ffffff',
+    fontSize: 16,
   },
   activeFilterRow: {
     marginTop: 12,
