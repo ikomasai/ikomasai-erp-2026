@@ -160,14 +160,6 @@ const ASYNC_KEY_UNVISITED_ALERT_MINUTES = 'unvisitedAlertMinutes';
 /** AsyncStorage: 評価フォームURL（本部が設定し、巡回サポートは読み取り専用） */
 const ASYNC_KEY_EVALUATION_FORM_URL = 'evaluationFormUrl';
 
-/** タブごとの案内文 */
-const PATROL_TAB_DESCRIPTIONS = {
-  [PATROL_TAB_TYPES.DASHBOARD]: '件数と優先タスクだけを短く確認する巡回用の要約です。',
-  [PATROL_TAB_TYPES.TASKS]: '優先度の高い巡回依頼を選んで、そのまま対応まで進めます。',
-  [PATROL_TAB_TYPES.EVALUATION]: '企画評価タスクをまとめて確認し、現地評価を登録します。',
-  [PATROL_TAB_TYPES.CHECK]: '定常巡回の記録と未巡回箇所の確認を同じ流れで行います。',
-};
-
 /**
  * 巡回サポートのタブキーが有効か判定
  * @param {string|null|undefined} value - 判定対象タブキー
@@ -478,8 +470,7 @@ const Item12Screen = ({ navigation, route }) => {
   const [patrolLocations, setPatrolLocations] = useState([]);
   const [selectedPatrolLocationId, setSelectedPatrolLocationId] = useState('');
   const [patrolLocationText, setPatrolLocationText] = useState('');
-  const [patrolCheckItems, setPatrolCheckItems] = useState({});
-  const [patrolCheckMemo, setPatrolCheckMemo] = useState('');
+  const [isPatrolChecklistConfirmed, setIsPatrolChecklistConfirmed] = useState(false);
   const [isSubmittingPatrolCheck, setIsSubmittingPatrolCheck] = useState(false);
   const [recentPatrolChecks, setRecentPatrolChecks] = useState([]);
   const [isLoadingRecentPatrolChecks, setIsLoadingRecentPatrolChecks] = useState(false);
@@ -1010,40 +1001,6 @@ const Item12Screen = ({ navigation, route }) => {
   };
 
   /**
-   * 巡回チェック項目の回答を更新
-   * @param {string} itemKey - 項目キー
-   * @param {string} answerKey - 回答キー
-   * @param {string} answerLabel - 回答ラベル
-   * @returns {void}
-   */
-  const handleChangePatrolCheckAnswer = (itemKey, answerKey, answerLabel) => {
-    setPatrolCheckItems((prev) => ({
-      ...prev,
-      [itemKey]: {
-        ...(prev[itemKey] || {}),
-        answerKey,
-        answerLabel,
-      },
-    }));
-  };
-
-  /**
-   * 巡回チェック項目のメモを更新
-   * @param {string} item - 項目名
-   * @param {string} memo - 項目別メモ
-   * @returns {void}
-   */
-  const handleChangePatrolCheckMemo = (item, memo) => {
-    setPatrolCheckItems((prev) => ({
-      ...prev,
-      [item]: {
-        ...(prev[item] || {}),
-        memo,
-      },
-    }));
-  };
-
-  /**
    * 巡回場所選択ハンドラ
    * @param {Object} location - 選択された場所オブジェクト
    * @returns {void}
@@ -1051,6 +1008,7 @@ const Item12Screen = ({ navigation, route }) => {
   const handleSelectLocation = (location) => {
     setSelectedPatrolLocationId(location.id);
     setPatrolLocationText(location.label || '');
+    setIsPatrolChecklistConfirmed(false);
   };
 
   /**
@@ -1060,6 +1018,7 @@ const Item12Screen = ({ navigation, route }) => {
   const handleClearSelectedLocation = () => {
     setSelectedPatrolLocationId('');
     setPatrolLocationText('');
+    setIsPatrolChecklistConfirmed(false);
   };
 
   /**
@@ -1085,19 +1044,19 @@ const Item12Screen = ({ navigation, route }) => {
       return;
     }
 
+    if (!isPatrolChecklistConfirmed) {
+      showToast('チェック項目を確認してから登録してください', 'error');
+      return;
+    }
+
     /** 保存するチェック項目配列 */
     const checkItems = PATROL_CHECK_ITEM_OPTIONS.map((item) => ({
       key: item.key,
       label: item.label,
-      answerKey: patrolCheckItems[item.key]?.answerKey || '',
-      answerLabel: patrolCheckItems[item.key]?.answerLabel || '',
-      memo: (patrolCheckItems[item.key]?.memo || '').trim(),
+      answerKey: 'checked',
+      answerLabel: '確認済み',
+      memo: '',
     }));
-
-    if (checkItems.some((item) => !item.answerKey || !item.answerLabel)) {
-      showToast('すべてのチェック項目に回答してください', 'error');
-      return;
-    }
 
     setIsSubmittingPatrolCheck(true);
     const { error } = await createPatrolCheck({
@@ -1105,7 +1064,7 @@ const Item12Screen = ({ navigation, route }) => {
       locationId: selectedLocation.id,
       locationText,
       checkItems,
-      memo: patrolCheckMemo,
+      memo: '',
     });
     setIsSubmittingPatrolCheck(false);
 
@@ -1114,8 +1073,7 @@ const Item12Screen = ({ navigation, route }) => {
       return;
     }
 
-    setPatrolCheckMemo('');
-    setPatrolCheckItems({});
+    setIsPatrolChecklistConfirmed(false);
     await Promise.all([loadRecentPatrolChecks(), loadUnvisitedAlerts()]);
     showToast('巡回チェックを記録しました');
   };
@@ -1905,9 +1863,6 @@ const Item12Screen = ({ navigation, route }) => {
                     >
                       {isOnPatrol ? '巡回中' : '巡回していない'}
                     </Text>
-                    <Text style={[dashboardStyles.patrolToggleHint, { color: theme.textSecondary }]}>
-                      {isOnPatrol ? '本部ダッシュボードに表示中' : 'タップして巡回開始を通知'}
-                    </Text>
                   </View>
                 </View>
                 <Text
@@ -1925,9 +1880,6 @@ const Item12Screen = ({ navigation, route }) => {
               <View style={dashboardStyles.header}>
                 <View style={dashboardStyles.headerTextBlock}>
                   <Text style={[dashboardStyles.title, { color: theme.text }]}>ダッシュボード</Text>
-                  <Text style={[dashboardStyles.helpText, { color: theme.textSecondary }]}>
-                    {PATROL_TAB_DESCRIPTIONS[PATROL_TAB_TYPES.DASHBOARD]}
-                  </Text>
                 </View>
                 <Pressable
                   style={[dashboardStyles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
@@ -1975,9 +1927,6 @@ const Item12Screen = ({ navigation, route }) => {
                       <Text style={[dashboardStyles.metricLabel, { color: theme.text }]}>
                         {metric.label}
                       </Text>
-                      <Text style={[dashboardStyles.metricHelper, { color: theme.textSecondary }]}>
-                        {metric.helper}
-                      </Text>
                     </View>
                   );
                 })}
@@ -1989,18 +1938,10 @@ const Item12Screen = ({ navigation, route }) => {
                   { borderLeftColor: theme.primary, backgroundColor: `${theme.primary}0D` },
                 ]}
               >
-                <Text style={[dashboardStyles.sectionLabel, { color: theme.textSecondary }]}>
-                  次に見るべきタスク
-                </Text>
                 <Text style={[dashboardStyles.focusTitle, { color: theme.text }]}>
                   {selectedTask
                     ? selectedTask.event_name || getTaskTypeLabel(selectedTask) || '巡回タスク'
                     : 'タスクを選択してください'}
-                </Text>
-                <Text style={[dashboardStyles.focusBody, { color: theme.textSecondary }]}>
-                  {selectedTask
-                    ? `${getTaskTypeLabel(selectedTask)} / ${selectedTaskLocationLabel}`
-                    : '下のタブでタスクを開くと、受諾と完了登録に進めます。'}
                 </Text>
               </View>
 
@@ -2193,9 +2134,6 @@ const Item12Screen = ({ navigation, route }) => {
                     >
                       {isOnPatrol ? '巡回中' : '巡回していない'}
                     </Text>
-                    <Text style={[dashboardStyles.patrolToggleHint, { color: theme.textSecondary }]}>
-                      {isOnPatrol ? '本部ダッシュボードに表示中' : 'タップして巡回開始を通知'}
-                    </Text>
                   </View>
                 </View>
                 <Text
@@ -2216,12 +2154,9 @@ const Item12Screen = ({ navigation, route }) => {
                 selectedPatrolLocationId={selectedPatrolLocationId}
                 onSelectLocation={handleSelectLocation}
                 patrolLocationText={patrolLocationText}
-                patrolCheckItems={patrolCheckItems}
-                onChangeCheckAnswer={handleChangePatrolCheckAnswer}
-                onChangeCheckMemo={handleChangePatrolCheckMemo}
+                isChecklistConfirmed={isPatrolChecklistConfirmed}
+                onToggleChecklistConfirmed={setIsPatrolChecklistConfirmed}
                 onClearSelectedLocation={handleClearSelectedLocation}
-                patrolCheckMemo={patrolCheckMemo}
-                onChangeSummaryMemo={setPatrolCheckMemo}
                 isSubmittingPatrolCheck={isSubmittingPatrolCheck}
                 onSubmitPatrolCheck={handleSubmitPatrolCheck}
                 recentPatrolChecks={recentPatrolChecks}
@@ -2363,11 +2298,6 @@ const dashboardStyles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  patrolToggleHint: {
-    fontSize: 12,
-    marginTop: 2,
-    lineHeight: 17,
-  },
   /** ON/OFF トグルボタン pill 形 */
   patrolToggleButton: {
     fontSize: 13,
@@ -2391,10 +2321,6 @@ const dashboardStyles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     letterSpacing: 0.2,
-  },
-  helpText: {
-    fontSize: 12,
-    lineHeight: 18,
   },
   /** 更新ボタン */
   refreshButton: {
@@ -2434,10 +2360,6 @@ const dashboardStyles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  metricHelper: {
-    fontSize: 11,
-    marginTop: 1,
-  },
   /** フォーカスカード: 左アクセントボーダー付き */
   focusCard: {
     borderLeftWidth: 4,
@@ -2451,20 +2373,10 @@ const dashboardStyles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
   focusTitle: {
     fontSize: 17,
     fontWeight: '700',
     lineHeight: 24,
-  },
-  focusBody: {
-    fontSize: 13,
-    lineHeight: 20,
   },
   columnGroup: {
     gap: 10,

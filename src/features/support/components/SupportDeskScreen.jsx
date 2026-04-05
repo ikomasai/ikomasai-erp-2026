@@ -4488,17 +4488,9 @@ const SupportDeskScreen = ({
                         setActiveTab('tickets');
                       }}
                     >
-                      <View style={[styles.dashboardTicketTypeBadge, { backgroundColor: `${theme.primary}18` }]}>
-                        <Text style={[styles.dashboardTicketTypeText, { color: theme.primary }]}>
-                          {TICKET_TYPE_LABELS[t.ticket_type] || t.ticket_type}
-                        </Text>
-                      </View>
                       <View style={styles.dashboardTicketBody}>
                         <Text style={[styles.dashboardTicketTitle, { color: theme.text }]} numberOfLines={1}>
                           {t.title || t.event_name || '（タイトルなし）'}
-                        </Text>
-                        <Text style={[styles.dashboardTicketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                          {t.event_name || '-'} / {new Date(t.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -4550,11 +4542,6 @@ const SupportDeskScreen = ({
                           <Text style={[styles.dashboardPatrolName, { color: theme.text }]}>
                             {patrolUser.name || '（名前未設定）'}
                           </Text>
-                          {patrolUser.organization ? (
-                            <Text style={[styles.dashboardPatrolOrg, { color: theme.textSecondary }]}>
-                              {patrolUser.organization}
-                            </Text>
-                          ) : null}
                         </View>
 
                         <View
@@ -4627,7 +4614,7 @@ const SupportDeskScreen = ({
                                 ) : null}
 
                                 <Text style={[styles.dashboardPatrolTaskMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                                  {timeLabel} / {task.task_no || 'タスク番号なし'}
+                                  {timeLabel}
                                 </Text>
                               </View>
                             );
@@ -4779,9 +4766,6 @@ const SupportDeskScreen = ({
                           <Text style={[styles.overviewTaskLocation, { color: theme.text }]} numberOfLines={1}>
                             {ticket.event_name || '-'} / {ticket.event_location || '-'}
                           </Text>
-                          <Text style={[styles.messageDate, { color: theme.textSecondary }]}>
-                            団体: {ticket.organizations?.name || '-'} / {new Date(ticket.created_at).toLocaleString('ja-JP')}
-                          </Text>
                         </Pressable>
                       );
                     })
@@ -4797,12 +4781,6 @@ const SupportDeskScreen = ({
                       <Text style={[styles.sectionTitle, { color: theme.text }]}>選択中の企画報告</Text>
                       <Text style={[styles.ticketDetailTitle, { color: theme.text }]}>
                         {selectedOverviewReportTicket.title}
-                      </Text>
-                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                        種別:{' '}
-                        {TICKET_TYPE_LABELS[selectedOverviewReportTicket.ticket_type] ||
-                          selectedOverviewReportTicket.ticket_type}
-                        {' / '}状態: {getTicketStatusLabelForRole(selectedOverviewReportTicket, roleType)}
                       </Text>
                       <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                         企画: {selectedOverviewReportTicket.event_name || '-'}（
@@ -5048,9 +5026,6 @@ const SupportDeskScreen = ({
                         {selectedOverviewLockTask.notes || '施錠確認'}
                       </Text>
                       <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                        状態: {PATROL_TASK_STATUS_LABELS[selectedOverviewLockTask.task_status] || selectedOverviewLockTask.task_status}
-                      </Text>
-                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                         企画: {selectedOverviewLockTask.event_name || '-'}（
                         {selectedOverviewLockTask.event_location || selectedOverviewLockTask.location_text || '-'}）
                       </Text>
@@ -5058,9 +5033,6 @@ const SupportDeskScreen = ({
                         担当:{' '}
                         {overviewProfileMap[selectedOverviewLockTask.assigned_to] ||
                           (selectedOverviewLockTask.assigned_to ? '読込中...' : '未割当')}
-                      </Text>
-                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                        受付: {formatOverviewTaskTime(selectedOverviewLockTask)}
                       </Text>
                       <View style={styles.overviewActionRow}>
                         {[PATROL_TASK_STATUSES.OPEN, PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(
@@ -6461,11 +6433,6 @@ const SupportDeskScreen = ({
                         <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
                           {ticket.event_name} / {ticket.event_location}
                         </Text>
-                        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                          {TICKET_TYPE_LABELS[ticket.ticket_type] || ticket.ticket_type} /{' '}
-                          {getTicketStatusLabelForRole(ticket, roleType)} /{' '}
-                          {new Date(ticket.created_at).toLocaleString('ja-JP')}
-                        </Text>
                         {alertInfo.color ? (
                           <Text style={[styles.elapsedAlert, { color: alertInfo.color }]}>
                             {formatElapsedMinutes(alertInfo.elapsedMinutes)} 経過
@@ -6495,11 +6462,6 @@ const SupportDeskScreen = ({
                 {isDepartmentTicketDetailExpanded ? (
                   <>
                     <Text style={[styles.ticketDetailTitle, { color: theme.text }]}>{selectedTicket.title}</Text>
-                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>受付番号: {selectedTicket.ticket_no || '-'}</Text>
-                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                      種別: {TICKET_TYPE_LABELS[selectedTicket.ticket_type] || selectedTicket.ticket_type} / 状態:{' '}
-                      {getTicketStatusLabelForRole(selectedTicket, roleType)}
-                    </Text>
                     <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                       企画: {selectedTicket.event_name}（{selectedTicket.event_location}）
                     </Text>
@@ -6511,9 +6473,6 @@ const SupportDeskScreen = ({
                         { borderColor: theme.border, backgroundColor: theme.background },
                       ]}
                     >
-                      <Text style={[styles.statusPickerLabel, { color: theme.textSecondary }]}>
-                        {isUpdatingStatus ? 'ステータス更新中...' : 'ステータスを変更'}
-                      </Text>
                       <View style={styles.departmentStatusActions}>
                         {HQ_TICKET_STATUS_OPTIONS.map((option) => {
                           /** このオプションが選択中かどうか */
@@ -6549,17 +6508,9 @@ const SupportDeskScreen = ({
                               >
                                 {option.label}
                               </Text>
-                              <Text
-                                style={[
-                                  styles.departmentStatusButtonMeta,
-                                  { color: isActive ? tone.borderColor : theme.textSecondary },
-                                ]}
-                              >
-                                {isActive ? '選択中' : 'この状態に変更'}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
+                          </Pressable>
+                        );
+                      })}
                       </View>
                     </View>
 
@@ -6580,9 +6531,6 @@ const SupportDeskScreen = ({
                       <View style={[styles.dispatchSection, { borderColor: theme.border, backgroundColor: `${theme.primary}08` }]}>
                         <Text style={[styles.dispatchSectionTitle, { color: theme.text }]}>
                           🚶 現地対応
-                        </Text>
-                        <Text style={[styles.dispatchSectionDesc, { color: theme.textSecondary }]}>
-                          企画管理部の部員を現地に向かわせるタスクを生成します。依頼者にも通知が届きます。
                         </Text>
                         <TouchableOpacity
                           style={[styles.dispatchButton, { backgroundColor: theme.primary }]}
@@ -6884,15 +6832,7 @@ const SupportDeskScreen = ({
                       </Text>
                     </View>
                     <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                      {ticket.organizations?.name || '-'} / 受付 {ticket.ticket_no || '-'}
-                    </Text>
-                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
                       {ticket.event_name} / {ticket.event_location}
-                    </Text>
-                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                      {TICKET_TYPE_LABELS[ticket.ticket_type] || ticket.ticket_type} /{' '}
-                      {getTicketStatusLabelForRole(ticket, roleType)} /{' '}
-                      {new Date(ticket.created_at).toLocaleString('ja-JP')}
                     </Text>
                     {alertInfo.color ? (
                       <Text style={[styles.elapsedAlert, { color: alertInfo.color }]}>
@@ -6931,14 +6871,6 @@ const SupportDeskScreen = ({
               <>
                 <Text style={[styles.ticketDetailTitle, { color: theme.text }]}>{selectedTicket.title}</Text>
                 <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                  団体: {selectedTicket.organizations?.name || '-'} / 受付番号: {selectedTicket.ticket_no || '-'}
-                </Text>
-                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                  種別: {TICKET_TYPE_LABELS[selectedTicket.ticket_type] || selectedTicket.ticket_type} / 状態:{' '}
-                  {getTicketStatusLabelForRole(selectedTicket, roleType)}
-                  {selectedTicket.priority ? ` / 優先度: ${selectedTicket.priority === 'high' ? '高' : '中'}` : null}
-                </Text>
-                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                   企画: {selectedTicket.event_name}（{selectedTicket.event_location}）
                 </Text>
                 {isEventStatusTicket ? (
@@ -6955,9 +6887,6 @@ const SupportDeskScreen = ({
                       { borderColor: theme.border, backgroundColor: theme.background },
                     ]}
                   >
-                    <Text style={[styles.statusPickerLabel, { color: theme.textSecondary }]}>
-                      {isUpdatingStatus ? 'ステータス更新中...' : 'ステータスを変更'}
-                    </Text>
                     <View style={styles.departmentStatusActions}>
                       {departmentStatusOptions.map((option) => {
                         const tone = DEPARTMENT_STATUS_TONES[option.key] || {
@@ -6992,14 +6921,6 @@ const SupportDeskScreen = ({
                             >
                               {option.label}
                             </Text>
-                            <Text
-                              style={[
-                                styles.departmentStatusButtonMeta,
-                                { color: isActive ? tone.borderColor : theme.textSecondary },
-                              ]}
-                            >
-                              {isActive ? '選択中' : 'この状態に変更'}
-                            </Text>
                           </Pressable>
                         );
                       })}
@@ -7012,9 +6933,6 @@ const SupportDeskScreen = ({
                       { borderColor: theme.border, backgroundColor: theme.background },
                     ]}
                   >
-                    <Text style={[styles.statusPickerLabel, { color: theme.textSecondary }]}>
-                      {isUpdatingStatus ? 'ステータス更新中...' : 'ステータスを変更'}
-                    </Text>
                     <Picker
                       selectedValue={selectedTicket.ticket_status}
                       onValueChange={(value) => {
@@ -8072,15 +7990,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     paddingBottom: 8,
   },
-  dashboardTicketTypeBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  dashboardTicketTypeText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
   dashboardTicketBody: {
     flex: 1,
   },
@@ -8134,10 +8043,6 @@ const styles = StyleSheet.create({
   dashboardPatrolName: {
     fontSize: 13,
     fontWeight: '700',
-  },
-  /** ダッシュボード: 巡回スタッフ所属 */
-  dashboardPatrolOrg: {
-    fontSize: 11,
   },
   /** ダッシュボード: 担当中タスクバッジ */
   dashboardPatrolTaskBadge: {
@@ -8212,10 +8117,6 @@ const styles = StyleSheet.create({
   dispatchSectionTitle: {
     fontSize: 14,
     fontWeight: '800',
-  },
-  dispatchSectionDesc: {
-    fontSize: 12,
-    lineHeight: 18,
   },
   dispatchButton: {
     borderRadius: 10,
@@ -8879,13 +8780,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingTop: 8,
   },
-  /** ステータス変更Pickerのラベル */
-  statusPickerLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    paddingHorizontal: 8,
-    marginBottom: 2,
-  },
   /** 部署向けステータス変更カード */
   departmentStatusPanel: {
     borderWidth: 1,
@@ -8914,11 +8808,6 @@ const styles = StyleSheet.create({
   departmentStatusButtonLabel: {
     fontSize: 14,
     fontWeight: '700',
-  },
-  /** 部署向けステータス変更ボタンの補足 */
-  departmentStatusButtonMeta: {
-    fontSize: 11,
-    marginTop: 4,
   },
   /** ステータス変更Picker本体 */
   picker: {
