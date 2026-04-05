@@ -76,6 +76,11 @@ import {
   selectPrizeDistributions,
   updatePrizeDistributionCriteria,
 } from '../../../services/supabase/prizeDistributionService';
+import {
+  ERP_SETTING_KEYS,
+  selectEvaluationFormUrlSetting,
+  upsertEvaluationFormUrlSetting,
+} from '../../../services/supabase/erpSettingService';
 import { useManagedPushSubscription } from '../../notifications/hooks/useManagedPushSubscription';
 import WebPushStatusCard from '../../notifications/components/WebPushStatusCard';
 import {
@@ -290,6 +295,13 @@ const UNVISITED_ALERT_MINUTE_OPTIONS = [30, 60, 90, 120];
 
 /** AsyncStorage: 評価項目設定（本部が設定した項目名の配列 JSON） */
 const ASYNC_KEY_EVALUATION_ITEMS = 'hqEvaluationItems';
+
+/** AsyncStorage: 評価フォームURL（本部が設定、巡回サポートは読み取り専用） */
+const ASYNC_KEY_EVALUATION_FORM_URL = 'evaluationFormUrl';
+
+/** 評価フォームURLのデフォルト値 */
+const DEFAULT_EVALUATION_FORM_URL =
+  'https://docs.google.com/forms/d/e/1FAIpQLSfcBhmp3X4Z3ARM6UFkvCH6WW4hXvg6-s6hhNuBKKaAjKmZhg/viewform?embedded=true';
 
 /** 評価項目のデフォルト値 */
 const DEFAULT_EVALUATION_ITEMS = ['企画書通りの進行', '安全管理', '来場者対応', '設営・片付け', '全体印象'];
@@ -991,6 +1003,15 @@ const SupportDeskScreen = ({
    * 巡回サポート（Item12Screen）はここで設定した値を読み取り専用で使用する。
    */
   const [hqUnvisitedAlertMinutes, setHqUnvisitedAlertMinutes] = useState(90);
+  /**
+   * 評価フォームURL（本部が設定、AsyncStorage に保存）
+   * 巡回サポートの評価タブに埋め込むGoogleフォームのURL
+   */
+  const [evaluationFormUrl, setEvaluationFormUrl] = useState(DEFAULT_EVALUATION_FORM_URL);
+  /** 評価フォームURL編集中のドラフト */
+  const [evaluationFormUrlDraft, setEvaluationFormUrlDraft] = useState('');
+  /** 評価フォームURL保存中フラグ */
+  const [isSavingEvaluationFormUrl, setIsSavingEvaluationFormUrl] = useState(false);
   /**
    * 評価項目リスト（本部が設定、AsyncStorage に保存）
    * 評価タスク生成時は、この一覧を1件の企画評価タスクへまとめて保存する
@@ -1824,6 +1845,95 @@ const SupportDeskScreen = ({
       await AsyncStorage.setItem(ASYNC_KEY_UNVISITED_ALERT_MINUTES, String(minutes));
     } catch (error) {
       console.error('未巡回アラート閾値の保存に失敗:', error);
+    }
+  };
+
+  /**
+   * AsyncStorage から評価フォームURLを読み込む（本部のみ）
+   * @returns {Promise<void>} 読み込み処理
+   */
+  const loadEvaluationFormUrl = useCallback(async () => {
+    if (!isHQRole) {
+      return;
+    }
+    try {
+      const { value, error } = await selectEvaluationFormUrlSetting();
+      /** DB から取得した共有URL */
+      const sharedUrl =
+        typeof value === 'string' && value.trim().length > 0 ? value.trim() : '';
+      if (sharedUrl) {
+        setEvaluationFormUrl(sharedUrl);
+        setEvaluationFormUrlDraft(sharedUrl);
+        await AsyncStorage.setItem(ASYNC_KEY_EVALUATION_FORM_URL, sharedUrl);
+        return;
+      }
+
+      const stored = await AsyncStorage.getItem(ASYNC_KEY_EVALUATION_FORM_URL);
+      if (stored) {
+        setEvaluationFormUrl(stored);
+        setEvaluationFormUrlDraft(stored);
+        return;
+      }
+
+      if (error) {
+        console.error('共有評価フォームURLの読み込みに失敗:', error);
+      }
+
+      setEvaluationFormUrl(DEFAULT_EVALUATION_FORM_URL);
+      setEvaluationFormUrlDraft(DEFAULT_EVALUATION_FORM_URL);
+    } catch (error) {
+      console.error('評価フォームURLの読み込みに失敗:', error);
+    }
+  }, [isHQRole]);
+
+  /**
+   * 評価フォームURLを保存する（本部のみ）
+   * @returns {Promise<void>} 保存処理
+   */
+  const handleSaveEvaluationFormUrl = async () => {
+    const trimmed = evaluationFormUrlDraft.trim();
+    if (!trimmed) {
+      showMessage('入力エラー', 'URLを入力してください');
+      return;
+    }
+
+    setIsSavingEvaluationFormUrl(true);
+    try {
+      const { error } = await upsertEvaluationFormUrlSetting(trimmed, user?.id || null);
+      if (error) {
+        throw error;
+      }
+      await AsyncStorage.setItem(ASYNC_KEY_EVALUATION_FORM_URL, trimmed);
+      setEvaluationFormUrl(trimmed);
+      setEvaluationFormUrlDraft(trimmed);
+      showMessage('保存完了', '評価フォームURLを保存しました');
+    } catch (error) {
+      console.error('評価フォームURLの保存に失敗:', error);
+      showMessage('保存エラー', '評価フォームURLの保存に失敗しました');
+    } finally {
+      setIsSavingEvaluationFormUrl(false);
+    }
+  };
+
+  /**
+   * 評価フォームURLをデフォルトにリセットする
+   * @returns {Promise<void>} リセット処理
+   */
+  const handleResetEvaluationFormUrl = async () => {
+    setEvaluationFormUrlDraft(DEFAULT_EVALUATION_FORM_URL);
+    setEvaluationFormUrl(DEFAULT_EVALUATION_FORM_URL);
+    try {
+      const { error } = await upsertEvaluationFormUrlSetting(
+        DEFAULT_EVALUATION_FORM_URL,
+        user?.id || null
+      );
+      if (error) {
+        throw error;
+      }
+      await AsyncStorage.setItem(ASYNC_KEY_EVALUATION_FORM_URL, DEFAULT_EVALUATION_FORM_URL);
+      showMessage('リセット完了', 'デフォルトのURLに戻しました');
+    } catch (error) {
+      console.error('評価フォームURLのリセットに失敗:', error);
     }
   };
 
@@ -3406,9 +3516,10 @@ const SupportDeskScreen = ({
 
   useEffect(() => {
     loadLastViewedAt();
-    /** 本部は初回マウント時に閾値設定・評価項目を読み込む */
+    /** 本部は初回マウント時に閾値設定・評価項目・評価フォームURLを読み込む */
     loadHqAlertMinutes();
     loadEvaluationItems();
+    loadEvaluationFormUrl();
     loadTickets();
     loadRadioLogs();
     loadHqPatrolTasks();
@@ -3661,6 +3772,38 @@ const SupportDeskScreen = ({
       supabase.removeChannel(channel);
     };
   }, [isHQRole, user?.id]);
+
+  /**
+   * HQ向け: ERP共有設定の Realtime 購読
+   * 評価フォームURLの変更を即時反映する
+   */
+  useEffect(() => {
+    if (!isHQRole || !user?.id) {
+      return () => {};
+    }
+
+    const supabase = getSupabaseClient();
+    const channel = supabase.channel(`erp_setting_hq_${user.id}`);
+
+    channel.on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'ERP_setting',
+        filter: `key=eq.${ERP_SETTING_KEYS.EVALUATION_FORM_URL}`,
+      },
+      () => {
+        loadEvaluationFormUrl();
+      }
+    );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isHQRole, loadEvaluationFormUrl, user?.id]);
 
   /**
    * HQ向け: 画面フォーカス復帰時・アプリ復帰時に巡回タスク一覧を再取得する
@@ -7432,6 +7575,67 @@ const SupportDeskScreen = ({
               <Text style={[styles.helpText, { color: theme.textSecondary }]}>
                 現在の設定: {hqUnvisitedAlertMinutes}分以上巡回がない場所にアラートを表示
               </Text>
+            </View>
+
+            {/* ── 評価フォームURL設定 ── */}
+            <View style={[styles.card, { backgroundColor: theme.surface }]}>
+              <View style={styles.sectionHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.sectionTitle, { color: theme.text }]}>評価フォームURL設定</Text>
+                  <Text style={[styles.helpText, { color: theme.textSecondary, marginTop: 2 }]}>
+                    巡回サポートの「評価」タブに埋め込まれるGoogleフォームのURLを設定します。
+                  </Text>
+                </View>
+              </View>
+              <TextInput
+                value={evaluationFormUrlDraft}
+                onChangeText={setEvaluationFormUrlDraft}
+                placeholder="https://docs.google.com/forms/..."
+                placeholderTextColor={theme.textSecondary}
+                style={[
+                  styles.evalItemInput,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor: theme.background,
+                    color: theme.text,
+                    marginBottom: 8,
+                  },
+                ]}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+              />
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  style={[
+                    styles.evalItemAddButton,
+                    {
+                      flex: 1,
+                      backgroundColor:
+                        isSavingEvaluationFormUrl || !evaluationFormUrlDraft.trim()
+                          ? theme.border
+                          : theme.primary,
+                    },
+                  ]}
+                  onPress={handleSaveEvaluationFormUrl}
+                  disabled={isSavingEvaluationFormUrl || !evaluationFormUrlDraft.trim()}
+                >
+                  <Text style={styles.evalItemAddButtonText}>
+                    {isSavingEvaluationFormUrl ? '保存中...' : '保存'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.inlineActionButton,
+                    { borderColor: theme.border, alignSelf: 'stretch', justifyContent: 'center' },
+                  ]}
+                  onPress={handleResetEvaluationFormUrl}
+                >
+                  <Text style={[styles.inlineActionButtonText, { color: theme.textSecondary }]}>
+                    デフォルトに戻す
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* ── 評価項目設定 ── */}

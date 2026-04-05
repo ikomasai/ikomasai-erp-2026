@@ -4,8 +4,9 @@
  * state管理とAPI呼び出しを集約するコンテナコンポーネント
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { WebView } from 'react-native-webview';
 import {
   AppState,
   KeyboardAvoidingView,
@@ -54,6 +55,10 @@ import {
 import { selectOrganizationEvents } from '../../../services/supabase/organizationEventService';
 import { listKeyLoans } from '../../../services/supabase/keyLoanService';
 import {
+  ERP_SETTING_KEYS,
+  selectEvaluationFormUrlSetting,
+} from '../../../services/supabase/erpSettingService';
+import {
   ALL_ORGANIZATION_EVENT_FILTER,
   buildOrganizationEventOptions,
   matchesOrganizationEventSearchKeyword,
@@ -69,6 +74,10 @@ import OfflineBanner from '../../../shared/components/OfflineBanner';
 import { useManagedPushSubscription } from '../../notifications/hooks/useManagedPushSubscription';
 import WebPushStatusCard from '../../notifications/components/WebPushStatusCard';
 import SupportScreenAccessGuard from '../../support/components/SupportScreenAccessGuard';
+
+/** 企画評価フォームの埋め込みURL（Google Forms） */
+const EVALUATION_FORM_URL =
+  'https://docs.google.com/forms/d/e/1FAIpQLSfcBhmp3X4Z3ARM6UFkvCH6WW4hXvg6-s6hhNuBKKaAjKmZhg/viewform?embedded=true';
 
 /** 表示専用の評価タスクラベル */
 const EVALUATION_TASK_LABEL = '企画評価';
@@ -147,6 +156,9 @@ const ASYNC_KEY_SHOW_LOCK_CHECK_IN_PATROL = 'showLockCheckInPatrol';
 
 /** AsyncStorage: 未巡回アラート閾値（本部が設定し、巡回サポートは読み取り専用） */
 const ASYNC_KEY_UNVISITED_ALERT_MINUTES = 'unvisitedAlertMinutes';
+
+/** AsyncStorage: 評価フォームURL（本部が設定し、巡回サポートは読み取り専用） */
+const ASYNC_KEY_EVALUATION_FORM_URL = 'evaluationFormUrl';
 
 /** タブごとの案内文 */
 const PATROL_TAB_DESCRIPTIONS = {
@@ -476,6 +488,8 @@ const Item12Screen = ({ navigation, route }) => {
   const [unvisitedLocations, setUnvisitedLocations] = useState([]);
   const [isLoadingUnvisitedLocations, setIsLoadingUnvisitedLocations] = useState(false);
   const [unvisitedAlertMinutes, setUnvisitedAlertMinutes] = useState(DEFAULT_UNVISITED_ALERT_MINUTES);
+  /** 評価フォームURL（本部が設定、AsyncStorage から読み取り専用） */
+  const [evaluationFormUrl, setEvaluationFormUrl] = useState(EVALUATION_FORM_URL);
 
   /* ---- 自分の履歴関連 ---- */
   /** 自分が対応した過去タスク（完了・取消）一覧 */
@@ -1666,24 +1680,132 @@ const Item12Screen = ({ navigation, route }) => {
     loadLockCheckSetting();
   }, []);
 
+  const loadSharedEvaluationFormUrl = useCallback(async () => {
+    try {
+      const { value, error } = await selectEvaluationFormUrlSetting();
+      const sharedUrl =
+        typeof value === 'string' && value.trim().length > 0 ? value.trim() : '';
+      if (sharedUrl) {
+        setEvaluationFormUrl(sharedUrl);
+        await AsyncStorage.setItem(ASYNC_KEY_EVALUATION_FORM_URL, sharedUrl);
+        return;
+      }
+
+      const urlValue = await AsyncStorage.getItem(ASYNC_KEY_EVALUATION_FORM_URL);
+      if (urlValue) {
+        setEvaluationFormUrl(urlValue);
+        return;
+      }
+
+      if (error) {
+        console.warn('共有評価フォームURLの読み込みに失敗:', error);
+      }
+
+      setEvaluationFormUrl(EVALUATION_FORM_URL);
+    } catch (e) {
+      console.warn('評価フォームURLの読み込みに失敗:', e);
+    }
+  }, []);
+
   /**
-   * AsyncStorage から未巡回アラート閾値を読み込む
-   * 閾値は本部（SupportDeskScreen）が設定し、巡回サポートは読み取り専用として表示のみ行う
+   * AsyncStorage から未巡回アラート閾値と評価フォームURLを読み込む
+   * いずれも本部（SupportDeskScreen）が設定し、巡回サポートは読み取り専用
    */
   useEffect(() => {
-    const loadAlertMinutes = async () => {
+    const loadSettings = async () => {
       try {
-        const value = await AsyncStorage.getItem(ASYNC_KEY_UNVISITED_ALERT_MINUTES);
-        const parsed = value ? parseInt(value, 10) : null;
+        const minutesValue = await AsyncStorage.getItem(ASYNC_KEY_UNVISITED_ALERT_MINUTES);
+        const parsed = minutesValue ? parseInt(minutesValue, 10) : null;
         if (Number.isFinite(parsed) && parsed > 0) {
           setUnvisitedAlertMinutes(parsed);
         }
       } catch (e) {
         console.warn('未巡回アラート閾値の読み込みに失敗:', e);
       }
+
+      try {
+        const urlValue = await AsyncStorage.getItem(ASYNC_KEY_EVALUATION_FORM_URL);
+        if (urlValue) {
+          setEvaluationFormUrl(urlValue);
+        }
+      } catch (e) {
+        console.warn('評価フォームURLの読み込みに失敗:', e);
+      }
     };
-    loadAlertMinutes();
+    loadSettings();
   }, []);
+
+  useEffect(() => {
+    loadSharedEvaluationFormUrl();
+  }, [loadSharedEvaluationFormUrl]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return () => {};
+    }
+
+    const handleFocus = () => {
+      loadSharedEvaluationFormUrl();
+    };
+
+    const unsubscribeFocus = navigation?.addListener?.('focus', handleFocus) || (() => {});
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined') {
+      const handleVisibilityChange = () => {
+        if (!document.hidden) {
+          loadSharedEvaluationFormUrl();
+        }
+      };
+
+      window.addEventListener('focus', handleFocus);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        unsubscribeFocus();
+        window.removeEventListener('focus', handleFocus);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        loadSharedEvaluationFormUrl();
+      }
+    });
+
+    return () => {
+      unsubscribeFocus();
+      appStateSubscription.remove();
+    };
+  }, [loadSharedEvaluationFormUrl, navigation, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return () => {};
+    }
+
+    const supabase = getSupabaseClient();
+    const channel = supabase.channel(`erp_setting_item12_${user.id}`);
+
+    channel.on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'ERP_setting',
+        filter: `key=eq.${ERP_SETTING_KEYS.EVALUATION_FORM_URL}`,
+      },
+      () => {
+        loadSharedEvaluationFormUrl();
+      }
+    );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadSharedEvaluationFormUrl, user?.id]);
 
   /**
    * showLockCheckInPatrol が ON の場合に本日貸出中の鍵一覧を取得する
@@ -2010,58 +2132,31 @@ const Item12Screen = ({ navigation, route }) => {
             </>
           )}
 
+          {/* 評価タブ: Google Forms を埋め込み表示 */}
           {activeTab === PATROL_TAB_TYPES.EVALUATION && (
-            <>
-              <PatrolTaskList
-                theme={theme}
-                user={user}
-                tasks={evaluationTasks}
-                isLoadingTasks={isLoadingTasks}
-                selectedTaskId={selectedTaskId}
-                onSelectTask={handleSelectTask}
-                onRefresh={() => loadTasks(selectedTaskId)}
-                title="評価タスク一覧"
-                subTitle="評価対象を選んで、そのまま評価入力と登録まで進みます。"
-                searchPlaceholder="企画名・場所・評価項目で検索"
-                emptyTitle="評価タスクはありません"
-                emptyDescription="現在入力待ちの評価タスクはありません"
-                defaultHelpText="評価タスクだけをまとめて確認できます。タップすると詳細と評価入力へ進みます。"
-              />
-
-              {selectedTask && getPatrolTaskDisplayType(selectedTask) === PATROL_TASK_DISPLAY_TYPES.EVALUATION ? (
-                <View onLayout={(event) => setTaskDetailSectionY(event.nativeEvent.layout.y)}>
-                  <PatrolTaskDetail
-                    theme={theme}
-                    user={user}
-                    selectedTask={selectedTask}
-                    resultOptions={resultOptions}
-                    resultCode={resultCode}
-                    onChangeResultCode={setResultCode}
-                    patrolMemo={patrolMemo}
-                    onChangePatrolMemo={setPatrolMemo}
-                    isSubmitting={isSubmitting}
-                    canAccept={canAccept}
-                    hasAnyActiveTask={hasAnyActiveTask}
-                    canComplete={canComplete}
-                    onAcceptTask={handleAcceptTask}
-                    onRejectTask={handleRejectTask}
-                    onCompleteTask={handleCompleteTask}
-                    onSendMemoOnly={handleSendMemoOnly}
-                    taskResults={taskResults}
-                    isLoadingTaskResults={isLoadingTaskResults}
-                    onRefreshTaskResults={() => loadTaskResults(selectedTask.id, selectedTask.evaluationTaskIds || [])}
-                    sourceMessages={sourceMessages}
-                    isLoadingSourceMessages={isLoadingSourceMessages}
-                    onRefreshSourceMessages={() => loadSourceMessages(selectedTask.source_ticket_id)}
-                    evaluationInputs={evaluationInputs}
-                    onChangeEvaluationScore={handleChangeEvaluationScore}
-                    onChangeEvaluationComment={handleChangeEvaluationComment}
-                    evaluationSummaryMemo={evaluationSummaryMemo}
-                    onChangeEvaluationSummaryMemo={setEvaluationSummaryMemo}
-                  />
-                </View>
-              ) : null}
-            </>
+            <View style={styles.evaluationFormContainer}>
+              <Text style={[styles.evaluationFormTitle, { color: theme.text }]}>{EVALUATION_TASK_LABEL}</Text>
+              {Platform.OS === 'web' ? (
+                // Web版: iframe で直接埋め込み
+                <iframe
+                  src={evaluationFormUrl}
+                  style={styles.evaluationFormIframe}
+                  frameBorder="0"
+                  marginHeight="0"
+                  marginWidth="0"
+                  title="企画評価フォーム"
+                />
+              ) : (
+                // ネイティブ版: WebView で埋め込み
+                <WebView
+                  source={{ uri: evaluationFormUrl }}
+                  style={styles.evaluationFormWebView}
+                  startInLoadingState={true}
+                  javaScriptEnabled={true}
+                  nestedScrollEnabled={true}
+                />
+              )}
+            </View>
           )}
 
           {/* チェックタブ */}
@@ -2533,6 +2628,29 @@ const eventOrgStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  /** 評価タブ: フォーム埋め込みコンテナ */
+  evaluationFormContainer: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  /** 評価タブ: 見出しテキスト */
+  evaluationFormTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  /** 評価タブ: Web版 iframe スタイル */
+  evaluationFormIframe: {
+    width: '100%',
+    height: 854,
+    border: 'none',
+  },
+  /** 評価タブ: ネイティブ版 WebView */
+  evaluationFormWebView: {
+    flex: 1,
+    minHeight: 600,
   },
   /** KeyboardAvoidingView 全体 */
   body: {
