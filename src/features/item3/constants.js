@@ -42,14 +42,6 @@ export const STATUS_COLORS = {
 export const SCREEN_LABELS = {
 	/** 画面タイトル */
 	title: 'チケット配布率',
-	/** 今日の状況 */
-	summaryTitle: '今日の状況',
-	/** 案内中企画数 */
-	summaryActiveEvents: '案内中企画数',
-	/** 満員枠数 */
-	summaryFullSlots: '満員枠数',
-	/** 進行中枠数 */
-	summaryActiveSlots: '進行中枠数',
 	/** 順次案内制 */
 	sequential: '順次案内制',
 	/** 時間枠定員制 */

@@ -14,12 +14,14 @@ import {
   ScrollView,
   ActivityIndicator,
   Modal,
+  TextInput,
 } from 'react-native';
 import TicketDistributionCard from '../components/TicketDistributionCard';
 import useTicketDistributionData from '../hooks/useTicketDistributionData';
 import {
   DISTRIBUTION_TYPES,
   SCREEN_LABELS,
+  STATUS_LABELS,
 } from '../constants';
 import { useTheme } from '../../../shared/hooks/useTheme';
 import { ThemedHeader } from '../../../shared/components/ThemedHeader';
@@ -54,6 +56,14 @@ const Item3Screen = ({ navigation }) => {
   const [selectedFilter, setSelectedFilter] = useState(FILTER_TYPES.ALL);
   /** 日付検索文字列 */
   const [dateQuery, setDateQuery] = useState('');
+  /** 企画名検索文字列 */
+  const [eventNameQuery, setEventNameQuery] = useState('');
+  /** 企画名入力フォーカス状態 */
+  const [isNameFocused, setIsNameFocused] = useState(false);
+  /** ステータス検索 */
+  const [selectedStatus, setSelectedStatus] = useState('');
+  /** ステータスモーダル表示 */
+  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   /** 日付モーダル表示 */
   const [isDateModalOpen, setIsDateModalOpen] = useState(false);
   /** 開始時間フィルタ */
@@ -72,49 +82,19 @@ const Item3Screen = ({ navigation }) => {
     distributionList,
     isLoading,
     errorMessage,
-    lastUpdatedAt,
     refresh,
   } = useTicketDistributionData();
-
-  /** サマリー数値 */
-  const summaryData = useMemo(() => {
-    /** 案内中企画IDセット */
-    const activeEventIdSet = new Set();
-    /** 満員枠数 */
-    let fullSlotCount = 0;
-    /** 進行中枠数 */
-    let activeSlotCount = 0;
-
-    distributionList.forEach((item) => {
-      if (item.status === 'active') {
-        activeEventIdSet.add(item.eventId);
-      }
-
-      if (item.type === FILTER_TYPES.TIME_SLOT) {
-        (item.timeSlots || []).forEach((slot) => {
-          if (slot.status === 'full') {
-            fullSlotCount += 1;
-          }
-          if (slot.status === 'active') {
-            activeSlotCount += 1;
-          }
-        });
-      }
-    });
-
-    return {
-      activeEventCount: activeEventIdSet.size,
-      fullSlotCount,
-      activeSlotCount,
-    };
-  }, [distributionList]);
 
   /** フィルタ済みデータ */
   const filteredList = useMemo(() => {
     /** 日付検索文字列 */
     const normalizedDateQuery = dateQuery.trim();
+    /** 企画名検索文字列 */
+    const normalizedEventNameQuery = eventNameQuery.trim().toLowerCase();
     /** 開始時間検索 */
     const normalizedStartTime = selectedStartTime.trim();
+    /** ステータス検索 */
+    const normalizedStatus = selectedStatus.trim();
 
     const typeFilteredList = selectedFilter === FILTER_TYPES.ALL
       ? distributionList
@@ -126,11 +106,39 @@ const Item3Screen = ({ navigation }) => {
       ? typeFilteredList.filter((item) => item.date === normalizedDateQuery)
       : typeFilteredList;
 
+    const nameFilteredList = normalizedEventNameQuery
+      ? dateFilteredList.filter((item) =>
+        (item.eventName || '').toLowerCase().includes(normalizedEventNameQuery)
+      )
+      : dateFilteredList;
+
+    const statusFilteredList = normalizedStatus
+      ? nameFilteredList.map((item) => {
+        if (item.type !== FILTER_TYPES.TIME_SLOT) {
+          return item.status === normalizedStatus ? item : null;
+        }
+
+        /** ステータスで絞り込み */
+        const filteredTimeSlots = (item.timeSlots || []).filter(
+          (slot) => slot.status === normalizedStatus
+        );
+
+        if (!filteredTimeSlots.length) {
+          return null;
+        }
+
+        return {
+          ...item,
+          timeSlots: filteredTimeSlots,
+        };
+      }).filter(Boolean)
+      : nameFilteredList;
+
     if (!normalizedStartTime) {
-      return dateFilteredList;
+      return statusFilteredList;
     }
 
-    return dateFilteredList.map((item) => {
+    return statusFilteredList.map((item) => {
       if (item.type !== FILTER_TYPES.TIME_SLOT) {
         return item;
       }
@@ -144,8 +152,41 @@ const Item3Screen = ({ navigation }) => {
         ...item,
         timeSlots: filteredTimeSlots,
       };
+    }).filter((item) => item.type !== FILTER_TYPES.TIME_SLOT || item.timeSlots.length > 0);
+  }, [distributionList, selectedFilter, dateQuery, eventNameQuery, selectedStartTime, selectedStatus]);
+
+  /** 企画ごとにまとめた配布状況一覧 */
+  const groupedDistributionList = useMemo(() => {
+    /** 企画単位のマップ */
+    const groupedMap = new Map();
+
+    filteredList.forEach((item) => {
+      if (!groupedMap.has(item.eventId)) {
+        groupedMap.set(item.eventId, {
+          eventId: item.eventId,
+          eventName: item.eventName,
+          location: item.location,
+          type: item.type,
+          dateEntries: [],
+        });
+      }
+
+      groupedMap.get(item.eventId).dateEntries.push(item);
     });
-  }, [distributionList, selectedFilter, dateQuery, selectedStartTime]);
+
+    /** 企画配列 */
+    const groupedArray = Array.from(groupedMap.values());
+
+    groupedArray.forEach((group) => {
+      group.dateEntries.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    });
+
+    return groupedArray.sort((a, b) => {
+      const firstDateA = a.dateEntries[0]?.date || '';
+      const firstDateB = b.dateEntries[0]?.date || '';
+      return firstDateA.localeCompare(firstDateB);
+    });
+  }, [filteredList]);
 
   /** 空状態メッセージ */
   const emptyMessage = useMemo(() => {
@@ -155,8 +196,14 @@ const Item3Screen = ({ navigation }) => {
     if (dateQuery) {
       return '該当日付に企画がありません';
     }
+    if (eventNameQuery) {
+      return '該当する企画がありません';
+    }
+    if (selectedStatus) {
+      return '該当するステータスがありません';
+    }
     return '表示できるデータがありません';
-  }, [dateQuery, selectedStartTime]);
+  }, [dateQuery, eventNameQuery, selectedStartTime, selectedStatus]);
 
   /** 開始時間プルダウン候補 */
   const startTimeOptions = useMemo(() => {
@@ -194,8 +241,39 @@ const Item3Screen = ({ navigation }) => {
       filterList.push(`時間: ${selectedStartTime}`);
     }
 
+    if (eventNameQuery) {
+      filterList.push(`企画名: ${eventNameQuery}`);
+    }
+
+    if (selectedStatus) {
+      filterList.push(`ステータス: ${STATUS_LABELS[selectedStatus] || selectedStatus}`);
+    }
+
     return filterList;
-  }, [dateQuery, selectedStartTime]);
+  }, [dateQuery, eventNameQuery, selectedStartTime, selectedStatus]);
+
+  /**
+   * ステータスを選択する
+   * @param {string} value - ステータス
+   */
+  const handleStatusSelect = (value) => {
+    setSelectedStatus(value);
+    setIsStatusModalOpen(false);
+  };
+
+  /**
+   * ステータスモーダルを開く
+   */
+  const openStatusModal = () => {
+    setIsStatusModalOpen(true);
+  };
+
+  /**
+   * ステータスモーダルを閉じる
+   */
+  const closeStatusModal = () => {
+    setIsStatusModalOpen(false);
+  };
 
   /**
    * フィルタを切り替える
@@ -258,6 +336,20 @@ const Item3Screen = ({ navigation }) => {
     setIsTimeModalOpen(false);
   };
 
+  /**
+   * 企画名入力フォーカス時の処理
+   */
+  const handleNameFocus = () => {
+    setIsNameFocused(true);
+  };
+
+  /**
+   * 企画名入力フォーカス解除時の処理
+   */
+  const handleNameBlur = () => {
+    setIsNameFocused(false);
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       {/* ヘッダー */}
@@ -265,35 +357,6 @@ const Item3Screen = ({ navigation }) => {
 
       {/* コンテンツ */}
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={[styles.summaryCard, { backgroundColor: theme.surface, borderRadius: theme.borderRadius, shadowOpacity: theme.shadowOpacity }]}> 
-          <View style={styles.summaryHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>{SCREEN_LABELS.summaryTitle}</Text>
-            <TouchableOpacity
-              style={[styles.summaryRefreshButton, { backgroundColor: theme.primary, borderRadius: theme.borderRadius }]}
-              onPress={refresh}
-            >
-              <Text style={styles.summaryRefreshText}>更新</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.summaryGrid}>
-            <View style={[styles.summaryItem, { backgroundColor: theme.background, borderRadius: theme.borderRadius }]}>
-              <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.summaryActiveEvents}</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>{summaryData.activeEventCount}</Text>
-            </View>
-            <View style={[styles.summaryItem, { backgroundColor: theme.background, borderRadius: theme.borderRadius }]}>
-              <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.summaryFullSlots}</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>{summaryData.fullSlotCount}</Text>
-            </View>
-            <View style={[styles.summaryItem, { backgroundColor: theme.background, borderRadius: theme.borderRadius }]}>
-              <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.summaryActiveSlots}</Text>
-              <Text style={[styles.summaryValue, { color: theme.text }]}>{summaryData.activeSlotCount}</Text>
-            </View>
-          </View>
-          <Text style={[styles.lastUpdatedText, { color: theme.textSecondary }]}>
-            最終更新: {lastUpdatedAt ? lastUpdatedAt.toLocaleString('ja-JP') : '取得中'}
-          </Text>
-        </View>
-
         <View style={[styles.filterContainer, { backgroundColor: theme.surface, borderRadius: theme.borderRadius, shadowOpacity: theme.shadowOpacity }]}>
           <View style={styles.filterRow}>
             <View style={styles.filterGroup}>
@@ -325,6 +388,49 @@ const Item3Screen = ({ navigation }) => {
                   </TouchableOpacity>
                 ))}
               </View>
+            </View>
+
+            <View style={styles.nameSearchGroup}>
+              <Text style={[styles.searchLabel, { color: theme.textSecondary }]}>企画名検索</Text>
+              <View
+                style={[
+                  styles.searchInputWrapper,
+                  { backgroundColor: theme.background, borderColor: theme.border, borderRadius: theme.borderRadius },
+                  isNameFocused && { borderColor: theme.primary },
+                ]}
+              >
+                <TextInput
+                  style={[styles.searchInput, { color: theme.text }]}
+                  value={eventNameQuery}
+                  onChangeText={setEventNameQuery}
+                  onFocus={handleNameFocus}
+                  onBlur={handleNameBlur}
+                  placeholder="企画名を入力"
+                  placeholderTextColor={theme.textSecondary}
+                />
+                {eventNameQuery.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.clearButton}
+                    onPress={() => setEventNameQuery('')}
+                  >
+                    <Text style={[styles.clearButtonText, { color: theme.textSecondary }]}>×</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.dropdownGroup}>
+              <Text style={[styles.searchLabel, { color: theme.textSecondary }]}>ステータス</Text>
+              <TouchableOpacity
+                style={[styles.dropdownButton, { backgroundColor: theme.background, borderColor: theme.border, borderRadius: theme.borderRadius }]}
+                onPress={openStatusModal}
+              >
+                <Text style={[styles.dropdownButtonText, { color: theme.text }]}
+                >
+                  {selectedStatus ? STATUS_LABELS[selectedStatus] : '全てのステータス'}
+                </Text>
+                <Text style={[styles.dropdownIcon, { color: theme.textSecondary }]}>▼</Text>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.dropdownGroup}>
@@ -387,17 +493,17 @@ const Item3Screen = ({ navigation }) => {
           </View>
         ) : null}
 
-        {!isLoading && !errorMessage && filteredList.length === 0 && (
+        {!isLoading && !errorMessage && groupedDistributionList.length === 0 && (
           <View style={[styles.emptyBox, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
             <Text style={[styles.emptyText, { color: theme.textSecondary }]}>{emptyMessage}</Text>
           </View>
         )}
 
-        {!isLoading && !errorMessage && filteredList.length > 0 && (
+        {!isLoading && !errorMessage && groupedDistributionList.length > 0 && (
           <View style={[styles.cardList, !isMobile && styles.cardListDesktop]}>
-            {filteredList.map((item) => (
+            {groupedDistributionList.map((item) => (
               <View
-                key={`${item.eventId}_${item.eventDateId}`}
+                key={item.eventId}
                 style={[styles.cardWrapper, !isMobile && styles.cardWrapperDesktop]}
               >
                 <TicketDistributionCard item={item} />
@@ -507,6 +613,56 @@ const Item3Screen = ({ navigation }) => {
         </View>
       </Modal>
 
+      <Modal
+        transparent
+        visible={isStatusModalOpen}
+        animationType="slide"
+        onRequestClose={closeStatusModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { backgroundColor: theme.surface }]}
+          >
+            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}
+            >
+              <TouchableOpacity onPress={closeStatusModal}>
+                <Text style={[styles.modalActionText, { color: theme.primary }]}
+                >
+                  キャンセル
+                </Text>
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: theme.text }]}
+              >
+                ステータス
+              </Text>
+              <View style={styles.modalSpacer} />
+            </View>
+            <ScrollView style={styles.modalList}>
+              <TouchableOpacity
+                style={[styles.modalOption, { borderBottomColor: theme.border }]}
+                onPress={() => handleStatusSelect('')}
+              >
+                <Text style={[styles.modalOptionText, { color: theme.text }]}
+                >
+                  全てのステータス
+                </Text>
+              </TouchableOpacity>
+              {Object.keys(STATUS_LABELS).map((statusKey) => (
+                <TouchableOpacity
+                  key={statusKey}
+                  style={[styles.modalOption, { borderBottomColor: theme.border }]}
+                  onPress={() => handleStatusSelect(statusKey)}
+                >
+                  <Text style={[styles.modalOptionText, { color: theme.text }]}
+                  >
+                    {STATUS_LABELS[statusKey]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 };
@@ -519,68 +675,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 40,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#2c3e50',
-    marginBottom: 8,
-  },
-  summaryHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  summaryRefreshButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    backgroundColor: '#007AFF',
-    marginTop: -12,
-  },
-  summaryRefreshText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  summaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  summaryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  summaryItem: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 12,
-    minWidth: 120,
-    flex: 1,
-  },
-  summaryLabel: {
-    fontSize: 12,
-    color: '#7f8c8d',
-    marginBottom: 4,
-  },
-  summaryValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#2c3e50',
-  },
-  lastUpdatedText: {
-    fontSize: 11,
-    color: '#7f8c8d',
-    marginTop: 12,
-    textAlign: 'right',
   },
   filterContainer: {
     backgroundColor: '#FFFFFF',
@@ -602,6 +696,9 @@ const styles = StyleSheet.create({
   filterGroup: {
     minWidth: 200,
   },
+  nameSearchGroup: {
+    minWidth: 200,
+  },
   dropdownGroup: {
     minWidth: 160,
   },
@@ -609,12 +706,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    marginTop: 6,
+    minHeight: 44,
+    alignItems: 'center',
   },
   filterButton: {
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 12,
+    minHeight: 44,
     borderRadius: 20,
     backgroundColor: '#ecf0f1',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   filterButtonActive: {
     backgroundColor: '#007AFF',
@@ -643,6 +746,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    minHeight: 44,
   },
   dropdownButtonText: {
     fontSize: 14,
@@ -651,6 +755,34 @@ const styles = StyleSheet.create({
   dropdownIcon: {
     fontSize: 12,
     color: '#7f8c8d',
+  },
+  searchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#dfe6e9',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+    minHeight: 44,
+    backgroundColor: '#fdfdfd',
+    marginTop: 6,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    height: 44,
+    outlineStyle: 'none',
+    outlineWidth: 0,
+    outlineColor: 'transparent',
+  },
+  clearButton: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  clearButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
   },
   modalOverlay: {
     flex: 1,
