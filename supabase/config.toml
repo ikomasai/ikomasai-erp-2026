@@ -1,0 +1,12 @@
+# Edge Function configuration
+# Keep JWT verification disabled for functions that implement
+# application-level auth inside the function body.
+
+[functions.dispatch-notification]
+verify_jwt = false
+
+[functions.push-subscription]
+verify_jwt = false
+
+[functions.push-delivery-receipt]
+verify_jwt = false

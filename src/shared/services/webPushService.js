@@ -6,10 +6,14 @@
 import { Platform } from 'react-native';
 import { getSupabaseClient } from '../../services/supabase/client.js';
 import { registerServiceWorker } from '../utils/serviceWorker.js';
+import {
+  getEdgeFunctionAccessToken,
+  isUnauthorizedFunctionError,
+  recoverEdgeFunctionAccessToken,
+} from './edgeFunctionAuthService.js';
 
 /** 通知許可案内のローカルストレージキー接頭辞 */
 const WEB_PUSH_PROMPT_KEY_PREFIX = 'ikoma_erp_web_push_prompted_';
-const SESSION_REFRESH_MARGIN_SECONDS = 60;
 
 /**
  * URL-safe Base64文字列をUint8Arrayへ変換
@@ -91,83 +95,6 @@ const requestNotificationPermissionIfNeeded = async (userId) => {
 };
 
 /**
- * セッション有効期限が近いか判定
- * @param {Object|null} session
- * @returns {boolean}
- */
-const isSessionExpiringSoon = (session) => {
-  const expiresAt = session?.expires_at;
-  if (!expiresAt) {
-    return false;
-  }
-  const nowUnixSeconds = Math.floor(Date.now() / 1000);
-  return expiresAt <= nowUnixSeconds + SESSION_REFRESH_MARGIN_SECONDS;
-};
-
-/**
- * 有効なアクセストークンを取得
- * @param {boolean} forceRefresh
- * @returns {Promise<string|null>}
- */
-const getValidAccessToken = async (forceRefresh = false) => {
-  const supabase = getSupabaseClient();
-
-  if (forceRefresh) {
-    const { data, error } = await supabase.auth.refreshSession();
-    if (error) {
-      throw error;
-    }
-    return data?.session?.access_token ?? null;
-  }
-
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.getSession();
-
-  if (error) {
-    throw error;
-  }
-
-  if (!session) {
-    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-    if (refreshError) {
-      return null;
-    }
-    return refreshData?.session?.access_token ?? null;
-  }
-
-  if (isSessionExpiringSoon(session)) {
-    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-    if (!refreshError && refreshData?.session?.access_token) {
-      return refreshData.session.access_token;
-    }
-  }
-
-  return session.access_token ?? null;
-};
-
-/**
- * Edge Functionエラーが401か判定
- * @param {unknown} error
- * @returns {boolean}
- */
-const isUnauthorizedFunctionError = (error) => {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  const maybeError = /** @type {{ context?: { status?: number }; status?: number; message?: string }} */ (error);
-  const status = maybeError.context?.status ?? maybeError.status;
-  if (status === 401) {
-    return true;
-  }
-
-  const message = (maybeError.message ?? '').toLowerCase();
-  return message.includes('401') || message.includes('unauthorized');
-};
-
-/**
  * Functionエラーを整形
  * @param {unknown} error
  * @returns {Promise<Error>}
@@ -199,28 +126,31 @@ const normalizeFunctionError = async (error) => {
  */
 const savePushSubscription = async (subscription) => {
   const serialized = subscription.toJSON();
-  let accessToken = await getValidAccessToken();
+  let accessToken = await getEdgeFunctionAccessToken();
 
   if (!accessToken) {
     throw new Error('ログインセッションが見つかりません。再ログインしてください。');
   }
 
-  const invokeSubscription = async (token) =>
+  const invokeSubscription = async () =>
     getSupabaseClient().functions.invoke('push-subscription', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
       body: {
         subscription: serialized,
       },
     });
 
-  let { error } = await invokeSubscription(accessToken);
+  let { error } = await invokeSubscription();
 
   if (error && isUnauthorizedFunctionError(error)) {
-    accessToken = await getValidAccessToken(true).catch(() => null);
+    /** セッション再発行結果 */
+    const recoveryResult = await recoverEdgeFunctionAccessToken();
+    if (recoveryResult.error) {
+      throw recoveryResult.error;
+    }
+
+    accessToken = recoveryResult.accessToken;
     if (accessToken) {
-      ({ error } = await invokeSubscription(accessToken));
+      ({ error } = await invokeSubscription());
     }
   }
 
@@ -240,13 +170,21 @@ export const initializeWebPushSubscription = async (userId) => {
       return { enabled: false, error: null };
     }
 
+    registerServiceWorker();
+    const existingServiceWorkerRegistration = await navigator.serviceWorker.ready;
+    const existingSubscription = await existingServiceWorkerRegistration.pushManager.getSubscription();
+
+    if (existingSubscription) {
+      await savePushSubscription(existingSubscription);
+      return { enabled: Notification.permission === 'granted', error: null };
+    }
+
     const hasPermission = await requestNotificationPermissionIfNeeded(userId);
     if (!hasPermission) {
       return { enabled: false, error: null };
     }
 
-    registerServiceWorker();
-    const serviceWorkerRegistration = await navigator.serviceWorker.ready;
+    const serviceWorkerRegistration = existingServiceWorkerRegistration;
 
     let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
     if (!subscription) {

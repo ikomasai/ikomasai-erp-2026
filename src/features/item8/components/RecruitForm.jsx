@@ -3,7 +3,7 @@
  * 必須入力の検証、日付/時刻ピッカー、送信 payload の組み立てを担当する。
  */
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, TextInput, StyleSheet, Button, ScrollView, Pressable } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, useWindowDimensions } from 'react-native';
 import { OPTIONAL_FIELD_DEFAULTS } from '../constants.js';
 import { useTheme } from '../../../shared/hooks/useTheme';
 
@@ -15,6 +15,8 @@ const LATE_JOIN_ALLOW = 'allow';
 const LATE_JOIN_DENY = 'deny';
 const TIME_DROPDOWN_MIN_WIDTH = 280;
 const TIME_DROPDOWN_MAX_HEIGHT = 360;
+const TOGGLE_ACTIVE_COLOR = '#2563EB';
+const MOBILE_BREAKPOINT = 768;
 
 /**
  * フォームの空状態。
@@ -54,7 +56,8 @@ const withAlpha = (hexColor, alpha) => {
  *   initialValues?: Record<string, any>,
  *   submitLabel?: string,
  *   onSubmit?: (payload: Record<string, any>) => void,
- *   disabled?: boolean
+ *   disabled?: boolean,
+ *   resetDraftToken?: number
  * }} props
  * @returns {JSX.Element}
  */
@@ -63,9 +66,13 @@ export const RecruitForm = ({
   submitLabel = '作成',
   onSubmit,
   disabled = false,
+  resetDraftToken = 0,
 }) => {
   const { theme } = useTheme();
+  const { width } = useWindowDimensions();
+  const isMobile = width < MOBILE_BREAKPOINT;
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isEditing = Boolean(initialValues?.id);
 
   const [form, setForm] = useState({ ...emptyForm, ...initialValues });
   const [errors, setErrors] = useState({});
@@ -84,6 +91,8 @@ export const RecruitForm = ({
   const [meetMinute, setMeetMinute] = useState('');
   const [isImmediateMeetTime, setIsImmediateMeetTime] = useState(false);
   const [containerLayout, setContainerLayout] = useState(null);
+  const [notifyAllOnCreate, setNotifyAllOnCreate] = useState(true);
+  const [notifyApplicantsOnUpdate, setNotifyApplicantsOnUpdate] = useState(true);
 
   const dateOptions = [
     { label: '2026/11/1', value: '2026-11-01' },
@@ -173,7 +182,50 @@ export const RecruitForm = ({
     setIsImmediateMeetTime(Boolean(parsedMeet?.immediate));
     setMeetHour(parsedMeet?.hour || '');
     setMeetMinute(parsedMeet?.minute || '');
-  }, [initialValues]);
+    setNotifyAllOnCreate(
+      initialValues?.notify_all_on_create === undefined
+        ? true
+        : Boolean(initialValues?.notify_all_on_create)
+    );
+    setNotifyApplicantsOnUpdate(
+      initialValues?.notify_applicants_on_update === undefined
+        ? Boolean(initialValues?.id)
+        : Boolean(initialValues?.notify_applicants_on_update)
+    );
+  }, [
+    initialValues?.id,
+    initialValues?.headcount,
+    initialValues?.work_date,
+    initialValues?.work_time,
+    initialValues?.location,
+    initialValues?.meet_time,
+    initialValues?.meet_place,
+    initialValues?.description,
+    initialValues?.reward,
+    initialValues?.belongings,
+    initialValues?.department_id,
+    initialValues?.notify_all_on_create,
+    initialValues?.notify_applicants_on_update,
+  ]);
+
+  useEffect(() => {
+    if (isEditing) return;
+    setForm({ ...emptyForm });
+    setErrors({});
+    setDatePickerOpen(false);
+    setTimePickerOpen(false);
+    setMeetTimePickerOpen(false);
+    setStartHour('');
+    setStartMinute('');
+    setIsImmediateTime(false);
+    setMeetHour('');
+    setMeetMinute('');
+    setIsImmediateMeetTime(false);
+    setDurationMinutes('未定');
+    setLateJoin(LATE_JOIN_ALLOW);
+    setNotifyAllOnCreate(true);
+    setNotifyApplicantsOnUpdate(false);
+  }, [isEditing, resetDraftToken]);
 
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -271,6 +323,8 @@ export const RecruitForm = ({
         form.meet_time ||
         (isImmediateTime ? IMMEDIATE_TIME_LABEL : `${startHour}:${startMinute}`),
       belongings: form.belongings || OPTIONAL_FIELD_DEFAULTS.belongings,
+      notify_all_on_create: notifyAllOnCreate,
+      notify_applicants_on_update: notifyApplicantsOnUpdate,
     };
     onSubmit?.(payload);
   };
@@ -285,7 +339,7 @@ export const RecruitForm = ({
    */
   const renderInput = (label, key, props = {}) => (
     <View style={[styles.field, props.containerStyle]} key={key}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, props.labelStyle]}>{label}</Text>
       <TextInput
         style={[
           styles.input,
@@ -313,11 +367,37 @@ export const RecruitForm = ({
    * @returns {JSX.Element}
    */
   const renderRow = (fields, itemStyle = styles.half) => (
-    <View style={styles.row}>
+    <View style={[styles.row, isMobile && styles.rowMobile]}>
       {fields.map((f) =>
-        renderInput(f.label, f.key, { ...f.props, containerStyle: itemStyle })
+        renderInput(f.label, f.key, {
+          ...f.props,
+          containerStyle: [isMobile ? styles.full : itemStyle, f?.props?.containerStyle],
+        })
       )}
     </View>
+  );
+
+  /**
+   * フォーム内の補助ボタン（日時選択など）を描画する。
+   *
+   * @param {{title: string, onPress: () => void, color: string, disabled?: boolean}} params
+   * @returns {JSX.Element}
+   */
+  const renderSecondaryButton = ({ title, onPress, color, disabled: buttonDisabled = false }) => (
+    <Pressable
+      onPress={onPress}
+      disabled={buttonDisabled}
+      style={({ pressed }) => [
+        styles.inlineButton,
+        {
+          borderColor: withAlpha(color, '66'),
+          backgroundColor: pressed ? withAlpha(color, '1E') : withAlpha(color, '12'),
+          opacity: buttonDisabled ? 0.5 : 1,
+        },
+      ]}
+    >
+      <Text style={[styles.inlineButtonText, { color }]}>{title}</Text>
+    </Pressable>
   );
 
   /**
@@ -334,16 +414,16 @@ export const RecruitForm = ({
         onLayout={(e) => setDateLayout(e.nativeEvent.layout)}
       >
         <Text style={styles.label}>募集日</Text>
-        <Button
-          title={selected ? selected.label : '選択してください'}
-          onPress={() => {
+        {renderSecondaryButton({
+          title: selected ? selected.label : '選択してください',
+          onPress: () => {
             setTimePickerOpen(false);
             setMeetTimePickerOpen(false);
             setDatePickerOpen((v) => !v);
-          }}
-          disabled={disabled}
-          color={selected ? theme.primary : theme.textSecondary}
-        />
+          },
+          disabled,
+          color: selected ? theme.primary : theme.textSecondary,
+        })}
         {errors.work_date ? <Text style={styles.error}>{errors.work_date}</Text> : null}
       </View>
     );
@@ -396,31 +476,30 @@ export const RecruitForm = ({
       )}
 
       {/* 行2: 募集日 / 開始時刻 / 所要時間目安 */}
-      <View style={styles.row}>
-        {renderDatePicker(styles.third)}
+      <View style={[styles.row, isMobile && styles.rowMobile]}>
+        {renderDatePicker(isMobile ? styles.full : styles.third)}
         <View
-          style={[styles.field, styles.third, timePickerOpen && styles.fieldRaised]}
+          style={[styles.field, isMobile ? styles.full : styles.third, timePickerOpen && styles.fieldRaised]}
           onLayout={(e) => setTimeLayout(e.nativeEvent.layout)}
         >
           <Text style={styles.label}>開始時刻</Text>
-          <Button
-            title={
-              isImmediateTime
-                ? IMMEDIATE_TIME_LABEL
-                : startHour && startMinute
-                  ? `${startHour}:${startMinute}`
-                  : '開始時刻を選択'
-            }
-            onPress={() => {
+          {renderSecondaryButton({
+            title: isImmediateTime
+              ? IMMEDIATE_TIME_LABEL
+              : startHour && startMinute
+                ? `${startHour}:${startMinute}`
+                : '開始時刻を選択',
+            onPress: () => {
               setDatePickerOpen(false);
               setMeetTimePickerOpen(false);
               setTimePickerOpen((v) => !v);
-            }}
-            color={theme.primary}
-          />
+            },
+            disabled,
+            color: theme.primary,
+          })}
           {errors.work_time ? <Text style={styles.error}>{errors.work_time}</Text> : null}
         </View>
-        <View style={[styles.field, styles.third]}>
+        <View style={[styles.field, isMobile ? styles.full : styles.third]}>
           <Text style={styles.label}>所要時間目安（分）</Text>
           <TextInput
             style={styles.input}
@@ -438,45 +517,46 @@ export const RecruitForm = ({
       </View>
 
       {/* 行3: 報酬 / 集合時間 / 持ち物 */}
-      <View style={styles.row}>
+      <View style={[styles.row, isMobile && styles.rowMobile]}>
         {renderInput('報酬', 'reward', {
           placeholder: 'カントリーマアム1個',
-          containerStyle: styles.third,
+          containerStyle: isMobile ? styles.full : styles.third,
         })}
         <View
-          style={[styles.field, styles.third, meetTimePickerOpen && styles.fieldRaised]}
+          style={[styles.field, isMobile ? styles.full : styles.third, meetTimePickerOpen && styles.fieldRaised]}
           onLayout={(e) => setMeetTimeLayout(e.nativeEvent.layout)}
         >
           <Text style={styles.label}>集合時間（任意）</Text>
-          <Button
-            title={
-              isImmediateMeetTime
-                ? IMMEDIATE_TIME_LABEL
-                : meetHour && meetMinute
-                  ? `${meetHour}:${meetMinute}`
-                  : '集合時間を選択'
-            }
-            onPress={() => {
+          {renderSecondaryButton({
+            title: isImmediateMeetTime
+              ? IMMEDIATE_TIME_LABEL
+              : meetHour && meetMinute
+                ? `${meetHour}:${meetMinute}`
+                : '集合時間を選択',
+            onPress: () => {
               setDatePickerOpen(false);
               setTimePickerOpen(false);
               setMeetTimePickerOpen((v) => !v);
-            }}
-            color={theme.primary}
-          />
+            },
+            disabled,
+            color: theme.primary,
+          })}
         </View>
         {renderInput('持ち物（任意）', 'belongings', {
           placeholder: 'なし',
-          containerStyle: styles.third,
+          containerStyle: isMobile ? styles.full : styles.third,
         })}
       </View>
 
       {/* 行4: 募集タイトル */}
-      <View style={styles.row}>
-        {renderInput('募集タイトル', 'title', {
+      <View style={[styles.row, isMobile && styles.rowMobile]}>
+        {renderInput('募集タイトル *', 'title', {
           placeholder: '例: 受付前の案内サポート募集',
-          containerStyle: styles.twoThird,
+          containerStyle: isMobile ? styles.full : styles.twoThird,
+          labelStyle: styles.titleLabelEmphasis,
+          inputStyle: [styles.titleInputEmphasis, isMobile && styles.titleInputEmphasisMobile],
         })}
-        <View style={[styles.field, styles.third]}>
+        <View style={[styles.field, isMobile ? styles.full : styles.third]}>
           <Text style={styles.label}>途中参加の可否</Text>
           <View style={styles.checkboxRow}>
             <Pressable
@@ -505,7 +585,72 @@ export const RecruitForm = ({
 
       {/* 行5: 業務内容 */}
       {renderInput('業務内容', 'description', { multiline: true, inputStyle: styles.textarea })}
-      <Button title={submitLabel} onPress={handleSubmit} disabled={disabled} color={theme.primary} />
+      {!isEditing ? (
+        <View style={[styles.notifyToggleRow, isMobile && styles.notifyToggleRowMobile]}>
+          <Text style={[styles.notifyToggleLabel, isMobile && styles.notifyToggleLabelMobile]}>
+            作成時に全員への通知を行う
+          </Text>
+          <Pressable
+            style={[
+              styles.customToggleTrack,
+              { backgroundColor: notifyAllOnCreate ? withAlpha(TOGGLE_ACTIVE_COLOR, '55') : withAlpha(theme.textSecondary, '55') },
+              disabled && styles.customToggleDisabled,
+            ]}
+            onPress={() => setNotifyAllOnCreate((prev) => !prev)}
+            disabled={disabled}
+          >
+            <View
+              style={[
+                styles.customToggleThumb,
+                {
+                  backgroundColor: notifyAllOnCreate ? TOGGLE_ACTIVE_COLOR : theme.surface,
+                  borderColor: notifyAllOnCreate ? TOGGLE_ACTIVE_COLOR : withAlpha(theme.textSecondary, '88'),
+                  transform: [{ translateX: notifyAllOnCreate ? 18 : 0 }],
+                },
+              ]}
+            />
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.notifyToggleRow, isMobile && styles.notifyToggleRowMobile]}>
+          <Text style={[styles.notifyToggleLabel, isMobile && styles.notifyToggleLabelMobile]}>
+            変更時に応募済みの人へ通知する
+          </Text>
+          <Pressable
+            style={[
+              styles.customToggleTrack,
+              { backgroundColor: notifyApplicantsOnUpdate ? withAlpha(TOGGLE_ACTIVE_COLOR, '55') : withAlpha(theme.textSecondary, '55') },
+              disabled && styles.customToggleDisabled,
+            ]}
+            onPress={() => setNotifyApplicantsOnUpdate((prev) => !prev)}
+            disabled={disabled}
+          >
+            <View
+              style={[
+                styles.customToggleThumb,
+                {
+                  backgroundColor: notifyApplicantsOnUpdate ? TOGGLE_ACTIVE_COLOR : theme.surface,
+                  borderColor: notifyApplicantsOnUpdate ? TOGGLE_ACTIVE_COLOR : withAlpha(theme.textSecondary, '88'),
+                  transform: [{ translateX: notifyApplicantsOnUpdate ? 18 : 0 }],
+                },
+              ]}
+            />
+          </Pressable>
+        </View>
+      )}
+      <Pressable
+        onPress={handleSubmit}
+        disabled={disabled}
+        style={({ pressed }) => [
+          styles.submitButton,
+          {
+            backgroundColor: pressed ? withAlpha(theme.primary, 'D9') : theme.primary,
+            opacity: disabled ? 0.55 : 1,
+          },
+        ]}
+      >
+        <Text style={styles.submitButtonText}>{submitLabel}</Text>
+      </Pressable>
       {datePickerOpen && (
         <>
           <Pressable style={styles.portalOverlay} onPress={() => setDatePickerOpen(false)} />
@@ -724,6 +869,11 @@ const createStyles = (theme) =>
       color: theme.textSecondary,
       marginBottom: 4,
     },
+    titleLabelEmphasis: {
+      color: theme.primary,
+      fontSize: 14,
+      fontWeight: '700',
+    },
     fieldRaised: {
       zIndex: 2000,
     },
@@ -735,6 +885,14 @@ const createStyles = (theme) =>
       color: theme.text,
       backgroundColor: theme.background,
     },
+    titleInputEmphasis: {
+      borderColor: withAlpha(theme.primary, '88'),
+      backgroundColor: withAlpha(theme.primary, '10'),
+    },
+    titleInputEmphasisMobile: {
+      minHeight: 46,
+      paddingVertical: 10,
+    },
     error: {
       color: theme.error,
       fontSize: 12,
@@ -743,6 +901,10 @@ const createStyles = (theme) =>
     row: {
       flexDirection: 'row',
       gap: 10,
+    },
+    rowMobile: {
+      flexDirection: 'column',
+      gap: 0,
     },
     half: {
       flex: 1,
@@ -753,6 +915,9 @@ const createStyles = (theme) =>
     twoThird: {
       flex: 2,
     },
+    full: {
+      width: '100%',
+    },
     inputMultiline: {
       minHeight: 80,
       textAlignVertical: 'top',
@@ -760,6 +925,75 @@ const createStyles = (theme) =>
     textarea: {
       minHeight: 100,
       textAlignVertical: 'top',
+    },
+    inlineButton: {
+      minHeight: 42,
+      borderWidth: 1,
+      borderRadius: 999,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    inlineButtonText: {
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    notifyToggleRow: {
+      marginTop: 2,
+      marginBottom: 10,
+      paddingVertical: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-start',
+      gap: 8,
+      borderTopWidth: 1,
+      borderTopColor: withAlpha(theme.border, 'BB'),
+    },
+    notifyToggleRowMobile: {
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    notifyToggleLabel: {
+      fontSize: 13,
+      color: theme.text,
+    },
+    notifyToggleLabelMobile: {
+      flex: 1,
+      lineHeight: 18,
+    },
+    customToggleTrack: {
+      width: 44,
+      height: 26,
+      borderRadius: 999,
+      paddingHorizontal: 3,
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: withAlpha(theme.border, 'BB'),
+    },
+    customToggleThumb: {
+      width: 18,
+      height: 18,
+      borderRadius: 999,
+      borderWidth: 1,
+    },
+    customToggleDisabled: {
+      opacity: 0.6,
+    },
+    submitButton: {
+      minHeight: 44,
+      borderRadius: 999,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 2,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    submitButtonText: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '700',
     },
     dropdownItem: {
       paddingVertical: 8,
