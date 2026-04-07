@@ -14,9 +14,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../../../shared/hooks/useTheme';
 import { ThemedHeader } from '../../../shared/components/ThemedHeader';
 import { useAuth } from '../../../shared/contexts/AuthContext';
+import { getSupabaseClient } from '../../../services/supabase/client';
 import GoResponderModal from '../components/GoResponderModal';
 import { useAssignees } from '../hooks/useAssignees';
 import { useCalls } from '../hooks/useCalls';
@@ -26,14 +28,16 @@ import {
   ITEM2_CALL_TYPES,
   ITEM2_TITLES,
   ITEM2_VIEW_MODES,
+  ITEM2_DETAIL_STATUSES,
 } from '../constants';
 import {
   insertItem2Call,
   selectItem2StaffUsers,
+  updateItem2CallAdditionalInfo,
   updateItem2CallAssignees,
   updateItem2CallStatus,
 } from '../services/item2CallService';
-import { notifyItem2CallCreated, notifyItem2ResponderAssigned } from '../services/item2NotificationService';
+import { notifyItem2CallCreated } from '../services/item2NotificationService';
 
 const ITEM2_STAFF_ROLE_NAME = '厚生部';
 const ITEM2_ADMIN_ROLE_NAME = '管理者';
@@ -47,14 +51,6 @@ const ITEM2_REQUESTER_RELATIONS = {
 const ITEM2_REQUESTER_RELATION_DISPLAY = {
   [ITEM2_REQUESTER_RELATIONS.SELF]: '本人',
   [ITEM2_REQUESTER_RELATIONS.OTHER]: '本人ではない',
-};
-const ITEM2_SELF_COMMUNICATION_OPTIONS = [
-  { label: '可能', value: 'yes' },
-  { label: '不可能', value: 'no' },
-];
-const ITEM2_SELF_COMMUNICATION_DISPLAY = {
-  yes: '可能',
-  no: '不可能',
 };
 const ITEM2_CONDITION_OPTIONS = [
   { label: '軽い怪我(擦り傷や打撲など)', value: 'injury_light' },
@@ -126,9 +122,8 @@ const STAFF_STATUS_ORDER = {
   [ITEM2_CALL_STATUSES.RESOLVED]: 2,
 };
 const INITIAL_FORM_ANSWERS = {
-  callType: '',
+  callType: ITEM2_CALL_TYPES.NON_URGENT,
   requesterRelation: '',
-  selfCanUseText: '',
   consciousness: '',
   breathing: '',
   mobility: '',
@@ -148,6 +143,14 @@ const INITIAL_FORM_ANSWERS = {
   suppliesNeeded: '',
 };
 
+const buildInitialFormAnswers = (overrides = {}) => {
+  return {
+    ...INITIAL_FORM_ANSWERS,
+    ...overrides,
+    symptoms: Array.isArray(overrides.symptoms) ? overrides.symptoms : INITIAL_FORM_ANSWERS.symptoms,
+  };
+};
+
 const isItem2TableMissingError = (error) => {
   const errorMessage = error?.message ?? error?.details ?? '';
   return typeof errorMessage === 'string' && errorMessage.includes(ITEM2_TABLE_NOT_FOUND_KEYWORD);
@@ -165,6 +168,89 @@ const findOptionLabel = (options, value) => {
   return options.find((option) => option.value === value)?.label ?? '';
 };
 
+const applyAnswerUpdate = (previousAnswers, key, value) => {
+  const nextAnswers = {
+    ...previousAnswers,
+    [key]: value,
+  };
+
+  if (key === 'requesterRelation') {
+    if (value === ITEM2_REQUESTER_RELATIONS.SELF) {
+      nextAnswers.consciousness = '';
+      nextAnswers.breathing = '';
+    }
+    if (value === ITEM2_REQUESTER_RELATIONS.OTHER) {
+      nextAnswers.mobility = '';
+    }
+  }
+
+  if (key === 'conditionCategory') {
+    nextAnswers.bleedingPresence = '';
+    nextAnswers.painLocation = '';
+    nextAnswers.swellingStatus = '';
+    nextAnswers.swellingStatusOther = '';
+    nextAnswers.bleedingLocation = '';
+    nextAnswers.bleedingAmount = '';
+    nextAnswers.currentState = '';
+    nextAnswers.currentStateOther = '';
+    nextAnswers.symptoms = [];
+    nextAnswers.symptomsOther = '';
+    nextAnswers.conditionOtherText = '';
+  }
+
+  if (key === 'bleedingPresence') {
+    if (value !== 'yes') {
+      nextAnswers.bleedingLocation = '';
+      nextAnswers.bleedingAmount = '';
+    }
+
+    if (value !== 'no') {
+      nextAnswers.painLocation = '';
+      nextAnswers.swellingStatus = '';
+      nextAnswers.swellingStatusOther = '';
+    }
+  }
+
+  if (key === 'swellingStatus' && value !== 'other') {
+    nextAnswers.swellingStatusOther = '';
+  }
+
+  if (key === 'currentState' && value !== 'other') {
+    nextAnswers.currentStateOther = '';
+  }
+
+  return nextAnswers;
+};
+
+const toggleSymptomSelection = (previousAnswers, symptomValue) => {
+  const hasSelected = previousAnswers.symptoms.includes(symptomValue);
+  const nextSymptoms = hasSelected
+    ? previousAnswers.symptoms.filter((item) => item !== symptomValue)
+    : [...previousAnswers.symptoms, symptomValue];
+
+  return {
+    ...previousAnswers,
+    symptoms: nextSymptoms,
+    symptomsOther: nextSymptoms.includes('other') ? previousAnswers.symptomsOther : '',
+  };
+};
+
+const buildAnswersFromCall = (callData) => {
+  const rawAnswers = callData?.assessment_answers;
+  const assessmentAnswers = rawAnswers && typeof rawAnswers === 'object' && !Array.isArray(rawAnswers)
+    ? rawAnswers
+    : {};
+
+  return buildInitialFormAnswers({
+    ...assessmentAnswers,
+    callType: callData?.call_type ?? ITEM2_CALL_TYPES.NON_URGENT,
+    requesterRelation: assessmentAnswers.requesterRelation ?? callData?.requester_relation ?? '',
+    locationText: assessmentAnswers.locationText ?? callData?.location_text ?? '',
+    conditionCategory: assessmentAnswers.conditionCategory ?? '',
+    suppliesNeeded: assessmentAnswers.suppliesNeeded ?? '',
+  });
+};
+
 const buildSummaryText = (answers) => {
   const summaryLines = [];
   const pushSummaryLine = (label, value) => {
@@ -174,7 +260,11 @@ const buildSummaryText = (answers) => {
     summaryLines.push(`${label}: ${value}`);
   };
 
+  pushSummaryLine('場所', answers.locationText?.trim() ?? '');
+  pushSummaryLine('必要なもの', answers.suppliesNeeded?.trim() ?? '');
   pushSummaryLine('傷病者', ITEM2_REQUESTER_RELATION_DISPLAY[answers.requesterRelation] ?? '');
+  const conditionLabel = findOptionLabel(ITEM2_CONDITION_OPTIONS, answers.conditionCategory);
+  pushSummaryLine('状態', conditionLabel);
 
   if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER) {
     pushSummaryLine('意識', ITEM2_OTHER_PERSON_CONSCIOUSNESS_DISPLAY[answers.consciousness] ?? '');
@@ -182,29 +272,13 @@ const buildSummaryText = (answers) => {
   }
 
   if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF) {
-    pushSummaryLine('文字入力・選択', ITEM2_SELF_COMMUNICATION_DISPLAY[answers.selfCanUseText] ?? '');
+    pushSummaryLine('移動', findOptionLabel(ITEM2_SELF_MOBILITY_OPTIONS, answers.mobility));
   }
-
-  pushSummaryLine('必要なもの', answers.suppliesNeeded.trim());
-
-  if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF && answers.selfCanUseText === 'no') {
-    return summaryLines.join('\n');
-  }
-
-  if (
-    answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER
-    && ['weak', 'none'].includes(answers.consciousness)
-  ) {
-    return summaryLines.join('\n');
-  }
-
-  const conditionLabel = findOptionLabel(ITEM2_CONDITION_OPTIONS, answers.conditionCategory);
 
   switch (answers.conditionCategory) {
     case 'injury_light':
     case 'injury_medium':
     case 'injury_severe': {
-      pushSummaryLine('状態', conditionLabel);
       pushSummaryLine('出血', ITEM2_BLEEDING_PRESENCE_DISPLAY[answers.bleedingPresence] ?? '');
 
       if (answers.bleedingPresence === 'yes') {
@@ -224,82 +298,20 @@ const buildSummaryText = (answers) => {
       const symptomLabels = answers.symptoms.map((symptom) => {
         return symptom === 'other' ? answers.symptomsOther.trim() : findOptionLabel(ITEM2_SYMPTOM_OPTIONS, symptom);
       }).filter(Boolean);
-      pushSummaryLine('状態', conditionLabel);
       pushSummaryLine('症状', symptomLabels.join('、'));
       return summaryLines.join('\n');
     }
     case 'other':
-      pushSummaryLine('状態', conditionLabel);
       pushSummaryLine('詳細', answers.conditionOtherText.trim());
       return summaryLines.join('\n');
     default:
-      pushSummaryLine('状態', conditionLabel);
       return summaryLines.join('\n');
   }
 };
 
 const validateFormAnswers = (answers) => {
-  if (!answers.callType) {
-    return '呼び出し種別を選択してください。';
-  }
-
-  if (!answers.requesterRelation) {
-    return '傷病者本人かどうかを選択してください。';
-  }
-
-  if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER && !answers.consciousness) {
-    return '傷病者の意識を選択してください。';
-  }
-
-  if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER && !answers.breathing) {
-    return '傷病者の呼吸を選択してください。';
-  }
-
-  if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF && !answers.selfCanUseText) {
-    return '文字の入力や選択が可能かどうかを選択してください。';
-  }
-
-  if (
-    answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF
-    && answers.selfCanUseText === 'yes'
-    && !answers.mobility
-  ) {
-    return '立つ/歩くことができるかを選択してください。';
-  }
-
   if (!answers.locationText.trim()) {
     return '場所を入力してください。';
-  }
-
-  if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF && answers.selfCanUseText === 'no') {
-    return '';
-  }
-
-  if (
-    answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER
-    && ['weak', 'none'].includes(answers.consciousness)
-  ) {
-    return '';
-  }
-
-  if (!answers.conditionCategory) {
-    return '傷病者の状態を選択してください。';
-  }
-
-  if (['injury_light', 'injury_medium', 'injury_severe'].includes(answers.conditionCategory) && !answers.bleedingPresence) {
-    return '出血の有無を選択してください。';
-  }
-
-  if (['injury_light', 'injury_medium', 'injury_severe'].includes(answers.conditionCategory) && answers.bleedingPresence === 'no') {
-    if (!answers.swellingStatus) {
-      return '腫れや内出血等の状態を選択してください。';
-    }
-  }
-
-  if (answers.conditionCategory === 'physical_condition') {
-    if (answers.symptoms.length === 0) {
-      return '体調不良の症状を1つ以上選択してください。';
-    }
   }
 
   return '';
@@ -308,6 +320,7 @@ const validateFormAnswers = (answers) => {
 const Item2Screen = ({ navigation, route }) => {
   const { theme } = useTheme();
   const { user, userInfo } = useAuth();
+  const isScreenFocused = useIsFocused();
   const { calls, isLoading, refreshCalls, setCalls } = useCalls();
   const [viewMode, setViewMode] = useState(ITEM2_VIEW_MODES.CREATE);
   const [staffUsers, setStaffUsers] = useState([]);
@@ -315,13 +328,18 @@ const Item2Screen = ({ navigation, route }) => {
   const [createFeedback, setCreateFeedback] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
-  const [callTypeFilter, setCallTypeFilter] = useState('all');
-  const [formAnswers, setFormAnswers] = useState(INITIAL_FORM_ANSWERS);
+  const [formAnswers, setFormAnswers] = useState(buildInitialFormAnswers());
+  const [responderProfiles, setResponderProfiles] = useState([]);
+  const [additionalInfoCall, setAdditionalInfoCall] = useState(null);
+  const [additionalInfoAnswers, setAdditionalInfoAnswers] = useState(buildInitialFormAnswers());
+  const [additionalInfoErrorMessage, setAdditionalInfoErrorMessage] = useState('');
+  const [isAdditionalInfoSubmitting, setIsAdditionalInfoSubmitting] = useState(false);
   const [resolveConfirmCall, setResolveConfirmCall] = useState(null);
   const [isResolveSubmitting, setIsResolveSubmitting] = useState(false);
   const isCreateSubmittingRef = useRef(false);
   const createAttemptIdRef = useRef(0);
   const settledCreateAttemptIdRef = useRef(0);
+  const detailSnoozedCallIdsRef = useRef(new Set());
   const responderModal = useAssignees();
   const canAccessStaffViews = Boolean(
     userInfo?.roles?.some((role) => {
@@ -329,6 +347,27 @@ const Item2Screen = ({ navigation, route }) => {
         || [role?.name, role?.display_name].includes(ITEM2_ADMIN_ROLE_NAME);
     })
   );
+
+  const pendingDetailCall = (() => {
+    if (!user?.id) {
+      return null;
+    }
+
+    const pendingCalls = calls.filter((callItem) => {
+      return callItem.requester_user_id === user.id
+        && callItem.status !== ITEM2_CALL_STATUSES.RESOLVED
+        && callItem.detail_status !== ITEM2_DETAIL_STATUSES.COMPLETED
+        && !detailSnoozedCallIdsRef.current.has(callItem.id);
+    });
+
+    if (pendingCalls.length === 0) {
+      return null;
+    }
+
+    return [...pendingCalls].sort((left, right) => {
+      return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+    })[0] ?? null;
+  })();
 
   useEffect(() => {
     const requestedTab = route?.params?.initialTab;
@@ -363,13 +402,69 @@ const Item2Screen = ({ navigation, route }) => {
     loadStaffUsers();
   }, [canAccessStaffViews]);
 
-  const buildUserLabel = (userIds) => {
-    if (!Array.isArray(userIds) || userIds.length === 0) {
+  useEffect(() => {
+    const loadResponderProfiles = async () => {
+      const assignedUserIds = Array.from(new Set(
+        calls.flatMap((callItem) => {
+          return Array.isArray(callItem.assigned_to) ? callItem.assigned_to : [];
+        }).filter(Boolean)
+      ));
+
+      if (assignedUserIds.length === 0) {
+        setResponderProfiles([]);
+        return;
+      }
+
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('user_id, name')
+        .in('user_id', assignedUserIds);
+
+      if (error) {
+        setResponderProfiles([]);
+        return;
+      }
+
+      setResponderProfiles(Array.isArray(data) ? data : []);
+    };
+
+    loadResponderProfiles();
+  }, [calls]);
+
+  useEffect(() => {
+    if (isScreenFocused) {
+      return;
+    }
+
+    detailSnoozedCallIdsRef.current.clear();
+  }, [isScreenFocused]);
+
+  useEffect(() => {
+    if (!isScreenFocused || canAccessStaffViews || additionalInfoCall || !pendingDetailCall) {
+      return;
+    }
+
+    openAdditionalInfoModal(pendingDetailCall);
+  }, [additionalInfoCall, canAccessStaffViews, isScreenFocused, pendingDetailCall]);
+
+  const buildResponderLabel = (callData) => {
+    const storedResponderNames = Array.isArray(callData?.assessment_answers?.responderNames)
+      ? callData.assessment_answers.responderNames.filter(Boolean)
+      : [];
+
+    if (storedResponderNames.length > 0) {
+      return storedResponderNames.join('、');
+    }
+
+    const userIds = Array.isArray(callData?.assigned_to) ? callData.assigned_to : [];
+    if (userIds.length === 0) {
       return '未決定';
     }
 
     const names = userIds.map((userId) => {
-      const matchedUser = staffUsers.find((userItem) => userItem.id === userId);
+      const matchedResponder = responderProfiles.find((profile) => profile.user_id === userId);
+      const matchedUser = matchedResponder ?? staffUsers.find((userItem) => userItem.id === userId);
       return matchedUser?.name ?? '設定済み';
     });
 
@@ -385,97 +480,208 @@ const Item2Screen = ({ navigation, route }) => {
   };
 
   const updateFormAnswer = (key, value) => {
-    setFormAnswers((previousAnswers) => {
-      const nextAnswers = {
-        ...previousAnswers,
-        [key]: value,
-      };
-
-      if (key === 'requesterRelation') {
-        if (value === ITEM2_REQUESTER_RELATIONS.SELF) {
-          nextAnswers.consciousness = '';
-          nextAnswers.breathing = '';
-        }
-        if (value === ITEM2_REQUESTER_RELATIONS.OTHER) {
-          nextAnswers.selfCanUseText = '';
-          nextAnswers.mobility = '';
-        }
-      }
-
-      if (key === 'selfCanUseText' && value !== 'yes') {
-        nextAnswers.mobility = '';
-        nextAnswers.conditionCategory = '';
-        nextAnswers.bleedingPresence = '';
-        nextAnswers.painLocation = '';
-        nextAnswers.swellingStatus = '';
-        nextAnswers.swellingStatusOther = '';
-        nextAnswers.bleedingLocation = '';
-        nextAnswers.bleedingAmount = '';
-        nextAnswers.currentState = '';
-        nextAnswers.currentStateOther = '';
-        nextAnswers.symptoms = [];
-        nextAnswers.symptomsOther = '';
-        nextAnswers.conditionOtherText = '';
-      }
-
-      if (key === 'conditionCategory') {
-        nextAnswers.bleedingPresence = '';
-        nextAnswers.painLocation = '';
-        nextAnswers.swellingStatus = '';
-        nextAnswers.swellingStatusOther = '';
-        nextAnswers.bleedingLocation = '';
-        nextAnswers.bleedingAmount = '';
-        nextAnswers.currentState = '';
-        nextAnswers.currentStateOther = '';
-        nextAnswers.symptoms = [];
-        nextAnswers.symptomsOther = '';
-        nextAnswers.conditionOtherText = '';
-      }
-
-      if (key === 'bleedingPresence') {
-        if (value !== 'yes') {
-          nextAnswers.bleedingLocation = '';
-          nextAnswers.bleedingAmount = '';
-        }
-
-        if (value !== 'no') {
-          nextAnswers.painLocation = '';
-          nextAnswers.swellingStatus = '';
-          nextAnswers.swellingStatusOther = '';
-        }
-      }
-
-      if (key === 'swellingStatus' && value !== 'other') {
-        nextAnswers.swellingStatusOther = '';
-      }
-
-      if (key === 'currentState' && value !== 'other') {
-        nextAnswers.currentStateOther = '';
-      }
-
-      return nextAnswers;
-    });
+    setFormAnswers((previousAnswers) => ({
+      ...previousAnswers,
+      [key]: value,
+    }));
   };
 
-  const toggleSymptom = (symptomValue) => {
-    setFormAnswers((previousAnswers) => {
-      const hasSelected = previousAnswers.symptoms.includes(symptomValue);
-      const nextSymptoms = hasSelected
-        ? previousAnswers.symptoms.filter((item) => item !== symptomValue)
-        : [...previousAnswers.symptoms, symptomValue];
+  const updateAdditionalInfoAnswer = (key, value) => {
+    setAdditionalInfoErrorMessage('');
+    setAdditionalInfoAnswers((previousAnswers) => applyAnswerUpdate(previousAnswers, key, value));
+  };
 
-      return {
-        ...previousAnswers,
-        symptoms: nextSymptoms,
-        symptomsOther: nextSymptoms.includes('other') ? previousAnswers.symptomsOther : '',
-      };
+  const toggleAdditionalInfoSymptom = (symptomValue) => {
+    setAdditionalInfoErrorMessage('');
+    setAdditionalInfoAnswers((previousAnswers) => toggleSymptomSelection(previousAnswers, symptomValue));
+  };
+
+  const openAdditionalInfoModal = (callData, { shouldFocusDetail = true } = {}) => {
+    if (!callData?.id) {
+      return;
+    }
+
+    detailSnoozedCallIdsRef.current.delete(callData.id);
+    setAdditionalInfoErrorMessage('');
+    setAdditionalInfoAnswers(buildAnswersFromCall(callData));
+    setAdditionalInfoCall(callData);
+
+    if (shouldFocusDetail) {
+      setViewMode(ITEM2_VIEW_MODES.LIST);
+    }
+  };
+
+  const closeAdditionalInfoModal = () => {
+    if (isAdditionalInfoSubmitting) {
+      return;
+    }
+
+    const currentCallId = additionalInfoCall?.id;
+    if (currentCallId) {
+      detailSnoozedCallIdsRef.current.add(currentCallId);
+    }
+
+    setAdditionalInfoErrorMessage('');
+    clearAdditionalInfoModal();
+  };
+
+  const clearAdditionalInfoModal = () => {
+    setAdditionalInfoCall(null);
+    setAdditionalInfoAnswers(buildAnswersFromCall({}));
+    setAdditionalInfoErrorMessage('');
+  };
+
+  const validateAdditionalInfoAnswers = (answers) => {
+    if (!answers.requesterRelation) {
+      return '傷病者があなた自身かどうかを入力してください。';
+    }
+
+    if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF) {
+      if (!answers.mobility) {
+        return 'あなたは立つ/歩くことができるかを入力してください。';
+      }
+    }
+
+    if (answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER) {
+      if (!answers.consciousness) {
+        return '傷病者の意識を入力してください。';
+      }
+
+      if (!answers.breathing) {
+        return '傷病者の呼吸を入力してください。';
+      }
+    }
+
+    if (!answers.conditionCategory) {
+      return '状態カテゴリを入力してください。';
+    }
+
+    if (['injury_light', 'injury_medium', 'injury_severe'].includes(answers.conditionCategory) && !answers.bleedingPresence) {
+      return '出血の有無を入力してください。';
+    }
+
+    if (['injury_light', 'injury_medium', 'injury_severe'].includes(answers.conditionCategory) && answers.bleedingPresence === 'yes') {
+      if (!answers.bleedingLocation.trim()) {
+        return '出血している場所を入力してください。';
+      }
+
+      if (!answers.bleedingAmount.trim()) {
+        return '出血量を入力してください。';
+      }
+    }
+
+    if (['injury_light', 'injury_medium', 'injury_severe'].includes(answers.conditionCategory) && answers.bleedingPresence === 'no') {
+      if (!answers.painLocation.trim()) {
+        return answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF
+          ? 'どこが痛いかを入力してください。'
+          : '傷病者のどこが痛いかを入力してください。';
+      }
+
+      if (!answers.swellingStatus) {
+        return '腫れや内出血等の状態を入力してください。';
+      }
+
+      if (answers.swellingStatus === 'other' && !answers.swellingStatusOther.trim()) {
+        return 'その他の状態を入力してください。';
+      }
+    }
+
+    if (answers.conditionCategory === 'physical_condition') {
+      if (!Array.isArray(answers.symptoms) || answers.symptoms.length === 0) {
+        return '症状を入力してください。';
+      }
+
+      if (answers.symptoms.includes('other') && !answers.symptomsOther.trim()) {
+        return 'その他の症状を入力してください。';
+      }
+    }
+
+    if (answers.conditionCategory === 'other' && !answers.conditionOtherText.trim()) {
+      return 'その他の状態を入力してください。';
+    }
+
+    return '';
+  };
+
+  const saveAdditionalInfo = async ({ detailStatus, shouldClose = false }) => {
+    if (!additionalInfoCall?.id) {
+      if (shouldClose) {
+        clearAdditionalInfoModal();
+      }
+      return;
+    }
+
+    if (detailStatus === ITEM2_DETAIL_STATUSES.COMPLETED) {
+      const validationError = validateAdditionalInfoAnswers(additionalInfoAnswers);
+      if (validationError) {
+        setAdditionalInfoErrorMessage(validationError);
+        return;
+      }
+    }
+
+    try {
+      setIsAdditionalInfoSubmitting(true);
+      const summaryText = buildSummaryText(additionalInfoAnswers);
+      const result = await updateItem2CallAdditionalInfo({
+        callId: additionalInfoCall.id,
+        purpose: findOptionLabel(ITEM2_CONDITION_OPTIONS, additionalInfoAnswers.conditionCategory) || null,
+        detail: summaryText || null,
+        requesterRelation: additionalInfoAnswers.requesterRelation || null,
+        assessmentAnswers: {
+          ...additionalInfoAnswers,
+          locationText: additionalInfoAnswers.locationText.trim(),
+          painLocation: additionalInfoAnswers.painLocation.trim(),
+          swellingStatusOther: additionalInfoAnswers.swellingStatusOther.trim(),
+          bleedingLocation: additionalInfoAnswers.bleedingLocation.trim(),
+          bleedingAmount: additionalInfoAnswers.bleedingAmount.trim(),
+          currentStateOther: additionalInfoAnswers.currentStateOther.trim(),
+          symptomsOther: additionalInfoAnswers.symptomsOther.trim(),
+          conditionOtherText: additionalInfoAnswers.conditionOtherText.trim(),
+          suppliesNeeded: additionalInfoAnswers.suppliesNeeded.trim(),
+          summaryText,
+        },
+        detailStatus,
+        detailCompletedAt: detailStatus === ITEM2_DETAIL_STATUSES.COMPLETED ? new Date().toISOString() : null,
+      });
+
+      if (result.error || !result.call) {
+        setAdditionalInfoErrorMessage(buildItem2ErrorMessage(result.error, '追加情報の保存に失敗しました。'));
+        return;
+      }
+
+      patchCall(result.call);
+      setCalls((previousCalls) => {
+        return previousCalls.map((callItem) => (callItem.id === result.call.id ? { ...callItem, ...result.call } : callItem));
+      });
+      if (result.call.detail_status === ITEM2_DETAIL_STATUSES.COMPLETED) {
+        detailSnoozedCallIdsRef.current.delete(result.call.id);
+      }
+
+      await refreshCalls();
+
+      if (shouldClose) {
+        clearAdditionalInfoModal();
+        return;
+      }
+
+      setAdditionalInfoCall(result.call);
+      setAdditionalInfoAnswers(buildAnswersFromCall(result.call));
+    } finally {
+      setIsAdditionalInfoSubmitting(false);
+    }
+  };
+
+  const handleSaveAdditionalInfo = async () => {
+    await saveAdditionalInfo({
+      detailStatus: ITEM2_DETAIL_STATUSES.COMPLETED,
+      shouldClose: true,
     });
   };
 
   const openResponderModal = (callData) => {
     responderModal.openModal({
       initialUserIds: callData.assigned_to ?? [],
-      modalTitle: callData.call_type === ITEM2_CALL_TYPES.EMERGENCY ? '救護者を選択' : '担当者を選択',
+      modalTitle: '救護者を選択',
       onConfirm: async (selectedUserIds) => {
         const result = await updateItem2CallAssignees({
           callId: callData.id,
@@ -486,27 +692,6 @@ const Item2Screen = ({ navigation, route }) => {
         if (result.error) {
           Alert.alert('エラー', buildItem2ErrorMessage(result.error, '救護者の更新に失敗しました。'));
           return;
-        }
-
-        const previousAssignedTo = Array.isArray(callData.assigned_to) ? callData.assigned_to : [];
-        const nextAssignedTo = Array.isArray(result.call?.assigned_to) ? result.call.assigned_to : [];
-        const hasResponderChanged = (
-          previousAssignedTo.length !== nextAssignedTo.length
-          || previousAssignedTo.some((userId) => !nextAssignedTo.includes(userId))
-        );
-        if (hasResponderChanged && nextAssignedTo.length > 0) {
-          const responderNames = nextAssignedTo.map((userId) => {
-            const matchedUser = staffUsers.find((userItem) => userItem.id === userId);
-            return matchedUser?.name ?? '設定済み';
-          });
-          const notificationResult = await notifyItem2ResponderAssigned({
-            callData: result.call,
-            responderNames,
-            senderUserId: user?.id ?? null,
-          });
-          if (notificationResult.error) {
-            console.error('厚生部呼び出しの対応者通知の送信に失敗しました:', notificationResult.error);
-          }
         }
 
         patchCall({ ...callData, ...result.call });
@@ -608,21 +793,15 @@ const Item2Screen = ({ navigation, route }) => {
       const payload = {
         requester_user_id: user.id,
         requester_name: userInfo?.name ?? user.email ?? 'ユーザー',
-        requester_relation: formAnswers.requesterRelation,
-        call_type: formAnswers.callType,
-        purpose: findOptionLabel(ITEM2_CONDITION_OPTIONS, formAnswers.conditionCategory) || null,
+        requester_relation: null,
+        call_type: ITEM2_CALL_TYPES.NON_URGENT,
+        purpose: null,
         detail: summaryText || null,
         location_text: formAnswers.locationText.trim(),
+        detail_status: ITEM2_DETAIL_STATUSES.PENDING,
+        detail_completed_at: null,
         assessment_answers: {
-          ...formAnswers,
           locationText: formAnswers.locationText.trim(),
-          painLocation: formAnswers.painLocation.trim(),
-          swellingStatusOther: formAnswers.swellingStatusOther.trim(),
-          bleedingLocation: formAnswers.bleedingLocation.trim(),
-          bleedingAmount: formAnswers.bleedingAmount.trim(),
-          currentStateOther: formAnswers.currentStateOther.trim(),
-          symptomsOther: formAnswers.symptomsOther.trim(),
-          conditionOtherText: formAnswers.conditionOtherText.trim(),
           suppliesNeeded: formAnswers.suppliesNeeded.trim(),
           summaryText,
         },
@@ -645,9 +824,9 @@ const Item2Screen = ({ navigation, route }) => {
       }
 
       await refreshCalls();
-      setFormAnswers(INITIAL_FORM_ANSWERS);
+      setFormAnswers(buildInitialFormAnswers());
       setScreenError('');
-      setCreateFeedbackForAttempt({ type: 'success', message: '呼び出しを作成しました。' }, { settle: true });
+      openAdditionalInfoModal(result.call, { shouldFocusDetail: true });
     } catch (error) {
       const errorMessage = buildItem2ErrorMessage(error, '呼び出し作成に失敗しました。');
       setCreateFeedbackForAttempt({ type: 'error', message: errorMessage }, { settle: true });
@@ -658,12 +837,7 @@ const Item2Screen = ({ navigation, route }) => {
   };
 
   const closeCreateFeedback = () => {
-    const currentFeedback = createFeedback;
     setCreateFeedback(null);
-
-    if (currentFeedback?.type === 'success') {
-      setViewMode(ITEM2_VIEW_MODES.LIST);
-    }
   };
 
 
@@ -673,11 +847,6 @@ const Item2Screen = ({ navigation, route }) => {
         if (statusFilter !== 'all' && callItem.status !== statusFilter) {
           return false;
         }
-
-        if (callTypeFilter !== 'all' && callItem.call_type !== callTypeFilter) {
-          return false;
-        }
-
         return true;
       })
       .sort((left, right) => {
@@ -690,7 +859,7 @@ const Item2Screen = ({ navigation, route }) => {
 
         return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
       });
-  }, [calls, callTypeFilter, statusFilter]);
+  }, [calls, statusFilter]);
 
   const reporterCalls = useMemo(() => {
     if (!user?.id) {
@@ -750,15 +919,15 @@ const Item2Screen = ({ navigation, route }) => {
     );
   };
 
-  const renderSymptomsQuestion = () => {
-    const symptomSubjectLabel = formAnswers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF ? 'あなたは' : '傷病者は';
+  const renderSymptomsQuestion = ({ answers, onToggleSymptom, onUpdateAnswer }) => {
+    const symptomSubjectLabel = answers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF ? 'あなたは' : '傷病者は';
 
     return (
       <View style={styles.questionBlock}>
         <Text style={[styles.label, { color: theme.textSecondary }]}>{`${symptomSubjectLabel}どういう状態ですか？(複数選択可)`}</Text>
         <View style={styles.checkboxGroup}>
           {ITEM2_SYMPTOM_OPTIONS.map((option) => {
-            const isSelected = formAnswers.symptoms.includes(option.value);
+            const isSelected = answers.symptoms.includes(option.value);
             return (
               <TouchableOpacity
                 key={option.value}
@@ -769,7 +938,7 @@ const Item2Screen = ({ navigation, route }) => {
                     backgroundColor: isSelected ? `${theme.primaryVariant}14` : theme.surface,
                   },
                 ]}
-                onPress={() => toggleSymptom(option.value)}
+                onPress={() => onToggleSymptom(option.value)}
               >
                 <View style={[styles.checkbox, { borderColor: isSelected ? theme.primaryVariant : theme.textSecondary }]}>
                   {isSelected ? <Text style={[styles.checkboxCheck, { color: theme.primaryVariant }]}>✓</Text> : null}
@@ -779,34 +948,18 @@ const Item2Screen = ({ navigation, route }) => {
             );
           })}
         </View>
-        {formAnswers.symptoms.includes('other') ? renderTextQuestion({
+        {answers.symptoms.includes('other') ? renderTextQuestion({
           title: 'その他の症状を入力してください',
-          value: formAnswers.symptomsOther,
-          onChange: (value) => updateFormAnswer('symptomsOther', value),
+          value: answers.symptomsOther,
+          onChange: (value) => onUpdateAnswer('symptomsOther', value),
           placeholder: '例: 震えがある',
         }) : null}
       </View>
     );
   };
 
-  const shouldAskOtherPersonQuestions = formAnswers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER;
-  const shouldAskSelfCommunicationQuestion = formAnswers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF;
-  const canSelfCommunicateByText = formAnswers.selfCanUseText === 'yes';
-  const shouldAskSelfMobilityQuestion = shouldAskSelfCommunicationQuestion && canSelfCommunicateByText;
-  const conditionSubjectLabel = formAnswers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF ? 'あなたは' : '傷病者は';
-  const shouldSkipConditionQuestionForConsciousness = (
-    formAnswers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER
-    && ['weak', 'none'].includes(formAnswers.consciousness)
-  );
-  const shouldAskConditionQuestions = Boolean(
-    formAnswers.callType
-      && formAnswers.requesterRelation
-      && (
-        formAnswers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER
-        || canSelfCommunicateByText
-      )
-      && !shouldSkipConditionQuestionForConsciousness
-  );
+  const detailShouldAskOtherPersonQuestions = additionalInfoAnswers.requesterRelation === ITEM2_REQUESTER_RELATIONS.OTHER;
+  const detailShouldAskSelfMobilityQuestion = additionalInfoAnswers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}> 
@@ -843,130 +996,39 @@ const Item2Screen = ({ navigation, route }) => {
       {!canAccessStaffViews && viewMode === ITEM2_VIEW_MODES.CREATE ? (
         <ScrollView contentContainerStyle={styles.formContent}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>呼び出し作成</Text>
-          {renderChoiceQuestion({
-            title: '1. 緊急度を選択してください',
-            value: formAnswers.callType,
-            onChange: (value) => updateFormAnswer('callType', value),
-            options: [
-              { label: '不急', value: ITEM2_CALL_TYPES.NON_URGENT },
-              { label: '緊急', value: ITEM2_CALL_TYPES.EMERGENCY },
-            ],
-          })}
-          {formAnswers.callType ? renderChoiceQuestion({
-            title: '2. あなたは傷病者本人ですか？',
-            value: formAnswers.requesterRelation,
-            onChange: (value) => updateFormAnswer('requesterRelation', value),
-            options: [
-              { label: 'はい', value: ITEM2_REQUESTER_RELATIONS.SELF },
-              { label: 'いいえ', value: ITEM2_REQUESTER_RELATIONS.OTHER },
-            ],
-          }) : null}
-          {shouldAskOtherPersonQuestions ? renderChoiceQuestion({
-            title: '3. 傷病者の意識はありますか',
-            value: formAnswers.consciousness,
-            onChange: (value) => updateFormAnswer('consciousness', value),
-            options: ITEM2_OTHER_PERSON_CONSCIOUSNESS_OPTIONS,
-          }) : null}
-          {shouldAskOtherPersonQuestions ? renderChoiceQuestion({
-            title: '4. 傷病者は呼吸していますか',
-            value: formAnswers.breathing,
-            onChange: (value) => updateFormAnswer('breathing', value),
-            options: ITEM2_OTHER_PERSON_BREATHING_OPTIONS,
-          }) : null}
-          {shouldAskSelfCommunicationQuestion ? renderChoiceQuestion({
-            title: '3. 文字の入力や選択は可能ですか？',
-            value: formAnswers.selfCanUseText,
-            onChange: (value) => updateFormAnswer('selfCanUseText', value),
-            options: ITEM2_SELF_COMMUNICATION_OPTIONS,
-          }) : null}
-          {shouldAskSelfMobilityQuestion ? renderChoiceQuestion({
-            title: '4. あなたは立つ/歩くことができますか',
-            value: formAnswers.mobility,
-            onChange: (value) => updateFormAnswer('mobility', value),
-            options: ITEM2_SELF_MOBILITY_OPTIONS,
-          }) : null}
-          {shouldAskConditionQuestions ? renderChoiceQuestion({
-            title: shouldAskSelfMobilityQuestion
-              ? `5. ${conditionSubjectLabel}どういった状態ですか？`
-              : `5. ${conditionSubjectLabel}どういった状態ですか？`,
-            value: formAnswers.conditionCategory,
-            onChange: (value) => updateFormAnswer('conditionCategory', value),
-            options: ITEM2_CONDITION_OPTIONS,
-          }) : null}
-
-          {['injury_light', 'injury_medium', 'injury_severe'].includes(formAnswers.conditionCategory) ? renderChoiceQuestion({
-            title: '出血はありますか？',
-            value: formAnswers.bleedingPresence,
-            onChange: (value) => updateFormAnswer('bleedingPresence', value),
-            options: ITEM2_BLEEDING_PRESENCE_OPTIONS,
-          }) : null}
-
-          {['injury_light', 'injury_medium', 'injury_severe'].includes(formAnswers.conditionCategory) && formAnswers.bleedingPresence === 'no' ? (
-            <>
-              {renderTextQuestion({
-                title: `${conditionSubjectLabel}どこを痛がっていますか？`,
-                value: formAnswers.painLocation,
-                onChange: (value) => updateFormAnswer('painLocation', value),
-                placeholder: '例: 右足首',
-              })}
-              {renderChoiceQuestion({
-                title: '腫れや内出血等はありますか？',
-                value: formAnswers.swellingStatus,
-                onChange: (value) => updateFormAnswer('swellingStatus', value),
-                options: ITEM2_SWELLING_STATUS_OPTIONS,
-              })}
-              {formAnswers.swellingStatus === 'other' ? renderTextQuestion({
-                title: 'その他の状態を入力してください',
-                value: formAnswers.swellingStatusOther,
-                onChange: (value) => updateFormAnswer('swellingStatusOther', value),
-                placeholder: '例: 赤みが強い',
-              }) : null}
-            </>
+          {pendingDetailCall ? (
+            <View style={[styles.pendingBanner, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={[styles.pendingBannerTitle, { color: theme.text }]}>未完了の詳細入力があります</Text>
+              <Text style={[styles.pendingBannerText, { color: theme.textSecondary }]}>
+                呼び出し後の詳細を先に入力してください。閉じると入力内容は破棄されます。
+              </Text>
+              <TouchableOpacity
+                style={[styles.pendingBannerButton, { backgroundColor: theme.primaryVariant }]}
+                onPress={() => openAdditionalInfoModal(pendingDetailCall)}
+              >
+                <Text style={styles.pendingBannerButtonText}>詳細入力を開く</Text>
+              </TouchableOpacity>
+            </View>
           ) : null}
 
-          {['injury_light', 'injury_medium', 'injury_severe'].includes(formAnswers.conditionCategory) && formAnswers.bleedingPresence === 'yes' ? (
-            <>
-              {renderTextQuestion({
-                title: 'どこから出血していますか？',
-                value: formAnswers.bleedingLocation,
-                onChange: (value) => updateFormAnswer('bleedingLocation', value),
-                placeholder: '例: 左ひじ',
-              })}
-              {renderTextQuestion({
-                title: 'どのくらい出血していますか？',
-                value: formAnswers.bleedingAmount,
-                onChange: (value) => updateFormAnswer('bleedingAmount', value),
-                placeholder: '例: ティッシュ数枚分',
-              })}
-            </>
-          ) : null}
-
-          {formAnswers.conditionCategory === 'physical_condition' ? renderSymptomsQuestion() : null}
-
-          {formAnswers.conditionCategory === 'other' ? renderTextQuestion({
-            title: 'その他の状態を入力してください',
-            value: formAnswers.conditionOtherText,
-            onChange: (value) => updateFormAnswer('conditionOtherText', value),
-            placeholder: '例: 様子がおかしい、震えている',
-            multiline: true,
-          }) : null}
-
-          {formAnswers.requesterRelation ? renderTextQuestion({
-            title: 'なにか必要なものはありますか？',
-            value: formAnswers.suppliesNeeded,
-            onChange: (value) => updateFormAnswer('suppliesNeeded', value),
-            placeholder: '例: 水、タオル、椅子',
-          }) : null}
-
-          {formAnswers.requesterRelation ? renderTextQuestion({
-            title: '場所を入力してください',
+          {renderTextQuestion({
+            title: '1. 場所を入力してください',
             value: formAnswers.locationText,
             onChange: (value) => updateFormAnswer('locationText', value),
             placeholder: '例: 11月ホール 2階 学友会連合会室前',
-          }) : null}
+          })}
 
-          <TouchableOpacity style={[styles.submitButton, { backgroundColor: theme.primaryVariant }]} onPress={handleCreateCall} disabled={isCreating}>
-            <Text style={styles.submitButtonText}>{isCreating ? '作成中...' : '呼び出しを作成'}</Text>
+          {renderTextQuestion({
+            title: '2. 必要なもの（任意）',
+            value: formAnswers.suppliesNeeded,
+            onChange: (value) => updateFormAnswer('suppliesNeeded', value),
+            placeholder: '例: 絆創膏、体温計。なければ空欄で大丈夫です',
+          })}
+
+          <TouchableOpacity style={[styles.submitButton, { backgroundColor: theme.primaryVariant }]} onPress={handleCreateCall} disabled={isCreating || Boolean(pendingDetailCall)}>
+            <Text style={styles.submitButtonText}>
+              {isCreating ? '作成中...' : pendingDetailCall ? '詳細入力を完了してください' : '厚生部を呼び出す'}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
       ) : null}
@@ -976,13 +1038,15 @@ const Item2Screen = ({ navigation, route }) => {
           calls={canAccessStaffViews ? staffCalls : reporterCalls}
           isRefreshing={isLoading}
           onRefresh={refreshCalls}
-          getResponderLabel={(callData) => buildUserLabel(callData.assigned_to ?? [])}
+          getResponderLabel={(callData) => buildResponderLabel(callData)}
           onOpenResponderModal={canAccessStaffViews ? openResponderModal : undefined}
+          onOpenAdditionalInfoModal={openAdditionalInfoModal}
           onResolveCall={canAccessStaffViews ? handleResolveCall : undefined}
           statusFilter={canAccessStaffViews ? statusFilter : 'all'}
-          callTypeFilter={canAccessStaffViews ? callTypeFilter : 'all'}
           onChangeStatusFilter={canAccessStaffViews ? setStatusFilter : undefined}
-          onChangeCallTypeFilter={canAccessStaffViews ? setCallTypeFilter : undefined}
+          headerActionLabel={canAccessStaffViews ? (isLoading ? '更新中...' : '更新') : ''}
+          onPressHeaderAction={canAccessStaffViews ? refreshCalls : undefined}
+          isHeaderActionDisabled={isLoading}
         />
       ) : null}
 
@@ -995,6 +1059,151 @@ const Item2Screen = ({ navigation, route }) => {
         onClose={responderModal.closeModal}
         onConfirm={responderModal.confirm}
       />
+
+      <Modal
+        visible={Boolean(additionalInfoCall)}
+        transparent
+        animationType="slide"
+        onRequestClose={closeAdditionalInfoModal}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, styles.additionalInfoModalCard, { backgroundColor: theme.background, borderColor: theme.border }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>詳細入力</Text>
+            <Text style={[styles.modalMessage, { color: theme.textSecondary }]}>
+              必要な情報を入力してください。閉じると入力内容は破棄されます。
+            </Text>
+            {additionalInfoErrorMessage ? (
+              <View style={[styles.additionalInfoErrorBox, { backgroundColor: `${theme.error}14`, borderColor: theme.error }]}>
+                <Text style={[styles.additionalInfoErrorText, { color: theme.error }]}>
+                  {additionalInfoErrorMessage}
+                </Text>
+              </View>
+            ) : null}
+            <View style={[styles.detailContextBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={[styles.detailContextLabel, { color: theme.textSecondary }]}>場所</Text>
+              <Text style={[styles.detailContextValue, { color: theme.text }]}>{additionalInfoCall?.location_text || '未入力'}</Text>
+              <Text style={[styles.detailContextLabel, { color: theme.textSecondary }]}>必要なもの</Text>
+              <Text style={[styles.detailContextValue, { color: theme.text }]}>{additionalInfoAnswers.suppliesNeeded?.trim() || additionalInfoCall?.assessment_answers?.suppliesNeeded || '特になし'}</Text>
+            </View>
+            <ScrollView contentContainerStyle={styles.additionalInfoContent}>
+              {renderChoiceQuestion({
+                title: '傷病者はあなた自身ですか？',
+                value: additionalInfoAnswers.requesterRelation,
+                onChange: (value) => updateAdditionalInfoAnswer('requesterRelation', value),
+                options: [
+                  { label: 'はい', value: ITEM2_REQUESTER_RELATIONS.SELF },
+                  { label: 'いいえ', value: ITEM2_REQUESTER_RELATIONS.OTHER },
+                ],
+              })}
+
+              {detailShouldAskOtherPersonQuestions ? renderChoiceQuestion({
+                title: '傷病者の意識はありますか',
+                value: additionalInfoAnswers.consciousness,
+                onChange: (value) => updateAdditionalInfoAnswer('consciousness', value),
+                options: ITEM2_OTHER_PERSON_CONSCIOUSNESS_OPTIONS,
+              }) : null}
+              {detailShouldAskOtherPersonQuestions ? renderChoiceQuestion({
+                title: '傷病者は呼吸していますか',
+                value: additionalInfoAnswers.breathing,
+                onChange: (value) => updateAdditionalInfoAnswer('breathing', value),
+                options: ITEM2_OTHER_PERSON_BREATHING_OPTIONS,
+              }) : null}
+              {detailShouldAskSelfMobilityQuestion ? renderChoiceQuestion({
+                title: 'あなたは立つ/歩くことができますか',
+                value: additionalInfoAnswers.mobility,
+                onChange: (value) => updateAdditionalInfoAnswer('mobility', value),
+                options: ITEM2_SELF_MOBILITY_OPTIONS,
+              }) : null}
+
+              {renderChoiceQuestion({
+                title: '状態カテゴリを選択してください',
+                value: additionalInfoAnswers.conditionCategory,
+                onChange: (value) => updateAdditionalInfoAnswer('conditionCategory', value),
+                options: ITEM2_CONDITION_OPTIONS,
+              })}
+
+              {['injury_light', 'injury_medium', 'injury_severe'].includes(additionalInfoAnswers.conditionCategory) ? renderChoiceQuestion({
+                title: '出血はありますか？',
+                value: additionalInfoAnswers.bleedingPresence,
+                onChange: (value) => updateAdditionalInfoAnswer('bleedingPresence', value),
+                options: ITEM2_BLEEDING_PRESENCE_OPTIONS,
+              }) : null}
+
+              {['injury_light', 'injury_medium', 'injury_severe'].includes(additionalInfoAnswers.conditionCategory) && additionalInfoAnswers.bleedingPresence === 'no' ? (
+                <>
+                  {renderTextQuestion({
+                    title: additionalInfoAnswers.requesterRelation === ITEM2_REQUESTER_RELATIONS.SELF
+                      ? 'どこが痛いですか？'
+                      : '傷病者のどこが痛いですか？',
+                    value: additionalInfoAnswers.painLocation,
+                    onChange: (value) => updateAdditionalInfoAnswer('painLocation', value),
+                    placeholder: '例: 右足首',
+                  })}
+                  {renderChoiceQuestion({
+                    title: '腫れや内出血等はありますか？',
+                    value: additionalInfoAnswers.swellingStatus,
+                    onChange: (value) => updateAdditionalInfoAnswer('swellingStatus', value),
+                    options: ITEM2_SWELLING_STATUS_OPTIONS,
+                  })}
+                  {additionalInfoAnswers.swellingStatus === 'other' ? renderTextQuestion({
+                    title: 'その他の状態を入力してください',
+                    value: additionalInfoAnswers.swellingStatusOther,
+                    onChange: (value) => updateAdditionalInfoAnswer('swellingStatusOther', value),
+                    placeholder: '例: 赤みが強い',
+                  }) : null}
+                </>
+              ) : null}
+
+              {['injury_light', 'injury_medium', 'injury_severe'].includes(additionalInfoAnswers.conditionCategory) && additionalInfoAnswers.bleedingPresence === 'yes' ? (
+                <>
+                  {renderTextQuestion({
+                    title: 'どこから出血していますか？',
+                    value: additionalInfoAnswers.bleedingLocation,
+                    onChange: (value) => updateAdditionalInfoAnswer('bleedingLocation', value),
+                    placeholder: '例: 左ひじ',
+                  })}
+                  {renderTextQuestion({
+                    title: 'どのくらい出血していますか？',
+                    value: additionalInfoAnswers.bleedingAmount,
+                    onChange: (value) => updateAdditionalInfoAnswer('bleedingAmount', value),
+                    placeholder: '例: ティッシュ数枚分',
+                  })}
+                </>
+              ) : null}
+
+              {additionalInfoAnswers.conditionCategory === 'physical_condition' ? renderSymptomsQuestion({
+                answers: additionalInfoAnswers,
+                onToggleSymptom: toggleAdditionalInfoSymptom,
+                onUpdateAnswer: updateAdditionalInfoAnswer,
+              }) : null}
+
+              {additionalInfoAnswers.conditionCategory === 'other' ? renderTextQuestion({
+                title: 'その他の状態を入力してください',
+                value: additionalInfoAnswers.conditionOtherText,
+                onChange: (value) => updateAdditionalInfoAnswer('conditionOtherText', value),
+                placeholder: '例: 様子がおかしい、震えている',
+                multiline: true,
+              }) : null}
+            </ScrollView>
+            <View style={styles.modalButtonRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                onPress={closeAdditionalInfoModal}
+                disabled={isAdditionalInfoSubmitting}
+              >
+                <Text style={[styles.modalCancelText, { color: theme.text }]}>閉じる</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalConfirmButton, { backgroundColor: theme.primaryVariant }]}
+                onPress={handleSaveAdditionalInfo}
+                disabled={isAdditionalInfoSubmitting}
+              >
+                <Text style={styles.modalConfirmText}>{isAdditionalInfoSubmitting ? '保存中...' : '完了'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={Boolean(resolveConfirmCall)}
@@ -1030,14 +1239,7 @@ const Item2Screen = ({ navigation, route }) => {
         <View style={styles.feedbackOverlay}>
           <View style={styles.modalBackdrop}>
             <View style={[styles.modalCard, { backgroundColor: theme.background, borderColor: theme.border }]}>
-              <Text
-                style={[
-                  styles.modalTitle,
-                  { color: createFeedback.type === 'success' ? theme.primaryVariant : theme.error },
-                ]}
-              >
-                {createFeedback.type === 'success' ? '呼び出し成功' : '呼び出し失敗'}
-              </Text>
+              <Text style={[styles.modalTitle, { color: theme.error }]}>呼び出し失敗</Text>
               <Text style={[styles.modalMessage, { color: theme.text }]}>
                 {createFeedback.message}
               </Text>
@@ -1098,6 +1300,33 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#212121',
     marginBottom: 16,
+  },
+  pendingBanner: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+  },
+  pendingBannerTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  pendingBannerText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  pendingBannerButton: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    marginTop: 12,
+    alignSelf: 'flex-start',
+  },
+  pendingBannerButtonText: {
+    color: '#ffffff',
+    fontWeight: '700',
   },
   questionBlock: {
     marginBottom: 14,
@@ -1211,6 +1440,43 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 20,
     padding: 20,
+  },
+  additionalInfoModalCard: {
+    maxHeight: '85%',
+  },
+  additionalInfoErrorBox: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 10,
+  },
+  additionalInfoErrorText: {
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  detailContextBox: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  detailContextLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
+    marginBottom: 2,
+  },
+  detailContextValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  additionalInfoContent: {
+    paddingTop: 16,
+    paddingBottom: 8,
   },
   modalTitle: {
     fontSize: 18,

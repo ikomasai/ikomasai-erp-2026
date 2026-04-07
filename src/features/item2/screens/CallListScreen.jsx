@@ -5,7 +5,7 @@
 import React from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../../../shared/hooks/useTheme';
-import { ITEM2_CALL_STATUSES, ITEM2_CALL_TYPES } from '../constants';
+import { ITEM2_CALL_STATUSES } from '../constants';
 import CallCard from '../components/CallCard';
 
 const STATUS_FILTER_OPTIONS = [
@@ -13,12 +13,6 @@ const STATUS_FILTER_OPTIONS = [
   { value: ITEM2_CALL_STATUSES.UNHANDLED, label: '未対応' },
   { value: ITEM2_CALL_STATUSES.IN_PROGRESS, label: '対応中' },
   { value: ITEM2_CALL_STATUSES.RESOLVED, label: '対応終了' },
-];
-
-const CALL_TYPE_FILTER_OPTIONS = [
-  { value: 'all', label: 'すべて' },
-  { value: ITEM2_CALL_TYPES.EMERGENCY, label: '緊急' },
-  { value: ITEM2_CALL_TYPES.NON_URGENT, label: '不急' },
 ];
 
 const FilterChip = ({ label, isActive, onPress, theme }) => {
@@ -49,14 +43,17 @@ const CallListScreen = ({
   onRefresh,
   getResponderLabel,
   onOpenResponderModal,
+  onOpenAdditionalInfoModal,
   onResolveCall,
   statusFilter = 'all',
-  callTypeFilter = 'all',
   onChangeStatusFilter,
-  onChangeCallTypeFilter,
+  headerActionLabel = '',
+  onPressHeaderAction,
+  isHeaderActionDisabled = false,
 }) => {
   const { theme } = useTheme();
-  const shouldShowFilterControls = typeof onChangeStatusFilter === 'function' || typeof onChangeCallTypeFilter === 'function';
+  const shouldShowFilterControls = typeof onChangeStatusFilter === 'function';
+  const shouldShowHeaderAction = typeof onPressHeaderAction === 'function' && headerActionLabel;
 
   const renderHeader = () => {
     if (!shouldShowFilterControls) {
@@ -65,33 +62,34 @@ const CallListScreen = ({
 
     return (
       <View style={styles.filterSection}>
-        <Text style={[styles.filterSectionTitle, { color: theme.textSecondary }]}>ステータス</Text>
-        <View style={styles.filterRow}>
-          {STATUS_FILTER_OPTIONS.map((option) => {
-            return (
-              <FilterChip
-                key={option.value}
-                label={option.label}
-                isActive={statusFilter === option.value}
-                onPress={() => onChangeStatusFilter?.(option.value)}
-                theme={theme}
-              />
-            );
-          })}
+        <View style={styles.filterHeaderRow}>
+          <Text style={[styles.filterSectionTitle, { color: theme.textSecondary }]}>ステータス</Text>
         </View>
-        <Text style={[styles.filterSectionTitle, styles.filterSectionTitleSpacing, { color: theme.textSecondary }]}>種別</Text>
-        <View style={styles.filterRow}>
-          {CALL_TYPE_FILTER_OPTIONS.map((option) => {
-            return (
-              <FilterChip
-                key={option.value}
-                label={option.label}
-                isActive={callTypeFilter === option.value}
-                onPress={() => onChangeCallTypeFilter?.(option.value)}
-                theme={theme}
-              />
-            );
-          })}
+        <View style={styles.filterControlsRow}>
+          <View style={styles.filterRow}>
+            {STATUS_FILTER_OPTIONS.map((option) => {
+              return (
+                <FilterChip
+                  key={option.value}
+                  label={option.label}
+                  isActive={statusFilter === option.value}
+                  onPress={() => onChangeStatusFilter?.(option.value)}
+                  theme={theme}
+                />
+              );
+            })}
+          </View>
+          {shouldShowHeaderAction ? (
+            <TouchableOpacity
+              style={[styles.refreshButton, { backgroundColor: theme.surface, borderColor: theme.border }]}
+              onPress={onPressHeaderAction}
+              disabled={isHeaderActionDisabled}
+            >
+              <Text style={[styles.refreshButtonText, { color: theme.text }]}>
+                {headerActionLabel}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
     );
@@ -112,9 +110,9 @@ const CallListScreen = ({
       renderItem={({ item }) => (
         <CallCard
           callData={item}
-          isEmergencyMode={item.call_type === ITEM2_CALL_TYPES.EMERGENCY}
           responderLabel={getResponderLabel(item)}
           onOpenResponderModal={onOpenResponderModal}
+          onOpenAdditionalInfoModal={onOpenAdditionalInfoModal}
           onResolveCall={
             typeof onResolveCall === 'function' && item.status !== ITEM2_CALL_STATUSES.RESOLVED
               ? onResolveCall
@@ -135,15 +133,21 @@ const styles = StyleSheet.create({
   filterSection: {
     marginBottom: 14,
   },
+  filterHeaderRow: {
+    marginBottom: 6,
+  },
   filterSectionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    marginBottom: 8,
   },
-  filterSectionTitleSpacing: {
-    marginTop: 12,
+  filterControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   filterRow: {
+    flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
@@ -155,6 +159,18 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   filterChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  refreshButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginTop: 0,
+    alignSelf: 'flex-start',
+  },
+  refreshButtonText: {
     fontSize: 12,
     fontWeight: '700',
   },

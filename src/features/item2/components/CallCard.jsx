@@ -5,6 +5,7 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../../../shared/hooks/useTheme';
+import { ITEM2_DETAIL_STATUS_COLORS, ITEM2_DETAIL_STATUSES } from '../constants';
 import StatusBadge from './StatusBadge';
 
 /**
@@ -24,9 +25,14 @@ const formatDateTime = (value) => {
  * @param {Object} props - プロパティ
  * @returns {JSX.Element} カード
  */
-const CallCard = ({ callData, isEmergencyMode = false, responderLabel, onOpenResponderModal, onResolveCall }) => {
+const CallCard = ({
+  callData,
+  responderLabel,
+  onOpenResponderModal,
+  onOpenAdditionalInfoModal,
+  onResolveCall,
+}) => {
   const { theme } = useTheme();
-  const isEmergency = callData.call_type === 'emergency';
   const summaryText = callData.detail || callData.purpose || '内容未入力';
   const requesterRolesText = Array.isArray(callData.requester_roles) && callData.requester_roles.length > 0
     ? callData.requester_roles
@@ -34,14 +40,28 @@ const CallCard = ({ callData, isEmergencyMode = false, responderLabel, onOpenRes
       .filter(Boolean)
       .join('、')
     : 'なし';
-  const shouldShowActionRow = typeof onOpenResponderModal === 'function' || typeof onResolveCall === 'function';
+  const isDetailPending = callData.detail_status !== ITEM2_DETAIL_STATUSES.COMPLETED;
+  const detailStatusLabel = isDetailPending ? '追加情報: 未入力' : '追加情報: 入力済み';
+  const shouldShowActionRow = (
+    typeof onOpenResponderModal === 'function'
+    || typeof onOpenAdditionalInfoModal === 'function'
+    || typeof onResolveCall === 'function'
+  );
+  const detailActionLabel = isDetailPending ? '詳細を入力' : '詳細を編集';
 
   return (
     <View style={[styles.card, { backgroundColor: theme.surface, shadowOpacity: theme.shadowOpacity, borderColor: theme.border }]}> 
       <View style={styles.topRow}>
         <View style={styles.topLeft}>
-          <Text style={[styles.typeText, { color: theme.textSecondary }]}>{isEmergency ? '緊急' : '不急'}</Text>
-          <StatusBadge status={callData.status} isEmergency={isEmergency} />
+          <StatusBadge status={callData.status} />
+          <View style={[
+            styles.detailBadge,
+            { backgroundColor: ITEM2_DETAIL_STATUS_COLORS[isDetailPending ? 'pending' : 'completed'] },
+          ]}>
+            <Text style={styles.detailBadgeText}>
+              {isDetailPending ? '詳細入力待ち' : '追加情報済み'}
+            </Text>
+          </View>
         </View>
       </View>
       <Text style={[styles.summaryText, { color: theme.text }]}>{summaryText}</Text>
@@ -49,6 +69,7 @@ const CallCard = ({ callData, isEmergencyMode = false, responderLabel, onOpenRes
       <Text style={[styles.metaText, { color: theme.textSecondary }]}>呼び出し者: {callData.requester_name}</Text>
       <Text style={[styles.metaText, { color: theme.textSecondary }]}>呼び出し者ロール: {requesterRolesText}</Text>
       <Text style={[styles.metaText, { color: theme.textSecondary }]}>時刻: {formatDateTime(callData.created_at)}</Text>
+      <Text style={[styles.metaText, { color: theme.textSecondary }]}>{detailStatusLabel}</Text>
       <View style={styles.assigneeRow}>
         <View style={styles.assigneeTextBox}>
           <Text style={[styles.assigneeTitle, { color: theme.textSecondary }]}>救護者</Text>
@@ -59,7 +80,12 @@ const CallCard = ({ callData, isEmergencyMode = false, responderLabel, onOpenRes
         <View style={styles.actionRow}>
           {typeof onOpenResponderModal === 'function' ? (
             <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.primaryVariant }]} onPress={() => onOpenResponderModal(callData)}>
-              <Text style={styles.actionButtonText}>{isEmergencyMode ? '救護者設定' : '担当者設定'}</Text>
+              <Text style={styles.actionButtonText}>救護者設定</Text>
+            </TouchableOpacity>
+          ) : null}
+          {typeof onOpenAdditionalInfoModal === 'function' ? (
+            <TouchableOpacity style={[styles.resolveButton, { borderColor: theme.border }]} onPress={() => onOpenAdditionalInfoModal(callData)}>
+              <Text style={[styles.resolveButtonText, { color: theme.text }]}>{detailActionLabel}</Text>
             </TouchableOpacity>
           ) : null}
           {typeof onResolveCall === 'function' ? (
@@ -93,10 +119,16 @@ const styles = StyleSheet.create({
   topLeft: {
     gap: 8,
   },
-  typeText: {
+  detailBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  detailBadgeText: {
+    color: '#ffffff',
     fontSize: 12,
     fontWeight: '700',
-    color: '#616161',
   },
   summaryText: {
     fontSize: 16,
@@ -131,6 +163,7 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
     marginTop: 14,
   },

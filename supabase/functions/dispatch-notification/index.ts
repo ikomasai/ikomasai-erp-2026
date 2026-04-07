@@ -199,6 +199,9 @@ const getNavigateTo = (
       return { screen: 'JimuShift', tab: 'requestHistory' };
     case 'shift_reminder':
       return { screen: 'JimuShift', tab: 'myShift' };
+    case 'item2_call_created':
+    case 'item2_responder_assigned':
+      return { screen: 'Item2', tab: 'list' };
     default:
       return null;
   }

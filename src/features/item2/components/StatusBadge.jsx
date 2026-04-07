@@ -25,14 +25,10 @@ const getStatusLabel = (status) => {
  * ステータスバッジ
  * @param {Object} props - プロパティ
  * @param {string} props.status - ステータス
- * @param {boolean} props.isEmergency - 緊急かどうか
  * @returns {JSX.Element} バッジ
  */
-const StatusBadge = ({ status, isEmergency = false }) => {
-  /** 背景色 */
-  const backgroundColor = status === ITEM2_CALL_STATUSES.UNHANDLED && isEmergency
-    ? ITEM2_STATUS_COLORS.emergency
-    : ITEM2_STATUS_COLORS[status] ?? ITEM2_STATUS_COLORS.unhandled;
+const StatusBadge = ({ status }) => {
+  const backgroundColor = ITEM2_STATUS_COLORS[status] ?? ITEM2_STATUS_COLORS.unhandled;
 
   return (
     <View style={[styles.badge, { backgroundColor }]}> 

@@ -8,10 +8,9 @@ import { selectItem2Calls } from '../services/item2CallService';
 
 /**
  * 呼び出し一覧を扱うフック
- * @param {Object} options - オプション
  * @returns {Object} 呼び出し一覧状態
  */
-export const useCalls = ({ emergencyOnly = false } = {}) => {
+export const useCalls = () => {
   const [calls, setCalls] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -20,7 +19,7 @@ export const useCalls = ({ emergencyOnly = false } = {}) => {
     try {
       setIsLoading(true);
       setError(null);
-      const result = await selectItem2Calls({ emergencyOnly });
+      const result = await selectItem2Calls();
       if (result.error) {
         setError(result.error);
         setCalls([]);
@@ -33,7 +32,7 @@ export const useCalls = ({ emergencyOnly = false } = {}) => {
     } finally {
       setIsLoading(false);
     }
-  }, [emergencyOnly]);
+  }, []);
 
   useEffect(() => {
     refreshCalls();
@@ -41,7 +40,7 @@ export const useCalls = ({ emergencyOnly = false } = {}) => {
 
   useEffect(() => {
     const supabase = getSupabaseClient();
-    const channel = supabase.channel(`item2-calls-${emergencyOnly ? 'emergency' : 'all'}`);
+    const channel = supabase.channel('item2-calls');
 
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'item2_calls' }, () => {
       refreshCalls();
@@ -52,7 +51,7 @@ export const useCalls = ({ emergencyOnly = false } = {}) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [emergencyOnly, refreshCalls]);
+  }, [refreshCalls]);
 
   return {
     calls,

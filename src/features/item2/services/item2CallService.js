@@ -3,7 +3,11 @@
  */
 
 import { getSupabaseClient } from '../../../services/supabase/client';
-import { ITEM2_CALL_STATUSES, ITEM2_CALL_TYPES } from '../constants';
+import { ITEM2_CALL_STATUSES } from '../constants';
+import { notifyItem2ResponderAssigned } from './item2NotificationService';
+
+const ITEM2_ADDITIONAL_INFO_RPC_NAME = 'update_item2_call_additional_info';
+const ITEM2_ADDITIONAL_INFO_RPC_MISSING_MESSAGE = '追加情報保存用の RPC が未作成です。`db/migrations/20260327_add_item2_requester_additional_info_rpc.sql`、`db/migrations/20260329_add_item2_detail_status.sql`、`db/migrations/20260407_allow_item2_staff_additional_info_updates.sql` を Supabase に適用してください。';
 
 /**
  * 配列値を uuid 配列へ正規化する
@@ -34,6 +38,26 @@ const extractMissingColumnName = (error) => {
 };
 
 /**
+ * 追加情報保存 RPC の未反映エラーか判定する
+ * @param {unknown} error - エラー
+ * @returns {boolean} 未反映なら true
+ */
+const isMissingAdditionalInfoRpcError = (error) => {
+  const errorMessage = error?.message ?? '';
+  const errorDetails = error?.details ?? '';
+  const targetPatterns = [
+    `/rpc/${ITEM2_ADDITIONAL_INFO_RPC_NAME}`,
+    `function public.${ITEM2_ADDITIONAL_INFO_RPC_NAME}`,
+    `Could not find the function public.${ITEM2_ADDITIONAL_INFO_RPC_NAME}`,
+    ITEM2_ADDITIONAL_INFO_RPC_NAME,
+  ];
+
+  return error?.status === 404 && targetPatterns.some((pattern) => {
+    return errorMessage.includes(pattern) || errorDetails.includes(pattern);
+  });
+};
+
+/**
  * 呼び出し登録を実行する
  * @param {Object} payload - 登録内容
  * @returns {Promise<Object>} 登録結果
@@ -57,28 +81,21 @@ const mapCallRow = (row) => {
     ...row,
     assigned_to: normalizeUserIdArray(row?.assigned_to),
     requester_roles: Array.isArray(row?.requester_roles) ? row.requester_roles : [],
+    detail_status: row?.detail_status ?? 'completed',
   };
 };
 
 /**
  * 呼び出し一覧を取得する
- * @param {Object} options - 取得オプション
- * @param {boolean} options.emergencyOnly - 緊急のみ取得するか
  * @returns {Promise<Object>} 呼び出し一覧
  */
-export const selectItem2Calls = async ({ emergencyOnly = false } = {}) => {
+export const selectItem2Calls = async () => {
   try {
     const supabase = getSupabaseClient();
-    let query = supabase
+    const { data, error } = await supabase
       .from('item2_calls')
       .select('*')
       .order('created_at', { ascending: false });
-
-    if (emergencyOnly) {
-      query = query.eq('call_type', ITEM2_CALL_TYPES.EMERGENCY);
-    }
-
-    const { data, error } = await query;
 
     if (error) {
       return { calls: [], error };
@@ -169,6 +186,54 @@ export const insertItem2Call = async (payload) => {
 };
 
 /**
+ * 呼び出し者が追加情報を更新する
+ * @param {Object} params - 更新内容
+ * @param {string} params.callId - 呼び出しID
+ * @param {string|null} params.purpose - 状態ラベル
+ * @param {string|null} params.detail - 表示用サマリー
+ * @param {string|null} params.requesterRelation - 本人/本人ではない
+ * @param {boolean|null} params.canCommunicateByText - 文字入力可否
+ * @param {Object} params.assessmentAnswers - 保存する回答一覧
+ * @returns {Promise<Object>} 更新結果
+ */
+export const updateItem2CallAdditionalInfo = async ({
+  callId,
+  purpose = null,
+  detail = null,
+  requesterRelation = null,
+  canCommunicateByText = null,
+  assessmentAnswers = {},
+  detailStatus = 'pending',
+  detailCompletedAt = null,
+}) => {
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.rpc(ITEM2_ADDITIONAL_INFO_RPC_NAME, {
+      p_call_id: callId,
+      p_purpose: purpose,
+      p_detail: detail,
+      p_requester_relation: requesterRelation,
+      p_can_communicate_by_text: canCommunicateByText,
+      p_assessment_answers: assessmentAnswers,
+      p_detail_status: detailStatus,
+      p_detail_completed_at: detailCompletedAt,
+    });
+
+    if (error) {
+      if (isMissingAdditionalInfoRpcError(error)) {
+        return { call: null, error: new Error(ITEM2_ADDITIONAL_INFO_RPC_MISSING_MESSAGE) };
+      }
+      return { call: null, error };
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    return { call: mapCallRow(row), error: null };
+  } catch (error) {
+    return { call: null, error };
+  }
+};
+
+/**
  * 現地対応者を更新する
  * @param {Object} params - 更新内容
  * @param {string} params.callId - 呼び出しID
@@ -182,7 +247,7 @@ export const updateItem2CallAssignees = async ({ callId, assignedTo, actorId = n
     const normalizedAssignedTo = normalizeUserIdArray(assignedTo);
     const { data: currentCall, error: currentCallError } = await supabase
       .from('item2_calls')
-      .select('status')
+      .select('status, assigned_to, assessment_answers, requester_user_id, requester_name, location_text, call_type')
       .eq('id', callId)
       .single();
 
@@ -224,7 +289,76 @@ export const updateItem2CallAssignees = async ({ callId, assignedTo, actorId = n
       });
     }
 
-    return { call: mapCallRow(data), error: null };
+    const updatedCall = mapCallRow(data);
+    const currentAssessmentAnswers = currentCall?.assessment_answers && typeof currentCall.assessment_answers === 'object' && !Array.isArray(currentCall.assessment_answers)
+      ? currentCall.assessment_answers
+      : {};
+    const previousAssignedTo = normalizeUserIdArray(currentCall?.assigned_to);
+    const hasResponderChanged = (
+      previousAssignedTo.length !== normalizedAssignedTo.length
+      || previousAssignedTo.some((userId) => !normalizedAssignedTo.includes(userId))
+    );
+
+    let responderNames = [];
+    if (normalizedAssignedTo.length > 0) {
+      const responderProfilesResult = await supabase
+        .from('user_profiles')
+        .select('user_id, name')
+        .in('user_id', normalizedAssignedTo);
+
+      responderNames = normalizedAssignedTo.map((userId) => {
+        const matchedProfile = Array.isArray(responderProfilesResult.data)
+          ? responderProfilesResult.data.find((profile) => profile.user_id === userId)
+          : null;
+        return matchedProfile?.name ?? '設定済み';
+      });
+
+      const notificationResult = await notifyItem2ResponderAssigned({
+        callData: {
+          ...updatedCall,
+          assessment_answers: {
+            ...(updatedCall.assessment_answers && typeof updatedCall.assessment_answers === 'object' && !Array.isArray(updatedCall.assessment_answers)
+              ? updatedCall.assessment_answers
+              : {}),
+            ...currentAssessmentAnswers,
+            responderNames,
+            responderUserIds: normalizedAssignedTo,
+          },
+        },
+        responderNames,
+        senderUserId: actorId ?? null,
+      });
+
+      if (notificationResult.error) {
+        console.error('厚生部呼び出しの対応者通知の送信に失敗しました:', notificationResult.error);
+      }
+    }
+
+    if (hasResponderChanged || normalizedAssignedTo.length > 0) {
+      const enrichedCall = {
+        ...updatedCall,
+        assessment_answers: {
+          ...(updatedCall.assessment_answers && typeof updatedCall.assessment_answers === 'object' && !Array.isArray(updatedCall.assessment_answers)
+            ? updatedCall.assessment_answers
+            : {}),
+          ...currentAssessmentAnswers,
+          responderNames,
+          responderUserIds: normalizedAssignedTo,
+        },
+      };
+
+      await supabase
+        .from('item2_calls')
+        .update({
+          assessment_answers: enrichedCall.assessment_answers,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', callId);
+
+      return { call: enrichedCall, error: null };
+    }
+
+    return { call: updatedCall, error: null };
   } catch (error) {
     return { call: null, error };
   }
