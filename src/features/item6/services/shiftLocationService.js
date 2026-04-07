@@ -221,7 +221,7 @@ export const insertKoseibuShiftLocation = async (payload) => {
         latitude: payload.latitude,
         longitude: payload.longitude,
         description: payload.description ?? null,
-        display_member_count: payload.displayMemberCount ?? 3,
+        display_member_count: payload.displayMemberCount ?? 2,
         display_order: payload.displayOrder ?? 0,
         is_active: true,
         created_by: payload.createdBy,

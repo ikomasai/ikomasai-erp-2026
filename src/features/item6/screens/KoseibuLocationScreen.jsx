@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Modal,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -45,6 +46,39 @@ const ITEM6_TABS = {
   location: 'location',
   self: 'self',
   current: 'current',
+};
+
+const FULLSCREEN_MAP_SOURCES = {
+  location: 'location',
+  self: 'self',
+  current: 'current',
+};
+
+const toAlphaColor = (colorText, alpha) => {
+  if (typeof colorText !== 'string') {
+    return `rgba(0, 0, 0, ${alpha})`;
+  }
+
+  if (colorText.startsWith('rgba(')) {
+    return colorText.replace(/rgba\(([^)]+),\s*[\d.]+\)/, `rgba($1, ${alpha})`);
+  }
+
+  const hex = colorText.replace('#', '').trim();
+  if (hex.length === 3) {
+    const r = Number.parseInt(hex[0] + hex[0], 16);
+    const g = Number.parseInt(hex[1] + hex[1], 16);
+    const b = Number.parseInt(hex[2] + hex[2], 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  if (hex.length === 6) {
+    const r = Number.parseInt(hex.slice(0, 2), 16);
+    const g = Number.parseInt(hex.slice(2, 4), 16);
+    const b = Number.parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  return `rgba(0, 0, 0, ${alpha})`;
 };
 
 const formatDateTime = (value) => {
@@ -145,7 +179,7 @@ const InfoValue = ({ label, value, theme }) => {
 
 const Item6LocationScreen = ({ navigation }) => {
   const { theme } = useTheme();
-  const { width } = useWindowDimensions();
+  const { width, height: windowHeight } = useWindowDimensions();
   const isCompact = width < MOBILE_BREAKPOINT;
   const { user, userInfo, isLoading: authLoading } = useAuth();
 
@@ -166,9 +200,13 @@ const Item6LocationScreen = ({ navigation }) => {
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
   const [draftCoordinate, setDraftCoordinate] = useState(DEFAULT_MAP_REGION);
-  const [draftDisplayMemberCount, setDraftDisplayMemberCount] = useState('3');
+  const [draftDisplayMemberCount, setDraftDisplayMemberCount] = useState('2');
+  const [fullscreenMapSource, setFullscreenMapSource] = useState('');
+  const [isCurrentLocationMapInteractionActive, setIsCurrentLocationMapInteractionActive] = useState(false);
   const selectionInitializedRef = useRef(false);
   const currentLocationDraftInitializedRef = useRef(false);
+  const scrollViewRef = useRef(null);
+  const [currentLocationControlsOffsetY, setCurrentLocationControlsOffsetY] = useState(0);
 
   const canView = useMemo(() => {
     const roles = userInfo?.roles || [];
@@ -191,6 +229,14 @@ const Item6LocationScreen = ({ navigation }) => {
   }, [userInfo?.roles]);
 
   const canEditLocation = useCallback(() => canManageLocations, [canManageLocations]);
+
+  const openFullscreenMap = useCallback((source) => {
+    setFullscreenMapSource(source);
+  }, []);
+
+  const closeFullscreenMap = useCallback(() => {
+    setFullscreenMapSource('');
+  }, []);
 
   const activeLocations = useMemo(() => locations.filter((location) => location.is_active), [locations]);
 
@@ -228,7 +274,7 @@ const Item6LocationScreen = ({ navigation }) => {
         return currentLocationNameComparator(right.updatedAt, left.updatedAt);
       });
 
-      const displayCount = Math.max(0, Number(location.display_member_count ?? 3));
+      const displayCount = Math.max(0, Number(location.display_member_count ?? 2));
       const visibleMembers = members.slice(0, displayCount);
       const hiddenCount = Math.max(0, members.length - visibleMembers.length);
       let summary = '登録者なし';
@@ -270,17 +316,15 @@ const Item6LocationScreen = ({ navigation }) => {
     }
   }, [myCurrentLocation?.status]);
 
-  const selectedCurrentLocation = useMemo(() => {
-    return locations.find((location) => location.id === selectedCurrentLocationId) ?? null;
-  }, [locations, selectedCurrentLocationId]);
+  useEffect(() => {
+    if (statusDraft !== MEMBER_STATUS.stationed && currentLocationDraftId) {
+      setCurrentLocationDraftId('');
+    }
+  }, [currentLocationDraftId, statusDraft]);
 
   const editingLocation = useMemo(() => {
     return locations.find((location) => location.id === editingLocationId) ?? null;
   }, [editingLocationId, locations]);
-
-  const focusLocation = useMemo(() => {
-    return editingLocation || selectedCurrentLocation;
-  }, [editingLocation, selectedCurrentLocation]);
 
   const sortedCurrentLocations = useMemo(() => {
     const normalize = (value) => (value || '').toString();
@@ -514,7 +558,7 @@ const Item6LocationScreen = ({ navigation }) => {
 
     setDraftName(editingLocation.name || '');
     setDraftDescription(editingLocation.description || '');
-    setDraftDisplayMemberCount(String(editingLocation.display_member_count ?? 3));
+    setDraftDisplayMemberCount(String(editingLocation.display_member_count ?? 2));
     setDraftCoordinate({
       latitude: Number(editingLocation.latitude),
       longitude: Number(editingLocation.longitude),
@@ -525,7 +569,7 @@ const Item6LocationScreen = ({ navigation }) => {
     setEditingLocationId('');
     setDraftName('');
     setDraftDescription('');
-    setDraftDisplayMemberCount('3');
+    setDraftDisplayMemberCount('2');
     setDraftCoordinate(DEFAULT_MAP_REGION);
   }, []);
 
@@ -545,7 +589,7 @@ const Item6LocationScreen = ({ navigation }) => {
       setSelectedCurrentLocationId(location.id);
       setDraftName(location.name || '');
       setDraftDescription(location.description || '');
-      setDraftDisplayMemberCount(String(location.display_member_count ?? 3));
+      setDraftDisplayMemberCount(String(location.display_member_count ?? 2));
       setDraftCoordinate({
         latitude: Number(location.latitude),
         longitude: Number(location.longitude),
@@ -571,6 +615,106 @@ const Item6LocationScreen = ({ navigation }) => {
 
     setDraftCoordinate(coordinate);
   };
+
+  const handleCurrentLocationMapPress = useCallback((location) => {
+    if (!location?.id) {
+      return;
+    }
+
+    setCurrentLocationLocationFilterId(location.id);
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollTo?.({
+        y: Math.max(0, currentLocationControlsOffsetY - 16),
+        animated: true,
+      });
+    });
+  }, [currentLocationControlsOffsetY]);
+
+  const handleCurrentLocationMapInteractionStart = useCallback(() => {
+    setIsCurrentLocationMapInteractionActive(true);
+  }, []);
+
+  const handleCurrentLocationMapInteractionEnd = useCallback(() => {
+    setIsCurrentLocationMapInteractionActive(false);
+  }, []);
+
+  const fullscreenMapHeight = useMemo(() => {
+    return Math.max(360, windowHeight - 220);
+  }, [windowHeight]);
+
+  const fullscreenMapConfig = useMemo(() => {
+    if (fullscreenMapSource === FULLSCREEN_MAP_SOURCES.location) {
+      return {
+        title: '場所マップ',
+        subtitle: '場所の登録・編集で使う全画面表示です',
+        locations,
+        draftCoordinate,
+        onDraftCoordinateChange: setDraftCoordinate,
+        selectedLocationId: editingLocationId,
+        highlightedLocationId: currentLocationDraftId,
+        focusLocationId: null,
+        canEdit: canRegisterLocations,
+        onLocationPress: handleLocationPress,
+        onBoardPress: handleMapBoardPress,
+        onClearSelection: handleClearLocationSelection,
+        showClearSelectionButton: Boolean(editingLocationId || currentLocationDraftId),
+        showMemberNames: false,
+      };
+    }
+
+    if (fullscreenMapSource === FULLSCREEN_MAP_SOURCES.self) {
+      return {
+        title: '自分の場所マップ',
+        subtitle: '選択中の場所を全画面で確認できます',
+        locations: activeLocations,
+        draftCoordinate: null,
+        onDraftCoordinateChange: null,
+        selectedLocationId: currentLocationDraftId,
+        highlightedLocationId: currentLocationDraftId,
+        focusLocationId: currentLocationDraftId || null,
+        canEdit: false,
+        onLocationPress: null,
+        onBoardPress: null,
+        onClearSelection: handleClearSelfSelection,
+        showClearSelectionButton: Boolean(currentLocationDraftId),
+        showMemberNames: false,
+      };
+    }
+
+    if (fullscreenMapSource === FULLSCREEN_MAP_SOURCES.current) {
+      return {
+        title: '現在地マップ',
+        subtitle: '厚生部メンバーの現在地を全画面で確認できます',
+        locations: locationsWithRegisteredMembers,
+        draftCoordinate: null,
+        onDraftCoordinateChange: null,
+        selectedLocationId: '',
+        highlightedLocationId: '',
+        focusLocationId: null,
+        canEdit: false,
+        onLocationPress: null,
+        onBoardPress: null,
+        onClearSelection: null,
+        showClearSelectionButton: false,
+        showMemberNames: true,
+      };
+    }
+
+    return null;
+  }, [
+    activeLocations,
+    canRegisterLocations,
+    currentLocationDraftId,
+    draftCoordinate,
+    editingLocationId,
+    fullscreenMapSource,
+    handleClearLocationSelection,
+    handleClearSelfSelection,
+    handleLocationPress,
+    handleMapBoardPress,
+    locations,
+    locationsWithRegisteredMembers,
+  ]);
 
   const handleSaveLocation = async () => {
     if (!canRegisterLocations) {
@@ -778,7 +922,14 @@ const Item6LocationScreen = ({ navigation }) => {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <ThemedHeader title={SCREEN_NAME} navigation={navigation} />
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        ref={scrollViewRef}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        scrollEnabled={!isCurrentLocationMapInteractionActive}
+        disableScrollViewPanResponder={isCurrentLocationMapInteractionActive}
+      >
         {/* エラーバナーはスクロール最上部に表示して見逃しを防ぐ */}
         {errorMessage ? (
           <View style={[styles.errorBanner, { borderColor: theme.error, backgroundColor: `${theme.error}12` }]}>
@@ -804,61 +955,12 @@ const Item6LocationScreen = ({ navigation }) => {
           renderAccessDenied()
         ) : (
           <>
-            <View style={[styles.summaryGrid, isCompact && styles.summaryGridCompact]}>
+            <View style={styles.summaryGrid}>
               <SectionCard title="概要" subtitle="現在の状態" theme={theme}>
                 <View style={styles.infoRow}>
                   <InfoValue label="有効場所" value={summaryCounts.activeLocations} theme={theme} />
                   <InfoValue label="現在地登録" value={summaryCounts.currentRegistrations} theme={theme} />
                 </View>
-              </SectionCard>
-
-              <SectionCard title="現在の選択" subtitle="選択中の場所" theme={theme}>
-                {focusLocation ? (
-                  <>
-                    <View
-                      style={[
-                        styles.selectionBanner,
-                        {
-                          backgroundColor: editingLocationId === focusLocation.id ? `${theme.warning}28` : `${theme.primary}28`,
-                          borderColor: editingLocationId === focusLocation.id ? theme.warning : theme.primary,
-                          borderLeftWidth: 6,
-                          borderLeftColor: editingLocationId === focusLocation.id ? theme.warning : theme.primary,
-                        },
-                      ]}
-                    >
-                      <Badge
-                        label={editingLocationId === focusLocation.id ? '編集対象' : '選択中'}
-                        color={editingLocationId === focusLocation.id ? theme.warning : theme.primary}
-                        backgroundColor={
-                          editingLocationId === focusLocation.id ? `${theme.warning}20` : `${theme.primary}18`
-                        }
-                      />
-                      <Text style={[styles.selectionBannerText, { color: theme.text }]}>
-                        {focusLocation.name}
-                      </Text>
-                    </View>
-                    <Text style={[styles.focusTitle, { color: theme.text }]} numberOfLines={1}>
-                      {focusLocation.name}
-                    </Text>
-                    <Text style={[styles.focusMeta, { color: theme.textSecondary }]}>
-                      {focusLocation.description || '補足情報なし'}
-                    </Text>
-                    {editingLocationId === focusLocation.id ? (
-                      <Text style={[styles.focusMeta, { color: theme.warning }]}>
-                        編集対象として選択中です
-                      </Text>
-                    ) : null}
-                    {myCurrentLocation ? (
-                      <Text style={[styles.focusMeta, { color: theme.textSecondary }]}>
-                        あなたの登録: {myCurrentLocation.location_name_snapshot}
-                      </Text>
-                    ) : null}
-                  </>
-                ) : (
-                  <Text style={[styles.focusMeta, { color: theme.textSecondary }]}>
-                    選択中の場所はありません
-                  </Text>
-                )}
               </SectionCard>
             </View>
 
@@ -920,6 +1022,10 @@ const Item6LocationScreen = ({ navigation }) => {
                     onBoardPress={handleMapBoardPress}
                     onClearSelection={handleClearLocationSelection}
                     showClearSelectionButton={Boolean(editingLocationId || currentLocationDraftId)}
+                    showFullscreenButton
+                    onFullscreenPress={() => openFullscreenMap(FULLSCREEN_MAP_SOURCES.location)}
+                    embedded
+                    showLegend
                   />
                 </SectionCard>
 
@@ -942,7 +1048,7 @@ const Item6LocationScreen = ({ navigation }) => {
                       value={draftName}
                       onChangeText={setDraftName}
                       placeholder="例: 厚生部本部前"
-                      placeholderTextColor={theme.textSecondary}
+                      placeholderTextColor={toAlphaColor(theme.textSecondary, 0.35)}
                     />
                   </View>
 
@@ -957,7 +1063,7 @@ const Item6LocationScreen = ({ navigation }) => {
                       value={draftDescription}
                       onChangeText={setDraftDescription}
                       placeholder="任意"
-                      placeholderTextColor={theme.textSecondary}
+                      placeholderTextColor={toAlphaColor(theme.textSecondary, 0.35)}
                       multiline
                     />
                   </View>
@@ -968,8 +1074,8 @@ const Item6LocationScreen = ({ navigation }) => {
                       style={[styles.textInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
                       value={draftDisplayMemberCount}
                       onChangeText={setDraftDisplayMemberCount}
-                      placeholder="3"
-                      placeholderTextColor={theme.textSecondary}
+                      placeholder="例: 2"
+                      placeholderTextColor={toAlphaColor(theme.textSecondary, 0.35)}
                       keyboardType="number-pad"
                     />
                     <Text style={[styles.formHint, { color: theme.textSecondary }]}>
@@ -1127,7 +1233,12 @@ const Item6LocationScreen = ({ navigation }) => {
                                 borderColor: isActive ? theme.primary : theme.border,
                               },
                             ]}
-                            onPress={() => setStatusDraft(key)}
+                            onPress={() => {
+                              setStatusDraft(key);
+                              if (key !== MEMBER_STATUS.stationed) {
+                                setCurrentLocationDraftId('');
+                              }
+                            }}
                             activeOpacity={0.8}
                           >
                             <Text style={[styles.statusButtonText, { color: isActive ? '#fff' : theme.text }]}>
@@ -1198,6 +1309,9 @@ const Item6LocationScreen = ({ navigation }) => {
                           canEdit={false}
                           onClearSelection={handleClearSelfSelection}
                           showClearSelectionButton={Boolean(currentLocationDraftId)}
+                          showFullscreenButton
+                          onFullscreenPress={() => openFullscreenMap(FULLSCREEN_MAP_SOURCES.self)}
+                          embedded
                         />
 
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
@@ -1242,93 +1356,117 @@ const Item6LocationScreen = ({ navigation }) => {
               <View style={styles.tabPanel}>
                 <SectionCard title="現在地一覧" subtitle="厚生部メンバーの最新状態" theme={theme}>
                   <View style={styles.currentMapSection}>
-                    <SectionCard title="現在地マップ" subtitle="場所ごとの登録者名を表示" theme={theme}>
+                    <Text style={[styles.inlineSectionTitle, { color: theme.text }]}>現在地マップ</Text>
+                    <Text style={[styles.inlineSectionSubtitle, { color: theme.textSecondary }]}>
+                      場所ごとの登録者名を表示
+                    </Text>
+                    <View
+                      onMouseEnter={handleCurrentLocationMapInteractionStart}
+                      onMouseLeave={handleCurrentLocationMapInteractionEnd}
+                      onTouchStart={handleCurrentLocationMapInteractionStart}
+                      onTouchEnd={handleCurrentLocationMapInteractionEnd}
+                      onTouchCancel={handleCurrentLocationMapInteractionEnd}
+                    >
                       <ShiftLocationMap
                         theme={theme}
                         compact={isCompact}
-                        height={isCompact ? 300 : 420}
+                        height={isCompact ? 360 : 520}
                         locations={locationsWithRegisteredMembers}
                         canEdit={false}
+                        selectedLocationId={currentLocationLocationFilterId}
+                        highlightedLocationId={currentLocationLocationFilterId}
+                        onLocationPress={handleCurrentLocationMapPress}
                         showMemberNames
+                        showFullscreenButton
+                        onFullscreenPress={() => openFullscreenMap(FULLSCREEN_MAP_SOURCES.current)}
+                        embedded
                       />
-                    </SectionCard>
-                  </View>
-                  <View style={styles.filterPanel}>
-                    <TextInput
-                      style={[styles.searchInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
-                      value={currentLocationSearchQuery}
-                      onChangeText={setCurrentLocationSearchQuery}
-                      placeholder="名前で検索"
-                      placeholderTextColor={theme.textSecondary}
-                    />
-                    <View style={styles.filterSection}>
-                      <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>状態で絞り込み</Text>
-                      <View style={styles.statusFilterGroup}>
-                        {currentLocationStatusFilterOptions.map((option) => {
-                          const selected = currentLocationStatusFilterId === option.value;
-                          return (
-                            <TouchableOpacity
-                              key={option.value || 'all-status'}
-                              style={[
-                                styles.filterChip,
-                                styles.statusFilterChip,
-                                {
-                                  backgroundColor: selected ? theme.primary : theme.surface,
-                                  borderColor: selected ? theme.primary : theme.border,
-                                },
-                              ]}
-                              onPress={() => setCurrentLocationStatusFilterId(option.value)}
-                              activeOpacity={0.8}
-                            >
-                              <Text style={{ color: selected ? '#fff' : theme.text }} numberOfLines={1}>
-                                {option.label}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    </View>
-                    <View style={styles.filterSection}>
-                      <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>場所で絞り込み</Text>
-                      <View style={styles.locationFilterGroup}>
-                        <TouchableOpacity
-                          style={[
-                            styles.filterChip,
-                            {
-                              backgroundColor: currentLocationLocationFilterId === '' ? theme.primary : theme.surface,
-                              borderColor: currentLocationLocationFilterId === '' ? theme.primary : theme.border,
-                            },
-                          ]}
-                          onPress={() => setCurrentLocationLocationFilterId('')}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={{ color: currentLocationLocationFilterId === '' ? '#fff' : theme.text }}>全て</Text>
-                        </TouchableOpacity>
-                        {currentLocationFilterOptions.map((option) => {
-                          const selected = currentLocationLocationFilterId === option.value;
-                          return (
-                            <TouchableOpacity
-                              key={option.value}
-                              style={[
-                                styles.filterChip,
-                                {
-                                  backgroundColor: selected ? theme.primary : theme.surface,
-                                  borderColor: selected ? theme.primary : theme.border,
-                                },
-                              ]}
-                              onPress={() => setCurrentLocationLocationFilterId(option.value)}
-                              activeOpacity={0.8}
-                            >
-                              <Text style={{ color: selected ? '#fff' : theme.text }} numberOfLines={1}>
-                                {option.label}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
                     </View>
                   </View>
-                  {renderCurrentLocationList()}
+                  <View
+                    onLayout={(event) => {
+                      setCurrentLocationControlsOffsetY(event.nativeEvent.layout.y);
+                    }}
+                  >
+                      <View style={styles.filterPanel}>
+                      <TextInput
+                        style={[styles.searchInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+                        value={currentLocationSearchQuery}
+                        onChangeText={setCurrentLocationSearchQuery}
+                        placeholder="例: 山田"
+                        placeholderTextColor={toAlphaColor(theme.textSecondary, 0.35)}
+                      />
+                      <View style={styles.filterSection}>
+                        <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>状態で絞り込み</Text>
+                        <View style={styles.statusFilterGroup}>
+                          {currentLocationStatusFilterOptions.map((option) => {
+                            const selected = currentLocationStatusFilterId === option.value;
+                            return (
+                              <TouchableOpacity
+                                key={option.value || 'all-status'}
+                                style={[
+                                  styles.filterChip,
+                                  styles.statusFilterChip,
+                                  {
+                                    backgroundColor: selected ? theme.primary : theme.surface,
+                                    borderColor: selected ? theme.primary : theme.border,
+                                  },
+                                ]}
+                                onPress={() => setCurrentLocationStatusFilterId(option.value)}
+                                activeOpacity={0.8}
+                              >
+                                <Text style={{ color: selected ? '#fff' : theme.text }} numberOfLines={1}>
+                                  {option.label}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </View>
+                      <View style={styles.filterSection}>
+                        <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>場所で絞り込み</Text>
+                        <View style={styles.locationFilterGroup}>
+                          <TouchableOpacity
+                            style={[
+                              styles.filterChip,
+                              {
+                                backgroundColor: currentLocationLocationFilterId === '' ? theme.primary : theme.surface,
+                                borderColor: currentLocationLocationFilterId === '' ? theme.primary : theme.border,
+                              },
+                            ]}
+                            onPress={() => setCurrentLocationLocationFilterId('')}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={{ color: currentLocationLocationFilterId === '' ? '#fff' : theme.text }}>全て</Text>
+                          </TouchableOpacity>
+                          {currentLocationFilterOptions.map((option) => {
+                            const selected = currentLocationLocationFilterId === option.value;
+                            return (
+                              <TouchableOpacity
+                                key={option.value}
+                                style={[
+                                  styles.filterChip,
+                                  {
+                                    backgroundColor: selected ? theme.primary : theme.surface,
+                                    borderColor: selected ? theme.primary : theme.border,
+                                  },
+                                ]}
+                                onPress={() => setCurrentLocationLocationFilterId(option.value)}
+                                activeOpacity={0.8}
+                              >
+                                <Text style={{ color: selected ? '#fff' : theme.text }} numberOfLines={1}>
+                                  {option.label}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </View>
+                      </View>
+                    <View style={styles.currentLocationList}>
+                      {renderCurrentLocationList()}
+                    </View>
+                  </View>
                 </SectionCard>
               </View>
             ) : null}
@@ -1336,6 +1474,55 @@ const Item6LocationScreen = ({ navigation }) => {
         )}
 
       </ScrollView>
+
+      <Modal
+        visible={Boolean(fullscreenMapConfig)}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        onRequestClose={closeFullscreenMap}
+      >
+        <SafeAreaView style={[styles.fullscreenModalRoot, { backgroundColor: theme.background }]}>
+          <View style={[styles.fullscreenModalHeader, { borderBottomColor: theme.border, backgroundColor: theme.surface }]}>
+            <View style={styles.fullscreenModalHeaderText}>
+              <Text style={[styles.fullscreenModalTitle, { color: theme.text }]}>
+                {fullscreenMapConfig?.title || 'マップ'}
+              </Text>
+              <Text style={[styles.fullscreenModalSubtitle, { color: theme.textSecondary }]}>
+                {fullscreenMapConfig?.subtitle || '全画面表示'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.fullscreenCloseButton, { borderColor: theme.border, backgroundColor: theme.background }]}
+              onPress={closeFullscreenMap}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons name="close" size={20} color={theme.text} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.fullscreenModalBody}>
+            {fullscreenMapConfig ? (
+              <ShiftLocationMap
+                theme={theme}
+                compact={false}
+                height={fullscreenMapHeight}
+                locations={fullscreenMapConfig.locations}
+                draftCoordinate={fullscreenMapConfig.draftCoordinate}
+                onDraftCoordinateChange={fullscreenMapConfig.onDraftCoordinateChange}
+                selectedLocationId={fullscreenMapConfig.selectedLocationId}
+                highlightedLocationId={fullscreenMapConfig.highlightedLocationId}
+                focusLocationId={fullscreenMapConfig.focusLocationId}
+                canEdit={fullscreenMapConfig.canEdit}
+                onLocationPress={fullscreenMapConfig.onLocationPress}
+                onBoardPress={fullscreenMapConfig.onBoardPress}
+                onClearSelection={fullscreenMapConfig.onClearSelection}
+                showClearSelectionButton={fullscreenMapConfig.showClearSelectionButton}
+                showMemberNames={fullscreenMapConfig.showMemberNames}
+              />
+            ) : null}
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1345,8 +1532,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 12,
-    gap: 12,
+    padding: 16,
+    gap: 14,
   },
   pageHeader: {
     gap: 8,
@@ -1389,11 +1576,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   summaryGrid: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  summaryGridCompact: {
     flexDirection: 'column',
+    gap: 12,
   },
   infoRow: {
     flexDirection: 'row',
@@ -1412,16 +1596,6 @@ const styles = StyleSheet.create({
   },
   infoValueLabel: {
     fontSize: 12,
-  },
-  focusTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  focusMeta: {
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 2,
   },
   tabBar: {
     flexDirection: 'row',
@@ -1447,6 +1621,42 @@ const styles = StyleSheet.create({
   tabPanel: {
     gap: 12,
   },
+  fullscreenModalRoot: {
+    flex: 1,
+  },
+  fullscreenModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  fullscreenModalHeaderText: {
+    flex: 1,
+    gap: 4,
+  },
+  fullscreenModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  fullscreenModalSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  fullscreenCloseButton: {
+    width: 40,
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fullscreenModalBody: {
+    flex: 1,
+    padding: 12,
+  },
   layoutGrid: {
     flexDirection: 'column',
     gap: 12,
@@ -1466,9 +1676,9 @@ const styles = StyleSheet.create({
   sectionCard: {
     alignSelf: 'stretch',
     borderRadius: 14,
-    padding: 12,
+    padding: 16,
     borderWidth: 1,
-    gap: 12,
+    gap: 14,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -1520,12 +1730,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   rowItem: {
-    padding: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderWidth: 1,
     borderRadius: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 14,
   },
   rowItemSelected: {
     borderWidth: 2,
@@ -1597,12 +1808,12 @@ const styles = StyleSheet.create({
     minHeight: 56,
     borderWidth: 1,
     borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 12,
   },
   choiceTextWrap: {
     flex: 1,
@@ -1616,13 +1827,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   filterPanel: {
-    gap: 10,
+    gap: 14,
   },
   filterSection: {
-    gap: 8,
+    gap: 10,
   },
   currentMapSection: {
-    marginBottom: 4,
+    gap: 10,
+  },
+  inlineSectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  inlineSectionSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   searchInput: {
     minHeight: 42,
@@ -1644,7 +1863,7 @@ const styles = StyleSheet.create({
   locationFilterGroup: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
     alignItems: 'flex-start',
     flexShrink: 1,
   },
@@ -1660,9 +1879,12 @@ const styles = StyleSheet.create({
   statusFilterGroup: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
     alignItems: 'flex-start',
     marginLeft: 8,
+  },
+  currentLocationList: {
+    marginTop: 12,
   },
   statusFilterChip: {
     minWidth: 88,
@@ -1705,8 +1927,8 @@ const styles = StyleSheet.create({
   selectionBanner: {
     borderWidth: 1,
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

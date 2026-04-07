@@ -143,6 +143,10 @@ const escapeHtml = (value = '') => {
  * @param {Function} [props.onBoardPress] - マップタップコールバック
  * @param {Function} [props.onClearSelection] - 選択解除コールバック
  * @param {boolean} [props.showClearSelectionButton] - 選択解除ボタンを表示するか
+ * @param {boolean} [props.showFullscreenButton] - 全画面ボタンを表示するか
+ * @param {Function} [props.onFullscreenPress] - 全画面表示コールバック
+ * @param {boolean} [props.embedded] - 外枠を持たない埋め込み表示にするか
+ * @param {boolean} [props.showLegend] - 凡例を表示するか
  * @param {boolean} [props.showMemberNames] - 場所ごとの登録者名を表示するか
  * @returns {React.ReactElement}
  */
@@ -161,6 +165,10 @@ const ShiftLocationMap = ({
   onBoardPress,
   onClearSelection,
   showClearSelectionButton = false,
+  showFullscreenButton = false,
+  onFullscreenPress,
+  embedded = false,
+  showLegend = !embedded,
   showMemberNames = false,
 }) => {
   /** @type {React.MutableRefObject<HTMLDivElement|null>} マップコンテナのDOM参照 */
@@ -391,7 +399,7 @@ const ShiftLocationMap = ({
     });
 
     return (
-      <View style={[styles.mapContainer, { height }]}>
+      <View style={[styles.mapContainer, embedded && styles.mapContainerEmbedded, { height }]}>
         <WebView
           originWhitelist={['*']}
           source={{ html: htmlContent }}
@@ -418,66 +426,94 @@ const ShiftLocationMap = ({
   }
 
   return (
-    <View style={[styles.container, { borderColor: theme.border, backgroundColor: theme.background }]}>
-      <View style={styles.headerRow}>
-        <MaterialCommunityIcons name="map-marker-radius" size={18} color={theme.primary} />
-        <Text style={[styles.title, { color: theme.text }]}>キャンパス上の場所</Text>
-      </View>
+    <View style={[
+      styles.container,
+      embedded && styles.containerEmbedded,
+      { borderColor: theme.border, backgroundColor: theme.background },
+    ]}>
+      {!embedded ? (
+        <>
+          <View style={styles.headerRow}>
+            <MaterialCommunityIcons name="map-marker-radius" size={18} color={theme.primary} />
+            <Text style={[styles.title, { color: theme.text }]}>キャンパス上の場所</Text>
+          </View>
 
-      <Text style={[styles.description, { color: theme.textSecondary }]}>
-        {canEdit
-          ? 'マップをドラッグして移動し、タップでピンを配置できます。ピンチで拡大・縮小できます。'
-          : '登録済みの場所と現在地を確認できます。ピンチで拡大・縮小できます。'}
-      </Text>
+          <Text style={[styles.description, { color: theme.textSecondary }]}>
+            {canEdit
+              ? 'マップをドラッグして移動し、タップでピンを配置できます。ピンチで拡大・縮小できます。'
+              : '登録済みの場所と現在地を確認できます。ピンチで拡大・縮小できます。'}
+          </Text>
+        </>
+      ) : null}
 
       <View style={[styles.mapShell, { height }]}>
         {Platform.OS === 'web' ? (
-          <View style={[styles.mapContainer, { height }]}>
+          <View style={[styles.mapContainer, embedded && styles.mapContainerEmbedded, { height }]}>
             <div
               ref={mapContainerRef}
-              style={{ width: '100%', height: '100%', borderRadius: 12 }}
+              style={{ width: '100%', height: '100%', borderRadius: embedded ? 0 : 12 }}
             />
           </View>
         ) : (
           renderNativeMap()
         )}
 
-        {showClearSelectionButton && onClearSelection ? (
-          <TouchableOpacity
-            style={[
-              styles.clearSelectionButton,
-              {
-                backgroundColor: `${theme.primary}18`,
-                borderColor: theme.primary,
-              },
-            ]}
-            onPress={onClearSelection}
-            activeOpacity={0.8}
-          >
-            <MaterialCommunityIcons name="close-circle-outline" size={18} color={theme.primary} />
-            <Text style={[styles.clearSelectionText, { color: theme.primary }]}>選択解除</Text>
-          </TouchableOpacity>
-        ) : null}
+        <View style={styles.mapActions}>
+          {showFullscreenButton && onFullscreenPress ? (
+            <TouchableOpacity
+              style={[
+                styles.mapActionButton,
+                {
+                  backgroundColor: `${theme.primary}18`,
+                  borderColor: theme.primary,
+                },
+              ]}
+              onPress={onFullscreenPress}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons name="fullscreen" size={18} color={theme.primary} />
+              <Text style={[styles.mapActionText, { color: theme.primary }]}>全画面</Text>
+            </TouchableOpacity>
+          ) : null}
+          {showClearSelectionButton && onClearSelection ? (
+            <TouchableOpacity
+              style={[
+                styles.mapActionButton,
+                {
+                  backgroundColor: `${theme.primary}18`,
+                  borderColor: theme.primary,
+                },
+              ]}
+              onPress={onClearSelection}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons name="close-circle-outline" size={18} color={theme.primary} />
+              <Text style={[styles.mapActionText, { color: theme.primary }]}>選択解除</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
 
-      <View style={styles.legendRow}>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.normal }]} />
-          <Text style={[styles.legendText, { color: theme.text }]}>場所</Text>
+      {showLegend ? (
+        <View style={styles.legendRow}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.normal }]} />
+            <Text style={[styles.legendText, { color: theme.text }]}>場所</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.selected }]} />
+            <Text style={[styles.legendText, { color: theme.text }]}>選択中</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.highlighted }]} />
+            <Text style={[styles.legendText, { color: theme.text }]}>現在地登録先</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.draft }]} />
+            <Text style={[styles.legendText, { color: theme.text }]}>新規</Text>
+          </View>
         </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.selected }]} />
-          <Text style={[styles.legendText, { color: theme.text }]}>選択中</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.highlighted }]} />
-          <Text style={[styles.legendText, { color: theme.text }]}>現在地登録先</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.draft }]} />
-          <Text style={[styles.legendText, { color: theme.text }]}>新規</Text>
-        </View>
-      </View>
+      ) : null}
     </View>
   );
 };
@@ -485,6 +521,8 @@ const ShiftLocationMap = ({
 const styles = StyleSheet.create({
   /** 外枠コンテナ */
   container: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 10 },
+  /** 埋め込み表示時の外枠 */
+  containerEmbedded: { borderWidth: 0, borderRadius: 0, padding: 0, gap: 0 },
   /** ヘッダー行 */
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   /** セクションタイトル */
@@ -495,12 +533,19 @@ const styles = StyleSheet.create({
   mapShell: { position: 'relative' },
   /** マップ表示エリア */
   mapContainer: { borderRadius: 12, overflow: 'hidden', minHeight: 300 },
+  /** 埋め込み時のマップ表示エリア */
+  mapContainerEmbedded: { borderRadius: 0 },
   /** 選択解除ボタン */
-  clearSelectionButton: {
+  mapActions: {
     position: 'absolute',
     top: 10,
     right: 10,
     zIndex: 20,
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+  /** マップ操作ボタン */
+  mapActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -514,8 +559,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
   },
-  /** 選択解除テキスト */
-  clearSelectionText: {
+  /** マップ操作ボタンテキスト */
+  mapActionText: {
     fontSize: 12,
     fontWeight: '700',
   },
