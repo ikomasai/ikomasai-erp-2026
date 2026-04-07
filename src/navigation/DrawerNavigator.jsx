@@ -20,7 +20,7 @@ import Item2Screen from '../features/item2/screens/Item2Screen';
 import Item3Screen from '../features/item3/screens/Item3Screen';
 import Item4Screen from '../features/item4/screens/Item4Screen';
 import Item5Screen from '../features/item5/screens/Item5Screen';
-import Item6Screen from '../features/item6/screens/Item6Screen';
+import KoseibuLocationScreen from '../features/item6/screens/KoseibuLocationScreen';
 import Item7Screen from '../features/item7/screens/Item7Screen';
 import Item8Screen from '../features/item8/screens/Item8Screen';
 import Item9Screen from '../features/item9/screens/Item9Screen';
@@ -203,7 +203,7 @@ const WrappedItem2Screen = createWrappedScreen(Item2Screen, '項目2');
 const WrappedItem3Screen = createWrappedScreen(Item3Screen, '項目3');
 const WrappedItem4Screen = createWrappedScreen(Item4Screen, '落とし物検索');
 const WrappedItem5Screen = createWrappedScreen(Item5Screen, '迷子検索');
-const WrappedItem6Screen = createWrappedScreen(Item6Screen, '項目6');
+const WrappedItem6Screen = createWrappedScreen(KoseibuLocationScreen, '厚生部場所管理');
 const WrappedItem7Screen = createWrappedScreen(Item7Screen, 'アクセス権限制御');
 const WrappedItem8Screen = createWrappedScreen(Item8Screen, '項目8');
 const WrappedItem9Screen = createWrappedScreen(Item9Screen, '実長機能');
@@ -264,7 +264,7 @@ const DrawerNavigator = () => {
       <Drawer.Screen name="Item3" component={WrappedItem3Screen} />
       <Drawer.Screen name="Item4" component={WrappedItem4Screen} options={{ title: '落とし物検索' }} />
       <Drawer.Screen name="Item5" component={WrappedItem5Screen} options={{ title: '迷子検索' }} />
-      <Drawer.Screen name="Item6" component={WrappedItem6Screen} />
+      <Drawer.Screen name="Item6" component={WrappedItem6Screen} options={{ title: '厚生部場所管理' }}/>
       <Drawer.Screen name="Item7" component={WrappedItem7Screen} options={{ title: 'アクセス権限制御' }} />
       <Drawer.Screen name="Item8" component={WrappedItem8Screen} />
       <Drawer.Screen name="Item9" component={WrappedItem9Screen} />
