@@ -90,7 +90,7 @@ const SequentialInfo = ({ sequential }) => {
           <Text style={[styles.infoValue, { color: theme.text }]}>{sequential.waitingCount}</Text>
         </View>
         <View style={[styles.infoItem, { backgroundColor: theme.surface, borderRadius: theme.borderRadius }]}>
-          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>1番号あたり</Text>
+          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>1グループあたり</Text>
           <Text style={[styles.infoValue, { color: theme.text }]}>{sequential.estimatedWaitPerNumber}分</Text>
         </View>
       </View>
