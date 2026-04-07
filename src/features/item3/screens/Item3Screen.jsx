@@ -358,6 +358,15 @@ const Item3Screen = ({ navigation }) => {
       {/* コンテンツ */}
       <ScrollView contentContainerStyle={styles.content}>
         <View style={[styles.filterContainer, { backgroundColor: theme.surface, borderRadius: theme.borderRadius, shadowOpacity: theme.shadowOpacity }]}>
+          <View style={styles.filterHeaderRow}>
+            <Text style={[styles.filterHeaderTitle, { color: theme.text }]}>表示フィルタ</Text>
+            <TouchableOpacity
+              style={[styles.filterRefreshButton, { backgroundColor: theme.primary, borderRadius: theme.borderRadius }]}
+              onPress={refresh}
+            >
+              <Text style={styles.filterRefreshText}>更新</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.filterRow}>
             <View style={styles.filterGroup}>
               <Text style={[styles.searchLabel, { color: theme.textSecondary }]}>{SCREEN_LABELS.filterLabel}</Text>
@@ -686,6 +695,26 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 6,
     elevation: 2,
+  },
+  filterHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  filterHeaderTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  filterRefreshButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+  },
+  filterRefreshText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   filterRow: {
     flexDirection: 'row',
