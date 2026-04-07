@@ -1,15 +1,19 @@
-# Project Guidelines
+---
+applyTo: "**"
+---
+
+# 生駒祭 ERP 2026 — GitHub Copilot ガイド
 
 ## 必読ドキュメント
 
 コードを書く前に次をこの順で確認する。
 
-- `docs/AI用プロンプト/AGENTS.md`
-- `docs/アプリ理解.md`
+- `docs/AI用プロンプト/AGENTS.md` — AI 共通入口
+- `docs/アプリ理解.md` — アプリ全体の理解を集約した基準ドキュメント
 - `docs/管理部統合システム仕様書.md`（`item12`〜`item16` / `support` を触る場合は最優先）
-- `docs/プロジェクト仕様書.md`
-- `docs/AI用プロンプト/supabaseスキーマ参照.md`
-- `.mcp.json`
+- `docs/プロジェクト仕様書.md` — 機能要件・画面設計・DB設計
+- `docs/AI用プロンプト/supabaseスキーマ参照.md` — 全49テーブルの詳細スキーマ
+- `.mcp.json` — MCP サーバー設定
 
 現在ここで主に開発しているのは企画管理部統合システムであり、通常編集対象は `item12`〜`item16` と `src/features/support`。
 
@@ -23,11 +27,11 @@
 
 ## アーキテクチャ
 
-### エントリーフロー
+### エントリーポイント
 
 ```
-index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
-  └→ 認証済み: DrawerNavigator（企画・屋台一覧, Item2〜10, Item12〜16, JimuShift, Settings, Admin, Notifications）
+index.js → App.js → GestureHandlerRootView → AuthProvider → ThemeProvider → TerminalProvider → FontLoaderProvider → AppNavigator
+  └→ 認証済み: DrawerNavigator（企画・屋台一覧, TimeSchedule, Item2〜10, Item12〜16, JimuShift, Settings, Admin, Notifications）
   └→ 未認証: LoginScreen
   └→ 初回ログイン: PasswordChangeModal
 ```
@@ -41,18 +45,26 @@ index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
 - `hooks/` — カスタムフック
 - `constants.js` — 機能固有定数
 
-機能一覧: 01_Events&Stalls_list, item2〜item10, item12〜item16, auth, support, jimu-shift, settings, admin, notifications
+機能一覧: 01_Events&Stalls_list, TimeSchedule, item2〜item10, item12〜item16, auth, support, jimu-shift, settings, admin, notifications
 
 ### 共有レイヤー
 
-- `src/shared/contexts/` — AuthContext, ThemeContext
-- `src/shared/components/` — ScreenErrorBoundary
-- `src/shared/services/` — notificationService, webPushService, themeSettingsService
-- `src/services/supabase/` — client.js, authService, userService, permissionService
+- `src/shared/contexts/` — AuthContext, ThemeContext, TerminalContext
+- `src/shared/components/` — ScreenErrorBoundary, EmptyState, FontLoaderProvider, OfflineBanner, PlaceholderContent, SkeletonLoader, ThemedButton/Card/Header/Text, ToastMessage, icons/
+- `src/shared/hooks/` — useTheme, useDraftStorage, usePushNavigationListener, useWebPushDebugListener
+- `src/shared/services/` — notificationService, webPushService, themeSettingsService, edgeFunctionAuthService, supportWorkflowNotificationService
+- `src/shared/utils/` — validation, notificationNavigation, organizationEventList, serviceWorker, themeTokens
+- `src/services/supabase/` — client.js, authService, userService, permissionService, eventService, organizationService, organizationEventService, evaluationService, keyLoanService, keyMasterService, keyReservationService, patrolCheckService, patrolTaskService, prizeDistributionService, radioLogService, supportNotificationService, supportTicketService, ticketAttachmentService
 
-### Edge Functions（12個、`supabase/functions/`）
+### Edge Functions（3個）
 
-dispatch-notification（Bearer/x-internal-notify-token）、push-subscription（Bearer+getUser）、verify-admin-password、update-password、import-organizations、import-projects、digital_tickets、delete-submission、review、submit、sandbox、test-drive
+| slug | 目的 | 認証 |
+|------|------|------|
+| `dispatch-notification` | プッシュ通知配信 | Bearer / x-internal-notify-token |
+| `push-subscription` | Web Push 購読管理 | Bearer + supabase.auth.getUser |
+| `push-delivery-receipt` | Push 配信レシート処理 | 独自検証 |
+
+共通モジュール: `_shared/`（CORS設定等）
 
 ### レスポンシブ
 
@@ -97,23 +109,20 @@ DrawerNavigator でブレークポイント768px。PC版は常時サイドバー
 - 環境変数は `.env.example` 基準。クライアント参照は `EXPO_PUBLIC_` プレフィックス付きのみ
 - 秘密値（`WEB_PUSH_VAPID_PRIVATE_KEY`, `INTERNAL_NOTIFY_TOKEN`, `SUPABASE_SERVICE_ROLE_KEY`）はクライアントコードに置かない
 - Edge Functions の認証要件を維持: 無認証エンドポイント追加禁止
-- `.env` ファイルを直接読み取らない
 
-## 利用可能な MCP サーバー
+## MCP サーバー
 
-本プロジェクトには以下のMCPサーバーが設定済み（`.mcp.json`）。MCP対応ツールで利用可能。
+本プロジェクトには7つのMCPサーバーが設定済み（`.mcp.json`）。MCP対応ツールで利用可能。
 
-| MCP サーバー | 用途 |
+| サーバー | 用途 |
 |---|---|
 | `supabase` | DB管理・テーブル参照・マイグレーション実行 |
-| `context7` | React Native / Expo / Supabase 公式ドキュメント検索 |
+| `context7` | ライブラリ公式ドキュメント検索 |
 | `sequential-thinking` | 複雑な問題の段階的思考 |
-| `playwright` | ブラウザ自動テスト（Web版） |
-| `chrome-devtools` | ブラウザデバッグ・ネットワーク監視 |
-| `drawio` | アーキテクチャ図・ER図の作成 |
+| `playwright` | ブラウザ自動テスト |
+| `chrome-devtools` | ブラウザデバッグ |
+| `drawio` | 図表作成 |
 | `serena` | IDEコード支援 |
-
-ライブラリのAPI仕様が不明な場合は、推測せず公式ドキュメントを確認すること。
 
 ## Git 運用
 
@@ -122,23 +131,11 @@ DrawerNavigator でブレークポイント768px。PC版は常時サイドバー
 
 ## 実装ワークフロー
 
-1. **仕様確認** → `docs/プロジェクト仕様書.md` の該当セクション
+1. **仕様確認** → `docs/プロジェクト仕様書.md`
 2. **探索** → 関連ファイル・既存パターン・ナビゲーション構造を把握
-3. **計画** → 変更ファイル一覧・新規ファイル命名・DB変更計画
-   - 3ファイル以上の変更: 計画を提示し承認を得てから実装
-4. **実装** → 規約遵守・エラーハンドリング・1機能内完結
-   - 全関数に JSDoc 日本語コメントを記載（処理内容・引数・戻り値）
-   - 変数宣言にもコメントを付与し、人間がコードリーディングで処理を理解できる状態にする
-   - 複雑なロジックにはインラインコメントで「なぜ」を説明
-5. **コミット** → `[add/fix/update/remove/docs]` 形式・論理単位で原子的
-
-### Edge Function 変更時
-
-1. `supabase/functions/{name}/index.ts` 編集 → 2. `_shared/cors.ts` 確認 → 3. 認証要件維持 → 4. デプロイ: `supabase functions deploy {name}`
-
-### DB スキーマ変更時
-
-1. 現状確認 → 2. マイグレーションSQL作成 → 3. RLSポリシー確認 → 4. サービスファイル更新 → 5. ドキュメント更新
+3. **計画** → 3ファイル以上の変更は計画を提示し承認を得てから実装
+4. **実装** → 規約遵守・全関数にJSDoc日本語コメント
+5. **コミット** → `[add/fix/update/remove/docs]` 形式
 
 ## DB スキーマ概要（49 テーブル）
 
@@ -152,7 +149,6 @@ DrawerNavigator でブレークポイント768px。PC版は常時サイドバー
 - **臨時ヘルプ (2):** rinji_help_recruits, rinji_help_applications
 - **常設内 (8):** josenai_profiles, josenai_organizations, josenai_projects, josenai_submissions, josenai_media_specs, josenai_check_items, josenai_rule_documents, josenai_app_settings
 - **シフト・その他 (2):** shift_change_requests, radio_logs
-- **RLS OFF:** user_profiles, user_roles, notifications, notification_recipients, push_subscriptions, departments
 
 ## 禁止事項
 
@@ -166,5 +162,5 @@ DrawerNavigator でブレークポイント768px。PC版は常時サイドバー
 8. APIキー・パスワードのハードコード
 9. try-catch でのエラー握りつぶし
 10. StyleSheet 以外のスタイリング
-11. ライブラリAPIの推測使用（公式ドキュメントを確認すること）
-12. 計画なしの大規模変更（3ファイル以上の変更は計画を提示すること）
+11. ライブラリAPIの推測使用
+12. 計画なしの大規模変更

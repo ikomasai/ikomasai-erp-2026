@@ -12,20 +12,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { PATROL_TASK_TYPES } from '../../../services/supabase/patrolTaskService';
 import { EVALUATION_STATUSES } from '../../../services/supabase/evaluationService';
 import SkeletonLoader from '../../../shared/components/SkeletonLoader';
 import EmptyState from '../../../shared/components/EmptyState';
-
-/** タスク種別表示名 */
-const TASK_TYPE_LABELS = {
-  [PATROL_TASK_TYPES.CONFIRM_START]: '企画開始確認',
-  [PATROL_TASK_TYPES.CONFIRM_END]: '企画終了確認',
-  [PATROL_TASK_TYPES.LOCK_CHECK]: '施錠確認',
-  [PATROL_TASK_TYPES.EMERGENCY_SUPPORT]: '緊急対応',
-  [PATROL_TASK_TYPES.ROUTINE_PATROL]: '定常巡回',
-  [PATROL_TASK_TYPES.OTHER]: 'その他',
-};
 
 /** 評価ステータス表示名 */
 const EVALUATION_STATUS_LABELS = {
@@ -69,9 +58,6 @@ const PatrolEvaluationForm = ({
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>企画評価入力</Text>
-          <Text style={[styles.sectionSubTitle, { color: theme.textSecondary }]}>
-            完了済みタスクを選び、現地の質を短く明確に残します。
-          </Text>
         </View>
         <TouchableOpacity
           style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
@@ -87,16 +73,8 @@ const PatrolEvaluationForm = ({
           { backgroundColor: theme.background },
         ]}
       >
-        <Text style={[styles.targetLabel, { color: theme.textSecondary }]}>評価対象</Text>
         <Text style={[styles.targetTitle, { color: theme.text }]}>
           {selectedTask ? selectedTask.event_name || '企画名未設定' : '未選択'}
-        </Text>
-        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-          {selectedTask
-            ? `${TASK_TYPE_LABELS[selectedTask.task_type] || selectedTask.task_type} / ${
-                selectedTask.event_location || selectedTask.location_text || '場所未設定'
-              }`
-            : 'タスク一覧で完了済みの案件を選択してください'}
         </Text>
       </View>
 
@@ -245,10 +223,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
-  sectionSubTitle: {
-    fontSize: 12,
-    lineHeight: 18,
-  },
   label: {
     fontSize: 13,
     fontWeight: '800',
@@ -266,18 +240,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
-  targetLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
   targetTitle: {
     fontSize: 18,
     fontWeight: '800',
     lineHeight: 24,
-  },
-  ticketMeta: {
-    fontSize: 12,
-    lineHeight: 18,
   },
   /** 更新ボタン: primary薄め背景 / borderWidth削除 */
   refreshButton: {
