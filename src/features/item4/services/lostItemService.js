@@ -66,7 +66,8 @@ export const fetchAllLostItemData = async () => {
  *
  * CSV列構成:
  *   A(0): 識別タグ, B(1): 写真=IMAGE()【CSV空文字・スキップ】, C(2): 拾得物名, D(3): 拾得時間,
- *   E(4): 発見場所, F(5): 預かり場所, G(6): 学籍番号（除外）, H(7): 返却日, I(8): 写真URL（プレーンテキスト）
+ *   E(4): 発見場所, F(5): 預かり場所, G(6): 学籍番号（除外）, H(7): 返却日, I(8): 写真URL（プレーンテキスト）,
+ *   J(9): 学生部預かり（チェックボックス: TRUE/FALSE）
  *
  * @param {string[][]} rawValues - CSVパース後の2次元配列
  * @param {boolean} isUrgent - 緊急フラグ
@@ -97,6 +98,10 @@ export const parseLostItems = (rawValues, isUrgent) => {
       const returnDate = (row[7] || '').trim();
       /** 返却済みかどうか */
       const isReturned = returnDate.length > 0;
+      /** 学生部預かりフラグ（J列チェックボックス: "TRUE" 文字列 = ON） */
+      const isStudentDept = (row[9] || '').trim().toUpperCase() === 'TRUE';
+      /** 実際の預かり場所（学生部預かりがONなら「学生部預かり」に上書き） */
+      const resolvedStorageLocation = isStudentDept ? '学生部預かり' : storageLocation;
 
       return {
         tag,
@@ -104,10 +109,11 @@ export const parseLostItems = (rawValues, isUrgent) => {
         itemName,
         foundTime,
         location,
-        storageLocation,
+        storageLocation: resolvedStorageLocation,
         returnDate,
         isReturned,
         isUrgent,
+        isStudentDept,
       };
     })
     .filter((item) => !item.isReturned); // 返却済みは表示対象外

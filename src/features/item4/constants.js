@@ -33,6 +33,8 @@ export const STATUS_FILTERS = {
   HOLDING: 'holding',
   /** 返却済み / 対応済み（返却日あり） */
   RETURNED: 'returned',
+  /** 学生部預かり（J列チェックボックスがON） */
+  STUDENT_DEPT: 'student_dept',
 };
 
 /** ステータスフィルタのラベル */
@@ -40,6 +42,7 @@ export const STATUS_FILTER_LABELS = {
   [STATUS_FILTERS.ALL]: 'すべて',
   [STATUS_FILTERS.HOLDING]: '保管中',
   [STATUS_FILTERS.RETURNED]: '返却済み',
+  [STATUS_FILTERS.STUDENT_DEPT]: '学生部預かり',
 };
 
 /** Google Drive画像サムネイル取得用ベースURL */

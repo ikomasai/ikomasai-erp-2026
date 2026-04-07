@@ -80,9 +80,10 @@ const formatShiftDate = (dateString) => {
  * シフト変更申請履歴画面コンポーネント（祭実長・部長向け）
  * @param {Object} props - コンポーネントプロパティ
  * @param {string} props.userId - ログインユーザーID
+ * @param {number} [props.refreshTrigger] - 親からの強制リロードトリガー（値が変わるたびにリロード）
  * @returns {JSX.Element} 申請履歴画面
  */
-const ShiftChangeHistoryScreen = ({ userId }) => {
+const ShiftChangeHistoryScreen = ({ userId, refreshTrigger }) => {
   /** テーマ */
   const { theme } = useTheme();
   /** 申請一覧 */
@@ -114,7 +115,7 @@ const ShiftChangeHistoryScreen = ({ userId }) => {
 
   useEffect(() => {
     loadRequests();
-  }, [loadRequests]);
+  }, [loadRequests, refreshTrigger]);
 
   /**
    * フィルター適用後の申請一覧
@@ -130,8 +131,26 @@ const ShiftChangeHistoryScreen = ({ userId }) => {
   const renderItem = ({ item }) => {
     /** ステータス表示設定 */
     const statusConfig = getStatusConfig(item.status);
-    /** シフト交換（true）か移動（false）かを判定 */
-    const isSwap = !!item.destination_area_name;
+    /** 救援要請かどうか（移動先メンバーなし） */
+    const isRescue = !item.destination_member_name;
+    /** シフト交換（true）か移動（false）かを判定（救援要請の場合は使わない） */
+    const isSwap = !isRescue && !!item.destination_area_name;
+
+    /**
+     * 申請種別バッジの色設定を返す
+     * @returns {{ color: string, backgroundColor: string, label: string }}
+     */
+    const getChangeTypeConfig = () => {
+      if (isRescue) {
+        return { color: '#E65100', backgroundColor: '#FFF3E0', label: '救援要請' };
+      }
+      if (isSwap) {
+        return { color: '#1565C0', backgroundColor: '#E3F2FD', label: '交換' };
+      }
+      return { color: '#6A1B9A', backgroundColor: '#F3E5F5', label: '移動' };
+    };
+    /** 申請種別バッジ設定 */
+    const changeTypeConfig = getChangeTypeConfig();
 
     return (
       <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -146,12 +165,12 @@ const ShiftChangeHistoryScreen = ({ userId }) => {
             style={[
               styles.changeTypeBadge,
               {
-                color: isSwap ? '#1565C0' : '#6A1B9A',
-                backgroundColor: isSwap ? '#E3F2FD' : '#F3E5F5',
+                color: changeTypeConfig.color,
+                backgroundColor: changeTypeConfig.backgroundColor,
               },
             ]}
           >
-            {isSwap ? '交換' : '移動'}
+            {changeTypeConfig.label}
           </Text>
         </View>
 
@@ -171,13 +190,17 @@ const ShiftChangeHistoryScreen = ({ userId }) => {
           <Text style={[styles.shiftArrowText, { color: theme.textSecondary }]}>↕</Text>
           <View style={styles.shiftRow}>
             <Text style={[styles.shiftLabel, { color: theme.textSecondary }]}>
-              {isSwap ? '交換先' : '移動先'}
+              {isRescue ? '対応' : isSwap ? '交換先' : '移動先'}
             </Text>
-            <Text style={[styles.shiftValue, { color: theme.text }]}>
-              {item.destination_member_name}さん
-              {isSwap
-                ? `・${item.destination_time_slot}・${item.destination_area_name}`
-                : '（シフトなし）'}
+            <Text style={[
+              styles.shiftValue,
+              { color: isRescue ? changeTypeConfig.color : theme.text },
+            ]}>
+              {isRescue
+                ? '救援要請（事務部へ手配依頼）'
+                : isSwap
+                  ? `${item.destination_member_name}さん・${item.destination_time_slot}・${item.destination_area_name}`
+                  : `${item.destination_member_name}さん（シフトなし）`}
             </Text>
           </View>
         </View>
@@ -250,10 +273,6 @@ const ShiftChangeHistoryScreen = ({ userId }) => {
             </Text>
           </TouchableOpacity>
         ))}
-        {/* 更新ボタン */}
-        <TouchableOpacity style={styles.refreshButton} onPress={loadRequests}>
-          <Text style={[styles.refreshButtonText, { color: theme.primary }]}>↺</Text>
-        </TouchableOpacity>
       </View>
 
       {/* ローディング */}
@@ -326,14 +345,6 @@ const styles = StyleSheet.create({
   filterButtonText: {
     fontSize: 13,
     fontWeight: '500',
-  },
-  refreshButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  refreshButtonText: {
-    fontSize: 20,
-    fontWeight: '600',
   },
   centerContainer: {
     alignItems: 'center',

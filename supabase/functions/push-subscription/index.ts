@@ -1,6 +1,28 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { corsHeaders, createJsonResponse } from '../_shared/cors.ts';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-notify-token',
+  'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS',
+};
+
+/**
+ * JSONレスポンスを返す
+ * push-subscription 単体で完結させ、Supabase MCP のバンドル時に sibling import で失敗しないようにする。
+ * @param {unknown} body - レスポンスボディ
+ * @param {number} status - HTTPステータス
+ * @returns {Response} JSONレスポンス
+ */
+const createJsonResponse = (body: unknown, status = 200) => {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'application/json',
+    },
+  });
+};
 
 /**
  * Supabaseサービスロールクライアントを作成する
@@ -18,6 +40,32 @@ const createServiceClient = () => {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
+    },
+  });
+};
+
+/**
+ * リクエストヘッダー付きの認証用 Supabase クライアントを作成する
+ * @param {Request} request - リクエスト
+ * @returns {import('@supabase/supabase-js').SupabaseClient} 認証用クライアント
+ */
+const createRequestAuthClient = (request: Request) => {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('SUPABASE_URL または SUPABASE_ANON_KEY が未設定です');
+  }
+
+  return createClient(supabaseUrl, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: request.headers.get('authorization') ?? '',
+      },
     },
   });
 };
@@ -68,6 +116,32 @@ const validateSubscription = (subscription: unknown) => {
   return { endpoint, p256dh, auth };
 };
 
+/**
+ * 同一ユーザーの古いPush購読を削除する
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase - Supabaseクライアント
+ * @param {string} userId - ユーザーID
+ * @param {string} currentEndpoint - 現在保持したいendpoint
+ * @returns {Promise<number>} 削除件数
+ */
+const deleteStaleSubscriptions = async (
+  supabase: ReturnType<typeof createServiceClient>,
+  userId: string,
+  currentEndpoint: string
+) => {
+  const { error, count } = await supabase
+    .from('push_subscriptions')
+    .delete({ count: 'exact' })
+    .eq('user_id', userId)
+    .neq('endpoint', currentEndpoint);
+
+  if (error) {
+    console.error('stale push subscription delete error:', error);
+    throw new Error('Failed to delete stale subscriptions');
+  }
+
+  return count ?? 0;
+};
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -84,10 +158,12 @@ Deno.serve(async (request) => {
       return createJsonResponse({ error: 'Authorization header is required' }, 401);
     }
 
+    /** 認証用クライアント */
+    const authClient = createRequestAuthClient(request);
     const {
       data: { user },
       error: userError,
-    } = await supabase.auth.getUser(token);
+    } = await authClient.auth.getUser();
 
     if (userError || !user) {
       return createJsonResponse({ error: 'Invalid user token' }, 401);
@@ -101,6 +177,8 @@ Deno.serve(async (request) => {
         return createJsonResponse({ error: 'Invalid subscription payload' }, 400);
       }
 
+      /** 現在時刻 */
+      const now = new Date().toISOString();
       const { error } = await supabase
         .from('push_subscriptions')
         .upsert(
@@ -110,7 +188,7 @@ Deno.serve(async (request) => {
               endpoint: validated.endpoint,
               p256dh: validated.p256dh,
               auth: validated.auth,
-              updated_at: new Date().toISOString(),
+              updated_at: now,
             },
           ],
           { onConflict: 'endpoint' }
@@ -121,7 +199,10 @@ Deno.serve(async (request) => {
         return createJsonResponse({ error: 'Failed to save subscription' }, 500);
       }
 
-      return createJsonResponse({ success: true });
+      /** 古い購読の削除件数 */
+      const removedCount = await deleteStaleSubscriptions(supabase, user.id, validated.endpoint);
+
+      return createJsonResponse({ success: true, removedCount });
     }
 
     const endpoint = payload?.endpoint;

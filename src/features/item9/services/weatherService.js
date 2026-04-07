@@ -1,9 +1,5 @@
-import './weatherService.test'; // デバッグ用
-
 const API_KEY = process.env.EXPO_PUBLIC_OPENWEATHERMAP_API_KEY || 'demo';
 const BASE_URL = 'https://api.openweathermap.org/data/2.5';
-
-console.log('Weather Service - API_KEY:', API_KEY); // デバッグ
 
 export const weatherService = {
   // 現在の天気取得（降水量含む）

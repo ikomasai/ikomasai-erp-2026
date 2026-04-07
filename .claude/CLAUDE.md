@@ -5,9 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 必読ドキュメント
 
 コードを書く前に必ず確認:
+- `docs/AI用プロンプト/AGENTS.md` — AI 共通入口。必読順と現在の編集対象
+- `docs/アプリ理解.md` — アプリ全体の理解を集約した基準ドキュメント
+- `docs/管理部統合システム仕様書.md` — 現在の主開発対象である企画管理部統合システムの仕様
 - `docs/プロジェクト仕様書.md` — 機能要件・画面設計・DB設計・API設計
 - `docs/AI用プロンプト/supabaseスキーマ参照.md` — 全49テーブルの詳細スキーマ
 - `.mcp.json` — 利用可能なMCPサーバー設定（下記「MCP サーバー活用ガイド」参照）
+
+現在ここで主に開発しているのは企画管理部統合システムであり、通常編集対象は `item12`〜`item16` と `src/features/support`。
 
 ## 技術スタック
 
@@ -20,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 開発コマンド
 
 ```bash
-npm start              # Expo 開発サーバー起動
+npx expo start -c      # Expo 開発サーバー起動（キャッシュクリア付き）
 npm run web            # Web版起動 + 地震モニター同時起動
 npm run web-only       # Web版のみ起動
 npm run ios            # iOS起動
@@ -35,8 +40,8 @@ npm run build          # Web版ビルド（expo export --platform web）
 ### エントリーポイント → ナビゲーション
 
 ```
-index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
-  └→ 認証済み: DrawerNavigator（Item1〜10, JimuShift, Settings, Admin, Notifications）
+index.js → App.js → GestureHandlerRootView → AuthProvider → ThemeProvider → TerminalProvider → FontLoaderProvider → AppNavigator
+  └→ 認証済み: DrawerNavigator（企画・屋台一覧, TimeSchedule, Item2〜10, Item12〜16, JimuShift, Settings, Admin, Notifications）
   └→ 未認証: LoginScreen
   └→ 初回ログイン: PasswordChangeModal
 ```
@@ -50,31 +55,26 @@ index.js → App.js → AuthProvider → ThemeProvider → AppNavigator
 - `hooks/` — カスタムフック
 - `constants.js` — 機能固有の定数
 
-現在の機能一覧: item1〜item10, auth, jimu-shift, settings, admin, notifications
+現在の機能一覧: 01_Events&Stalls_list, TimeSchedule, item2〜item10, item12〜item16, auth, support, jimu-shift, settings, admin, notifications
 
 ### 共有レイヤー
 
-- `src/shared/contexts/` — AuthContext（認証状態管理）、ThemeContext（テーマ管理）
-- `src/shared/components/` — ScreenErrorBoundary（全画面をError Boundaryでラップ）
-- `src/shared/services/` — notificationService, webPushService, themeSettingsService
-- `src/services/supabase/` — client.js（Supabaseクライアント）、authService, userService, permissionService
+- `src/shared/contexts/` — AuthContext（認証状態管理）、ThemeContext（テーマ管理）、TerminalContext（ターミナル管理）
+- `src/shared/components/` — ScreenErrorBoundary, EmptyState, FontLoaderProvider, OfflineBanner, PlaceholderContent, SkeletonLoader, ThemedButton/Card/Header/Text, ToastMessage, icons/
+- `src/shared/hooks/` — useTheme, useDraftStorage, usePushNavigationListener, useWebPushDebugListener
+- `src/shared/services/` — notificationService, webPushService, themeSettingsService, edgeFunctionAuthService, supportWorkflowNotificationService
+- `src/shared/utils/` — validation, notificationNavigation, organizationEventList, serviceWorker, themeTokens
+- `src/services/supabase/` — client.js, authService, userService, permissionService, eventService, organizationService, organizationEventService, evaluationService, keyLoanService, keyMasterService, keyReservationService, patrolCheckService, patrolTaskService, prizeDistributionService, radioLogService, supportNotificationService, supportTicketService, ticketAttachmentService
 
-### Supabase Edge Functions（12個）
+### Supabase Edge Functions（3個）
 
 | slug | 目的 | 認証 |
 |------|------|------|
 | `dispatch-notification` | プッシュ通知配信 | Bearer / x-internal-notify-token |
 | `push-subscription` | Web Push 購読管理 | Bearer + supabase.auth.getUser |
-| `verify-admin-password` | 管理者パスワード検証 | 独自検証 |
-| `update-password` | パスワード更新 | 独自検証 |
-| `import-organizations` | 団体データ一括取込 | 独自検証 |
-| `import-projects` | 企画データ一括取込 | 独自検証 |
-| `digital_tickets` | デジタルチケット処理 | 独自検証 |
-| `delete-submission` | 常設内提出物削除 | 独自検証 |
-| `review` | 常設内レビュー | 独自検証 |
-| `submit` | 常設内提出 | 独自検証 |
-| `sandbox` | 常設内サンドボックス | 独自検証 |
-| `test-drive` | テストドライブ | 独自検証 |
+| `push-delivery-receipt` | Push 配信レシート処理 | 独自検証 |
+
+共通モジュール: `_shared/`（CORS設定等）
 
 ### レスポンシブ対応
 
