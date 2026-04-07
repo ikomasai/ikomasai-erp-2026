@@ -1,11 +1,11 @@
 /**
  * 落とし物情報カードコンポーネント
  * 一般・緊急共通で使用。写真サムネイル、拾得物名、場所、時間、ステータスを表示する
- * 写真タップでフルスクリーン表示。失敗時はプレースホルダーを表示する
+ * カード全体タップで写真フルスクリーン表示（写真がない場合はタップ無効）。失敗時はプレースホルダーを表示する
  */
 
 import React, { useState } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Modal, useWindowDimensions } from 'react-native';
 import { useTheme } from '../../../shared/hooks/useTheme';
 import { Ionicons } from '../../../shared/components/icons';
 
@@ -22,11 +22,14 @@ import { Ionicons } from '../../../shared/components/icons';
  * @param {string} props.item.returnDate - 返却日（空文字 = 保管中）
  * @param {boolean} props.item.isReturned - 返却済みフラグ
  * @param {boolean} props.item.isUrgent - 緊急フラグ
+ * @param {boolean} props.item.isStudentDept - 学生部預かりフラグ
  * @returns {JSX.Element} 落とし物カードUI
  */
 const LostItemCard = ({ item }) => {
   /** テーマオブジェクト */
   const { theme } = useTheme();
+  /** 画面幅（レスポンシブな写真幅計算に使用） */
+  const { width: windowWidth } = useWindowDimensions();
   /** 写真の読み込みに失敗したかどうか */
   const [hasImageError, setHasImageError] = useState(false);
   /** 写真フルスクリーンモーダルの表示状態 */
@@ -34,23 +37,35 @@ const LostItemCard = ({ item }) => {
   /** 写真が存在するかどうか（URLがあり、かつエラーが発生していない） */
   const hasImage = item.imageUrl && !hasImageError;
 
+  /** カード左右マージン（px） */
+  const CARD_HORIZONTAL_MARGIN = 32;
+  /** 学生部預かり時の縁色（青） */
+  const STUDENT_DEPT_BORDER_COLOR = '#2196F3';
+  /** 写真エリア幅: カード幅の1/6（最小120px） */
+  const imageWidth = Math.max(Math.floor((windowWidth - CARD_HORIZONTAL_MARGIN) / 6), 120);
+
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-      {/* 写真エリア（画像あり時はタップでフルスクリーン表示） */}
-      <View style={styles.imageContainer}>
+    <TouchableOpacity
+      style={[
+        styles.card,
+        {
+          backgroundColor: theme.surface,
+          borderColor: item.isStudentDept ? STUDENT_DEPT_BORDER_COLOR : theme.border,
+          borderWidth: item.isStudentDept ? 2 : 1,
+        },
+      ]}
+      onPress={() => hasImage && setIsModalVisible(true)}
+      activeOpacity={hasImage ? 0.7 : 1}
+    >
+      {/* 写真エリア */}
+      <View style={[styles.imageContainer, { width: imageWidth }]}>
         {hasImage ? (
-          <TouchableOpacity
-            onPress={() => setIsModalVisible(true)}
-            activeOpacity={0.9}
-            style={styles.imageTouchable}
-          >
-            <Image
-              source={{ uri: item.imageUrl }}
-              style={styles.image}
-              resizeMode="cover"
-              onError={() => setHasImageError(true)}
-            />
-          </TouchableOpacity>
+          <Image
+            source={{ uri: item.imageUrl }}
+            style={styles.image}
+            resizeMode="cover"
+            onError={() => setHasImageError(true)}
+          />
         ) : (
           <View style={[styles.imagePlaceholder, { backgroundColor: theme.background }]}>
             <Ionicons name="image-outline" size={28} color={theme.textSecondary} />
@@ -68,6 +83,11 @@ const LostItemCard = ({ item }) => {
           {item.isUrgent && (
             <View style={[styles.urgentBadge, { backgroundColor: theme.error }]}>
               <Text style={styles.urgentBadgeText}>緊急</Text>
+            </View>
+          )}
+          {item.isStudentDept && (
+            <View style={styles.studentDeptBadge}>
+              <Text style={styles.studentDeptBadgeText}>学生部預かり</Text>
             </View>
           )}
           <View
@@ -152,7 +172,7 @@ const LostItemCard = ({ item }) => {
           />
         </TouchableOpacity>
       </Modal>
-    </View>
+    </TouchableOpacity>
   );
 };
 
@@ -166,15 +186,9 @@ const styles = StyleSheet.create({
     marginVertical: 4,
     overflow: 'hidden',
   },
-  /** 写真コンテナ（幅120・高さ90 = 4:3横長比率） */
+  /** 写真コンテナ（幅はuseWindowDimensionsで動的計算・高さ90 = 最小値） */
   imageContainer: {
-    width: 120,
     minHeight: 90,
-  },
-  /** 写真タップ領域（コンテナ全体を覆う） */
-  imageTouchable: {
-    width: '100%',
-    height: '100%',
   },
   /** 写真画像 */
   image: {
@@ -216,6 +230,19 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  /** 学生部預かりバッジ */
+  studentDeptBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#2196F320',
+  },
+  /** 学生部預かりバッジテキスト */
+  studentDeptBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#2196F3',
   },
   /** ステータスバッジ */
   statusBadge: {
