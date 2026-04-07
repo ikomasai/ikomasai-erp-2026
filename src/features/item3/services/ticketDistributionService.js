@@ -44,26 +44,127 @@ const createCallStatusMap = (callStatusList) => {
 };
 
 /**
+ * 票券グループ一覧をイベント開催日ごとに集計する
+ * @param {Array<Object>} ticketList - 票券一覧
+ * @returns {Object} 開催日IDごとのグループ配列
+ */
+const selectTicketGroupsForCall = (ticketList) => {
+  /** グループ集計マップ */
+  const ticketGroupMap = {};
+
+  (ticketList || []).forEach((ticket) => {
+    /** 開催日ID */
+    const eventDateId = ticket.event_date_id;
+    /** グループ番号 */
+    const groupNumber = ticket.group_number;
+    /** 整理番号 */
+    const ticketNumber = ticket.ticket_number ?? 0;
+
+    if (!eventDateId || !groupNumber) {
+      return;
+    }
+
+    /** グループキー */
+    const groupKey = `${eventDateId}_${groupNumber}`;
+
+    if (!ticketGroupMap[groupKey]) {
+      ticketGroupMap[groupKey] = {
+        eventDateId,
+        groupNumber,
+        minTicket: ticketNumber,
+        maxTicket: ticketNumber,
+        count: 1,
+      };
+      return;
+    }
+
+    ticketGroupMap[groupKey].minTicket = Math.min(
+      ticketGroupMap[groupKey].minTicket,
+      ticketNumber
+    );
+    ticketGroupMap[groupKey].maxTicket = Math.max(
+      ticketGroupMap[groupKey].maxTicket,
+      ticketNumber
+    );
+    ticketGroupMap[groupKey].count += 1;
+  });
+
+  /** 開催日ごとのグループ一覧 */
+  const eventDateGroupMap = {};
+
+  Object.values(ticketGroupMap).forEach((group) => {
+    if (!eventDateGroupMap[group.eventDateId]) {
+      eventDateGroupMap[group.eventDateId] = [];
+    }
+
+    eventDateGroupMap[group.eventDateId].push({
+      group_number: group.groupNumber,
+      min_ticket: group.minTicket,
+      max_ticket: group.maxTicket,
+      count: group.count,
+    });
+  });
+
+  return eventDateGroupMap;
+};
+
+/**
+ * 推定待ち時間を計算する
+ * @param {Object} params - パラメータ
+ * @param {Array<Object>} params.ticketGroups - グループ一覧
+ * @param {number} params.currentCallNumber - 現在の呼び出し番号
+ * @param {number} params.estimatedWaitMinutes - 1グループあたり待ち時間(分)
+ * @returns {Object} 待ち時間情報
+ */
+const calculateEstimatedWaitTime = ({
+  ticketGroups,
+  currentCallNumber,
+  estimatedWaitMinutes,
+}) => {
+  /** 待ちグループ数 */
+  const waitingGroupCount = (ticketGroups || []).filter(
+    (group) => group.min_ticket > currentCallNumber
+  ).length;
+
+  /** 推定待ち時間 */
+  const totalEstimatedWaitMinutes = waitingGroupCount <= 0
+    ? 0
+    : waitingGroupCount * estimatedWaitMinutes;
+
+  return {
+    waitingGroupCount,
+    totalEstimatedWaitMinutes,
+  };
+};
+
+/**
  * 順次案内制の表示データを生成する
  * @param {Object} params - パラメータ
  * @param {Object} params.event - 企画情報
  * @param {Object} params.eventDate - 開催日情報
  * @param {Object} [params.callStatus] - 呼び出し状態
+ * @param {Array<Object>} params.ticketGroups - チケットグループ一覧
  * @returns {Object} 表示データ
  */
-const createSequentialData = ({ event, eventDate, callStatus }) => {
+const createSequentialData = ({ event, eventDate, callStatus, ticketGroups }) => {
   /** 現在の呼び出し番号 */
   const currentCallNumber = callStatus?.current_call_number ?? 0;
   /** 次の整理番号 */
   const nextTicketNumber = eventDate?.next_ticket_number ?? 1;
   /** 最後尾番号 */
   const lastTicketNumber = Math.max(nextTicketNumber - 1, 0);
-  /** 待ち人数 */
-  const waitingCount = Math.max(lastTicketNumber - currentCallNumber, 0);
-  /** 1番号あたり待ち時間 */
+  /** 1グループあたり待ち時間 */
   const estimatedWaitPerNumber = event?.estimated_wait_minutes ?? 0;
+  /** 待ち時間情報 */
+  const waitInfo = calculateEstimatedWaitTime({
+    ticketGroups,
+    currentCallNumber,
+    estimatedWaitMinutes: estimatedWaitPerNumber,
+  });
+  /** 待ちグループ数 */
+  const waitingCount = waitInfo.waitingGroupCount;
   /** 推定待ち時間 */
-  const estimatedWaitMinutes = waitingCount * estimatedWaitPerNumber;
+  const estimatedWaitMinutes = waitInfo.totalEstimatedWaitMinutes;
 
   return {
     currentCallNumber,
@@ -228,6 +329,28 @@ export const selectTicketDistributions = async () => {
   /** 呼び出し状態マップ */
   const callStatusMap = createCallStatusMap(callStatusList || []);
 
+  /** チケット一覧 */
+  const { data: ticketList, error: ticketError } = eventDateIdList.length
+    ? await supabase
+        .from('tickets')
+        .select(
+          `
+          event_date_id,
+          group_number,
+          ticket_number
+        `
+        )
+        .in('event_date_id', eventDateIdList)
+        .gt('group_number', 0)
+    : { data: [], error: null };
+
+  if (ticketError) {
+    throw ticketError;
+  }
+
+  /** 開催日ごとのチケットグループマップ */
+  const ticketGroupMap = selectTicketGroupsForCall(ticketList || []);
+
   /** 配布状況一覧 */
   const distributionList = (eventList || []).flatMap((event) => {
     /** 開催日一覧 */
@@ -254,11 +377,14 @@ export const selectTicketDistributions = async () => {
       };
 
       if (event.type === DISTRIBUTION_TYPES.SEQUENTIAL) {
+        /** チケットグループ一覧 */
+        const ticketGroups = ticketGroupMap[eventDate.id] || [];
         /** 順次案内制情報 */
         const sequentialData = createSequentialData({
           event,
           eventDate,
           callStatus,
+          ticketGroups,
         });
 
         return {
