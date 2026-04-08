@@ -134,6 +134,10 @@ const MissingChildCard = ({ child, showReporterName = false, showActionButton = 
           <Text style={[styles.value, styles.pickupValue]}>{child.pickup_location}</Text>
         </View>
       )}
+      {/*
+       * 注記: 迎え場所のスタイル（pickupLabel/pickupValue）は移動不可カード内のみで使われる。
+       * 背景は淡い赤のまま視認性を保つため、文字色は黒(#212121)で統一する。
+       */}
 
       {/* 発見時刻 */}
       <View style={styles.infoRow}>
@@ -237,14 +241,14 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginBottom: 8,
   },
-  /** 迎え場所ラベル */
+  /** 迎え場所ラベル（文字は黒で統一、背景の淡赤で強調） */
   pickupLabel: {
-    color: URGENCY_CARD_BORDER_COLOR,
+    color: '#212121',
     fontWeight: 'bold',
   },
-  /** 迎え場所値 */
+  /** 迎え場所値（文字は黒で統一、背景の淡赤で強調） */
   pickupValue: {
-    color: URGENCY_CARD_BORDER_COLOR,
+    color: '#212121',
     fontWeight: 'bold',
   },
   /** コメントボックス */

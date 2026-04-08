@@ -14,11 +14,12 @@ import MissingChildForm from '../components/MissingChildForm';
 import MissingChildConfirmModal from '../components/MissingChildConfirmModal';
 import MissingChildCard from '../components/MissingChildCard';
 import StatusChangeModal from '../components/StatusChangeModal';
+import SuccessModal from '../components/SuccessModal';
 import DeleteAllDataSection from '../components/DeleteAllDataSection';
 import DebugDatePicker from '../components/DebugDatePicker';
 import {
   ADMIN_ROLE_NAMES,
-  JITCHO_ROLE_NAME,
+  JITCHO_ROLE_NAMES,
   MISSING_CHILD_STATUS,
   MISSING_CHILD_STATUS_LABELS,
 } from '../constants';
@@ -53,11 +54,11 @@ const Item5Screen = ({ navigation, route }) => {
   /** ユーザーのロール一覧 */
   const userRoles = userInfo?.roles || [];
 
-  /** 管理ロール（実長 or 渉外部）を持つかどうか */
+  /** 管理ロール（実長 or 渉外部 or 管理者）を持つかどうか */
   const isAdmin = ADMIN_ROLE_NAMES.some((roleName) => hasRole(userRoles, roleName));
 
-  /** 実長ロールを持つかどうか（全データ削除用） */
-  const isJitcho = hasRole(userRoles, JITCHO_ROLE_NAME);
+  /** 実長相当の権限（実長 or 管理者）を持つかどうか。全データ削除などに使用 */
+  const isJitcho = JITCHO_ROLE_NAMES.some((roleName) => hasRole(userRoles, roleName));
 
   /** 選択中のタブ */
   const [activeTab, setActiveTab] = useState(TAB_REGISTER);
@@ -80,8 +81,34 @@ const Item5Screen = ({ navigation, route }) => {
   /** デバッグ用日付 */
   const [debugDate, setDebugDate] = useState(null);
 
-  /** 成功メッセージ */
-  const [successMessage, setSuccessMessage] = useState('');
+  /** 結果モーダルの表示状態 */
+  const [isResultModalVisible, setIsResultModalVisible] = useState(false);
+  /** 結果モーダルのタイトル */
+  const [resultTitle, setResultTitle] = useState('');
+  /** 結果モーダルのメッセージ */
+  const [resultMessage, setResultMessage] = useState('');
+  /** 結果モーダルのバリアント（'success' | 'error'） */
+  const [resultVariant, setResultVariant] = useState('success');
+
+  /**
+   * 結果モーダルを表示するヘルパー
+   * @param {string} title - タイトル
+   * @param {string} message - 本文
+   * @param {'success'|'error'} [variant] - 表示バリアント
+   */
+  const showSuccessModal = useCallback((title, message, variant = 'success') => {
+    setResultTitle(title);
+    setResultMessage(message);
+    setResultVariant(variant);
+    setIsResultModalVisible(true);
+  }, []);
+
+  /**
+   * 結果モーダルを閉じるハンドラ
+   */
+  const handleCloseSuccessModal = useCallback(() => {
+    setIsResultModalVisible(false);
+  }, []);
 
   const {
     myChildren,
@@ -129,17 +156,6 @@ const Item5Screen = ({ navigation, route }) => {
   }, [activeTab, userInfo?.id, isAdmin, statusFilter, fetchMyChildren, fetchAllChildren]);
 
   /**
-   * 成功メッセージを一定時間後に消す
-   */
-  useEffect(() => {
-    if (successMessage) {
-      /** 3秒後にメッセージを消すタイマー */
-      const timer = setTimeout(() => setSuccessMessage(''), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [successMessage]);
-
-  /**
    * フォーム送信時（確認モーダル表示）のハンドラ
    * @param {Object} childData - 入力された迷子情報
    */
@@ -170,13 +186,16 @@ const Item5Screen = ({ navigation, route }) => {
     setPendingChildData(null);
 
     if (success) {
-      if (notificationError) {
-        setSuccessMessage('迷子情報は登録されましたが、通知の送信に失敗しました。');
-      } else {
-        setSuccessMessage('迷子情報を登録し、通知を送信しました。');
-      }
+      showSuccessModal('登録完了', '迷子情報を登録し、通知を送信しました。');
+    } else if (notificationError) {
+      /* 通知失敗時はロールバック済み。再起動とログアウトを促す */
+      showSuccessModal(
+        '通知の送信に失敗しました',
+        '迷子情報の登録に失敗しました。\nアプリを一度再起動し、ログアウトしてから再度お試しください。',
+        'error'
+      );
     }
-  }, [pendingChildData, userInfo?.id, registerChild]);
+  }, [pendingChildData, userInfo?.id, registerChild, showSuccessModal]);
 
   /**
    * 確認モーダルで「キャンセル」を押した時のハンドラ
@@ -216,12 +235,12 @@ const Item5Screen = ({ navigation, route }) => {
     setStatusChangeTarget(null);
 
     if (success) {
-      setSuccessMessage('ステータスを更新しました。');
+      showSuccessModal('更新完了', 'ステータスを更新しました。');
       /* リストを再取得 */
       fetchAllChildren(statusFilter);
       fetchStatusCounts();
     }
-  }, [updateStatus, fetchAllChildren, fetchStatusCounts, statusFilter, statusChangeTarget, userInfo?.user_id]);
+  }, [updateStatus, fetchAllChildren, fetchStatusCounts, statusFilter, statusChangeTarget, userInfo?.user_id, showSuccessModal]);
 
   /**
    * 全データ削除時のハンドラ
@@ -229,10 +248,10 @@ const Item5Screen = ({ navigation, route }) => {
   const handleDeleteAll = useCallback(async () => {
     const success = await deleteAll();
     if (success) {
-      setSuccessMessage('全データを削除しました。');
+      showSuccessModal('削除完了', '全データを削除しました。');
       fetchStatusCounts();
     }
-  }, [deleteAll, fetchStatusCounts]);
+  }, [deleteAll, fetchStatusCounts, showSuccessModal]);
 
   /**
    * タブを描画する
@@ -458,13 +477,6 @@ const Item5Screen = ({ navigation, route }) => {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <ThemedHeader title={SCREEN_NAME} navigation={navigation} />
 
-      {/* 成功メッセージ */}
-      {successMessage !== '' && (
-        <View style={[styles.successBar, { backgroundColor: '#4CAF50' }]}>
-          <Text style={styles.successText}>{successMessage}</Text>
-        </View>
-      )}
-
       {/* エラーメッセージ */}
       {errorMessage && (
         <View style={[styles.errorBar, { backgroundColor: '#F44336' }]}>
@@ -499,6 +511,15 @@ const Item5Screen = ({ navigation, route }) => {
         onSubmit={handleStatusUpdate}
         onClose={() => { setIsStatusModalVisible(false); setStatusChangeTarget(null); }}
         isSubmitting={isSubmitting}
+      />
+
+      {/* 結果通知モーダル（登録完了・更新完了・削除完了・エラー通知で共通利用） */}
+      <SuccessModal
+        isVisible={isResultModalVisible}
+        title={resultTitle}
+        message={resultMessage}
+        variant={resultVariant}
+        onClose={handleCloseSuccessModal}
       />
     </SafeAreaView>
   );
@@ -612,18 +633,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: 'bold',
-  },
-  /** 成功メッセージバー */
-  successBar: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-  },
-  /** 成功テキスト */
-  successText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '500',
   },
   /** エラーメッセージバー */
   errorBar: {

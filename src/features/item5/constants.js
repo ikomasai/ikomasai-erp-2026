@@ -76,8 +76,11 @@ export const ADMIN_ROLE_IDS = [
 /** 管理ロール名一覧（権限判定に使用） */
 export const ADMIN_ROLE_NAMES = ['実長', '渉外部', '管理者'];
 
-/** 実長ロール名（全データ削除の権限判定に使用） */
-export const JITCHO_ROLE_NAME = '実長';
+/**
+ * 全データ削除など実長相当の強い権限を持つロール名一覧
+ * 管理者は実長と同等のアクセス権を持つためここに含める
+ */
+export const JITCHO_ROLE_NAMES = ['実長', '管理者'];
 
 /** 特徴入力のプレースホルダ */
 export const CHARACTERISTICS_PLACEHOLDER = '服装や所持品、身長など';
