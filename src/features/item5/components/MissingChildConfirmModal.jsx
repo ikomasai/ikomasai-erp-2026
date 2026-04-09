@@ -80,15 +80,16 @@ const MissingChildConfirmModal = ({ isVisible, childData, onConfirm, onCancel, i
               { backgroundColor: theme.background, borderColor: isUrgent ? URGENCY_CARD_BORDER_COLOR : theme.border },
               isUrgent && { backgroundColor: URGENCY_CARD_BACKGROUND_COLOR },
             ]}>
-              <ConfirmRow label="年齢" value={childData.age} theme={theme} />
-              <ConfirmRow label="性別" value={GENDER_LABELS[childData.gender]} theme={theme} />
-              <ConfirmRow label="特徴" value={childData.characteristics} theme={theme} />
-              <ConfirmRow label="発見場所" value={childData.discovery_location} theme={theme} />
+              <ConfirmRow label="年齢" value={childData.age} theme={theme} isUrgentContext={isUrgent} />
+              <ConfirmRow label="性別" value={GENDER_LABELS[childData.gender]} theme={theme} isUrgentContext={isUrgent} />
+              <ConfirmRow label="特徴" value={childData.characteristics} theme={theme} isUrgentContext={isUrgent} />
+              <ConfirmRow label="発見場所" value={childData.discovery_location} theme={theme} isUrgentContext={isUrgent} />
               <ConfirmRow
                 label="保護テント"
                 value={SHELTER_TENT_LABELS[childData.shelter_tent]}
                 theme={theme}
                 isHighlighted={isUrgent}
+                isUrgentContext={isUrgent}
               />
               {isUrgent && childData.pickup_location && (
                 <ConfirmRow
@@ -96,6 +97,7 @@ const MissingChildConfirmModal = ({ isVisible, childData, onConfirm, onCancel, i
                   value={childData.pickup_location}
                   theme={theme}
                   isHighlighted
+                  isUrgentContext={isUrgent}
                 />
               )}
             </View>
@@ -136,23 +138,45 @@ const MissingChildConfirmModal = ({ isVisible, childData, onConfirm, onCancel, i
 
 /**
  * 確認行コンポーネント
+ * 移動不可時は背景が淡赤固定のため、文字色はテーマによらず黒で統一する
+ * ただし isHighlighted 指定時は赤文字強調（保護テント用）
  * @param {Object} props - プロパティ
  * @param {string} props.label - ラベル
  * @param {string} props.value - 値
  * @param {Object} props.theme - テーマ
- * @param {boolean} [props.isHighlighted] - 強調表示するか
+ * @param {boolean} [props.isHighlighted] - 赤文字で強調表示するか（保護テント用）
+ * @param {boolean} [props.isUrgentContext] - 移動不可コンテキスト内か（背景が淡赤のため文字を黒固定にする）
+ * @param {boolean} [props.isBold] - 太字にするか（迎え場所など強調したい行向け）
  * @returns {JSX.Element} 確認行
  */
-const ConfirmRow = ({ label, value, theme, isHighlighted = false }) => (
-  <View style={styles.confirmRow}>
-    <Text style={[styles.confirmLabel, { color: isHighlighted ? URGENCY_CARD_BORDER_COLOR : theme.textSecondary }]}>
-      {label}
-    </Text>
-    <Text style={[styles.confirmValue, { color: isHighlighted ? URGENCY_CARD_BORDER_COLOR : theme.text }, isHighlighted && styles.highlightedText]}>
-      {value}
-    </Text>
-  </View>
-);
+const ConfirmRow = ({ label, value, theme, isHighlighted = false, isUrgentContext = false, isBold = false }) => {
+  /** ラベルの文字色 */
+  const labelColor = isHighlighted
+    ? URGENCY_CARD_BORDER_COLOR
+    : isUrgentContext
+      ? '#555555'
+      : theme.textSecondary;
+  /** 値の文字色 */
+  const valueColor = isHighlighted
+    ? URGENCY_CARD_BORDER_COLOR
+    : isUrgentContext
+      ? '#212121'
+      : theme.text;
+  return (
+    <View style={styles.confirmRow}>
+      <Text style={[styles.confirmLabel, { color: labelColor }, isBold && styles.highlightedText]}>
+        {label}
+      </Text>
+      <Text style={[
+        styles.confirmValue,
+        { color: valueColor },
+        (isHighlighted || isBold) && styles.highlightedText,
+      ]}>
+        {value}
+      </Text>
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   /** オーバーレイ */

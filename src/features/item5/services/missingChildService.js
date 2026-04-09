@@ -202,6 +202,25 @@ export const updateMissingChildStatus = async (id, status, adminComment = null, 
 };
 
 /**
+ * 指定IDの迷子情報を1件削除する（登録ロールバック用）
+ * 登録後に通知送信が失敗した場合のロールバック処理として使用する
+ * @param {string} id - 削除する迷子情報のID
+ * @returns {Promise<{error: Error|null}>} 削除結果
+ */
+export const deleteMissingChildById = async (id) => {
+  try {
+    const { error } = await getSupabaseClient()
+      .from('missing_children')
+      .delete()
+      .eq('id', id);
+
+    return { error: error ?? null };
+  } catch (error) {
+    return { error };
+  }
+};
+
+/**
  * 全迷子情報を削除する（実長のみ）
  * @returns {Promise<{data: null, error: Error|null}>} 削除結果
  */

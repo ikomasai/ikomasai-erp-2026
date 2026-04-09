@@ -210,7 +210,7 @@ const MissingChildForm = ({ onSubmit }) => {
             迎えに来て欲しい場所 <Text style={styles.required}>*</Text>
           </Text>
           <TextInput
-            style={[styles.textInput, { backgroundColor: '#FFF3F3', borderColor: '#F44336', color: theme.text }]}
+            style={[styles.textInput, { backgroundColor: '#FFF3F3', borderColor: '#F44336', color: '#212121' }]}
             value={pickupLocation}
             onChangeText={setPickupLocation}
             placeholder="例: A館1階エレベーター前"

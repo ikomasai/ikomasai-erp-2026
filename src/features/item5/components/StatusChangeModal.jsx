@@ -265,7 +265,8 @@ const StatusChangeModal = ({ isVisible, child, onSubmit, onClose, isSubmitting =
                 {/* 迎え場所（移動不可のままの場合） */}
                 {isCurrentlyUrgent && (
                   <View style={styles.pickupEditContainer}>
-                    <Text style={[styles.sectionLabel, { color: URGENCY_CARD_BORDER_COLOR, marginBottom: 8 }]}>
+                    {/* ラベル文字は黒で統一（背景の淡赤で十分に強調されるため） */}
+                    <Text style={[styles.sectionLabel, { color: '#212121', marginBottom: 8 }]}>
                       迎えに来て欲しい場所 *
                     </Text>
                     <TextInput
