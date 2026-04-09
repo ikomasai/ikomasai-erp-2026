@@ -35,7 +35,7 @@ const MARKER_COLORS = {
   normal: 'blue',
   /** 選択中・編集対象（赤） */
   selected: 'red',
-  /** 現在地登録先（緑） */
+  /** 登録中の場所（緑） */
   highlighted: 'green',
   /** 新規ドラフト（オレンジ） */
   draft: 'orange',
@@ -506,7 +506,7 @@ const ShiftLocationMap = ({
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.highlighted }]} />
-            <Text style={[styles.legendText, { color: theme.text }]}>現在地登録先</Text>
+            <Text style={[styles.legendText, { color: theme.text }]}>登録中の場所</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: LEGEND_COLORS.draft }]} />
