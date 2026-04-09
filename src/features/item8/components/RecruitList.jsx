@@ -287,6 +287,7 @@ const RecruitSummaryCard = ({
   onPress,
 }) => {
   const text = parseTitleAndDescription(recruit.description);
+  const organization = `${recruit?.head_organization || ''}`.trim();
 
   return (
     <Pressable
@@ -309,6 +310,21 @@ const RecruitSummaryCard = ({
         <Text style={[styles.title, { color: theme.text, fontWeight: theme.fontWeight }]} numberOfLines={2}>
           {text.title}
         </Text>
+        {organization ? (
+          <View
+            style={[
+              styles.organizationBadge,
+              {
+                backgroundColor: withAlpha(theme.primary, '12'),
+                borderColor: withAlpha(theme.primary, '44'),
+              },
+            ]}
+          >
+            <Text style={[styles.organizationBadgeText, { color: theme.primary }]} numberOfLines={1}>
+              {organization}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.summaryLines}>
@@ -392,6 +408,7 @@ export const RecruitList = ({
     () => formatOptional(selectedRecruit || {}),
     [selectedRecruit]
   );
+  const selectedRecruitOrganization = `${selectedRecruit?.head_organization || ''}`.trim();
 
   const canManageSelectedRecruit = Boolean(currentUserId) && selectedRecruit?.head_user_id === currentUserId;
   const isSelectedAlreadyApplied = selectedRecruit ? appliedRecruitIds.includes(selectedRecruit.id) : false;
@@ -486,9 +503,27 @@ export const RecruitList = ({
             ]}
           >
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: theme.text, fontWeight: theme.fontWeight }]} numberOfLines={2}>
-                {detailText.title}
-              </Text>
+              <View style={styles.modalHeaderTitleGroup}>
+                <Text style={[styles.modalTitle, { color: theme.text, fontWeight: theme.fontWeight }]} numberOfLines={2}>
+                  {detailText.title}
+                </Text>
+              </View>
+              {selectedRecruitOrganization ? (
+                <View
+                  style={[
+                    styles.organizationBadge,
+                    styles.modalOrganizationBadge,
+                    {
+                      backgroundColor: withAlpha(theme.primary, '12'),
+                      borderColor: withAlpha(theme.primary, '44'),
+                    },
+                  ]}
+                >
+                  <Text style={[styles.organizationBadgeText, { color: theme.primary }]} numberOfLines={1}>
+                    {selectedRecruitOrganization}
+                  </Text>
+                </View>
+              ) : null}
               <Pressable onPress={handleCloseDetail} style={styles.modalCloseButton}>
                 <Text style={[styles.modalCloseText, { color: theme.textSecondary }]}>閉じる</Text>
               </Pressable>
@@ -691,9 +726,21 @@ const styles = StyleSheet.create({
   },
   titleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     gap: 8,
-    flexWrap: 'wrap',
+  },
+  organizationBadge: {
+    maxWidth: '42%',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    flexShrink: 0,
+  },
+  organizationBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   summaryLines: {
     gap: 3,
@@ -741,20 +788,26 @@ const styles = StyleSheet.create({
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(0,0,0,0.12)',
     gap: 8,
   },
-  modalTitle: {
+  modalHeaderTitleGroup: {
     flex: 1,
+    minWidth: 0,
+  },
+  modalTitle: {
     fontSize: 17,
+  },
+  modalOrganizationBadge: {
+    maxWidth: '34%',
   },
   modalCloseButton: {
     paddingHorizontal: 8,
     paddingVertical: 6,
+    flexShrink: 0,
   },
   modalCloseText: {
     fontSize: 14,
