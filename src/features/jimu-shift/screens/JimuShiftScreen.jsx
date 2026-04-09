@@ -16,6 +16,7 @@ import {
   Modal,
   Image,
 } from 'react-native';
+import { Ionicons } from '../../../shared/components/icons';
 import { useAuth } from '../../../shared/contexts/AuthContext.js';
 import { useTheme } from '../../../shared/hooks/useTheme';
 import { hasRole } from '../../../services/supabase/permissionService.js';
@@ -71,6 +72,10 @@ const JimuShiftScreen = ({ navigation, route }) => {
   const hasInitialFocusFiredRef = useRef(false);
   /** シフト変更申請タブのリロードトリガー（Drawerフォーカス復帰時にインクリメント） */
   const [changeRequestRefreshTrigger, setChangeRequestRefreshTrigger] = useState(0);
+  /** リロードボタンが押せる状態かどうか（5秒クールダウン制御） */
+  const [canRefresh, setCanRefresh] = useState(true);
+  /** リロードボタンのクールダウンタイマー */
+  const refreshCooldownTimer = useRef(null);
 
   /** シフト変更申請タブの表示権限があるか（祭実長・部長） */
   const canAccessChangeRequest = useMemo(() => {
@@ -175,6 +180,24 @@ const JimuShiftScreen = ({ navigation, route }) => {
   useEffect(() => {
     loadShifts();
   }, [loadShifts]);
+
+  /**
+   * リロードボタンのハンドラ
+   * アクティブタブに応じてデータを再取得し、5秒間のクールダウンを設ける
+   */
+  const handleRefreshPress = useCallback(() => {
+    if (!canRefresh) {
+      return;
+    }
+    setCanRefresh(false);
+    // アクティブタブに応じたリロード処理
+    if (activeTab === 'myShift') {
+      loadShifts();
+    } else {
+      setChangeRequestRefreshTrigger((n) => n + 1);
+    }
+    refreshCooldownTimer.current = setTimeout(() => setCanRefresh(true), 5000);
+  }, [canRefresh, activeTab, loadShifts]);
 
   /**
    * ドロワーを開く
@@ -520,6 +543,24 @@ const JimuShiftScreen = ({ navigation, route }) => {
         </TouchableOpacity>
       </View>
 
+      {/* タブバーなし（一般部員向け）のリロードボタン */}
+      {!canAccessChangeRequest && !canAccessJimuTab && (
+        <View style={[styles.reloadOnlyRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+          <TouchableOpacity
+            style={[
+              styles.reloadButton,
+              { borderColor: theme.border, opacity: canRefresh ? 1 : 0.4 },
+            ]}
+            onPress={handleRefreshPress}
+            disabled={!canRefresh}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="refresh" size={18} color={theme.primary} />
+            <Text style={[styles.reloadButtonText, { color: theme.primary }]}>更新</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* タブバー（祭実長・部長・事務部のみ表示） */}
       {(canAccessChangeRequest || canAccessJimuTab) && (
         <View style={[styles.tabBar, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
@@ -606,6 +647,18 @@ const JimuShiftScreen = ({ navigation, route }) => {
               </View>
             </TouchableOpacity>
           )}
+          {/* リロードボタン（タブバー右端） */}
+          <TouchableOpacity
+            style={[
+              styles.tabReloadButton,
+              { borderLeftColor: theme.border, opacity: canRefresh ? 1 : 0.4 },
+            ]}
+            onPress={handleRefreshPress}
+            disabled={!canRefresh}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="refresh" size={18} color={theme.primary} />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -615,12 +668,16 @@ const JimuShiftScreen = ({ navigation, route }) => {
           selectedDate={changeRequestDate}
           onDateChange={setChangeRequestDate}
           refreshTrigger={changeRequestRefreshTrigger}
+          onNavigateToHistory={() => setActiveTab('requestHistory')}
         />
       )}
 
       {/* 申請履歴タブの内容（祭実長・部長向け） */}
       {canAccessChangeRequest && activeTab === 'requestHistory' && (
-        <ShiftChangeHistoryScreen userId={user?.id} />
+        <ShiftChangeHistoryScreen
+          userId={user?.id}
+          refreshTrigger={changeRequestRefreshTrigger}
+        />
       )}
 
       {/* 変更申請管理タブの内容（事務部向け） */}
@@ -818,6 +875,34 @@ const styles = StyleSheet.create({
   },
   menuButtonText: {
     fontSize: 26,
+  },
+  /* タブなし一般部員向けリロード行 */
+  reloadOnlyRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+  },
+  reloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  reloadButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  /* タブバー右端のリロードボタン */
+  tabReloadButton: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderLeftWidth: 1,
   },
   /* タブバー */
   tabBar: {

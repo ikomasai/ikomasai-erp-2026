@@ -11,6 +11,17 @@ export const RINJI_STATUS = {
 };
 
 /**
+ * 募集終了理由の内部値。
+ * - manual: 管理者が手動で終了
+ * - auto_full: 募集人数到達で自動終了
+ */
+export const RINJI_CLOSE_REASON = {
+  MANUAL: 'manual',
+  AUTO_FULL: 'auto_full',
+  AUTO_DATE_PASSED: 'auto_date_passed',
+};
+
+/**
  * 募集の任意項目に対する既定値。
  */
 export const OPTIONAL_FIELD_DEFAULTS = {

@@ -23,6 +23,7 @@ export const themeTokens = {
     border: '#E0E0E0',
     error: '#D32F2F',
     success: '#388E3C',
+    warning: '#FF9500',
     borderRadius: 8,
     shadowOpacity: 0.1,
     fontSize: {
@@ -45,6 +46,7 @@ export const themeTokens = {
     border: '#4A4A4A',
     error: '#EF5350',
     success: '#66BB6A',
+    warning: '#FFB74D',
     borderRadius: 8,
     shadowOpacity: 0.3,
     fontSize: {
@@ -67,6 +69,7 @@ export const themeTokens = {
     border: '#FFB6D9',
     error: '#DC143C',
     success: '#FF69B4',
+    warning: '#FFB347',
     borderRadius: 20,
     shadowOpacity: 0.2,
     fontSize: {
@@ -89,6 +92,7 @@ export const themeTokens = {
     border: '#2E5A8A',
     error: '#FF4842',
     success: '#00D9FF',
+    warning: '#FFB000',
     borderRadius: 4,
     shadowOpacity: 0.5,
     fontSize: {
@@ -111,6 +115,7 @@ export const themeTokens = {
     border: '#FF6B00',
     error: '#FF0000',
     success: '#00FF00',
+    warning: '#FFB347',
     borderRadius: 0,
     shadowOpacity: 0.8,
     fontSize: {

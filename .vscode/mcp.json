@@ -1,5 +1,9 @@
 {
 	"servers": {
+		"supabase": {
+			"type": "http",
+			"url": "https://mcp.supabase.com/mcp?project_ref=qlldsvpkcfftbibujltf"
+		},
 		"context7": {
 			"command": "npx",
 			"args": [
@@ -13,19 +17,6 @@
 			"args": [
 				"-y",
 				"chrome-devtools-mcp@latest"
-			],
-			"type": "stdio"
-		},
-		"serena": {
-			"command": "uvx",
-			"args": [
-				"--from",
-				"git+https://github.com/oraios/serena",
-				"serena",
-				"start-mcp-server",
-				"--context",
-				"ide-assistant",
-				"--project-from-cwd"
 			],
 			"type": "stdio"
 		},
@@ -52,10 +43,6 @@
 				"@modelcontextprotocol/server-sequential-thinking"
 			],
 			"type": "stdio"
-		},
-		"supabase": {
-			"type": "http",
-			"url": "https://mcp.supabase.com/mcp?project_ref=qlldsvpkcfftbibujltf"
 		}
 	},
 	"inputs": []
