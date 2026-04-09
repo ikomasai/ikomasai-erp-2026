@@ -297,3 +297,7 @@ Web Push 購読情報
 - `notification_recipients`
 - `push_subscriptions`
 - `departments`
+
+### ERP_setting (RLS: ON)
+ERP 共有設定
+- 繧ｫ繝ｩ繝: key, value, description, updated_by, created_at, updated_at

@@ -58,6 +58,20 @@ const RESULT_LABELS = {
   [PATROL_RESULT_CODES.CANNOT_CONFIRM]: '確認不可',
 };
 
+/** 開始/終了確認タスクで指示メモに追記する確認ポイント */
+const TASK_INSTRUCTION_MEMO_LINES = {
+  [PATROL_TASK_TYPES.CONFIRM_START]: [
+    '体調不良がないか見ましょう',
+    '準備ができているか見ましょう',
+    '困りごとがあるか見ましょう',
+  ],
+  [PATROL_TASK_TYPES.CONFIRM_END]: [
+    '体調不良がないか見ましょう',
+    '片付けができているか見ましょう',
+    '困りごとがあるか見ましょう',
+  ],
+};
+
 /**
  * タスク詳細・操作コンポーネント
  * @param {Object} props - コンポーネントプロパティ
@@ -131,15 +145,14 @@ const PatrolTaskDetail = ({
   const isEvaluationTask = getPatrolTaskDisplayType(selectedTask) === PATROL_TASK_DISPLAY_TYPES.EVALUATION;
   const evaluationItems = isEvaluationTask ? getEvaluationPatrolTaskItemNames(selectedTask) : [];
   const taskTypeLabel = isEvaluationTask ? EVALUATION_TASK_LABEL : TASK_TYPE_LABELS[selectedTask.task_type] || selectedTask.task_type;
+  const normalizedTaskNote = (selectedTask.notes || '').trim();
+  const instructionMemoLines = TASK_INSTRUCTION_MEMO_LINES[selectedTask.task_type] || [];
 
   return (
     <View style={[styles.card, isMobile && styles.cardMobile, { backgroundColor: theme.surface }]}>
       <View style={styles.headerRow}>
         <View style={styles.headerTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>タスク詳細</Text>
-          <Text style={[styles.sectionSubTitle, { color: theme.textSecondary }]}>
-            状況確認から対応登録まで、このカード内で完結できます。
-          </Text>
         </View>
         <View
           style={[
@@ -188,17 +201,6 @@ const PatrolTaskDetail = ({
           {selectedTask.event_name || '企画名未設定'}
         </Text>
         <Text style={[styles.focusLocation, { color: theme.text }]}>📍 {locationLabel}</Text>
-        {/* タスク番号・元連絡案件IDはスマホでは省略（管理情報のため） */}
-        {!isMobile ? (
-          <>
-            <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-              タスク番号: {selectedTask.task_no || '-'}
-            </Text>
-            <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-              元連絡案件: {selectedTask.source_ticket_id || 'なし'} / 元鍵貸出: {selectedTask.source_key_loan_id || 'なし'}
-            </Text>
-          </>
-        ) : null}
       </View>
 
       {selectedTask.source_ticket?.description ? (
@@ -222,11 +224,6 @@ const PatrolTaskDetail = ({
         ]}
       >
         <Text style={[styles.label, { color: theme.text }]}>次の操作</Text>
-        <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-          {isEvaluationTask
-            ? '現地へ向かうときは先に受諾し、各評価項目の点数とコメントを入力して登録してください。'
-            : '現地へ向かうときは先に受諾し、対応後は結果とメモを添えて完了登録してください。'}
-        </Text>
         {/* 向かいます不可バナー: 別タスク対応中で未割当タスクを受諾できない場合に表示 */}
         {!isAssignedToMe && hasAnyActiveTask && selectedTask.task_status === PATROL_TASK_STATUSES.OPEN && (
           <View style={styles.cannotAcceptBanner}>
@@ -333,9 +330,43 @@ const PatrolTaskDetail = ({
             );
           })()
         ) : (
-          <Text style={[styles.requestBody, { color: theme.text }]}>
-            {selectedTask.notes || '指示メモはありません'}
-          </Text>
+          <View style={styles.requestContent}>
+            {normalizedTaskNote ? (
+              <Text style={[styles.requestBody, { color: theme.text }]}>
+                {normalizedTaskNote}
+              </Text>
+            ) : null}
+            {instructionMemoLines.length > 0 ? (
+              <View
+                style={[
+                  styles.instructionMemoCard,
+                  { backgroundColor: `${theme.primary}10` },
+                ]}
+              >
+                <Text style={[styles.instructionMemoTitle, { color: theme.text }]}>
+                  確認ポイント
+                </Text>
+                {instructionMemoLines.map((line) => (
+                  <View key={line} style={styles.instructionMemoRow}>
+                    <Text style={[styles.instructionMemoBullet, { color: theme.primary }]}>
+                      ・
+                    </Text>
+                    <Text style={[styles.instructionMemoText, { color: theme.text }]}>
+                      {line}
+                    </Text>
+                  </View>
+                ))}
+                <Text style={[styles.instructionMemoFooter, { color: theme.textSecondary }]}>
+                  何かあれば本部に連絡してください。
+                </Text>
+              </View>
+            ) : null}
+            {!normalizedTaskNote && instructionMemoLines.length === 0 ? (
+              <Text style={[styles.requestBody, { color: theme.text }]}>
+                指示メモはありません
+              </Text>
+            ) : null}
+          </View>
         )}
       </View>
 
@@ -607,10 +638,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
-  sectionSubTitle: {
-    fontSize: 12,
-    lineHeight: 18,
-  },
   /** ステータスバッジ: pill型 */
   statusBadge: {
     borderRadius: 999,
@@ -673,10 +700,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  ticketMeta: {
-    fontSize: 12,
-    marginTop: 2,
-  },
   /** アクションパネル: borderWidth削除 + shadow */
   actionPanel: {
     borderRadius: 16,
@@ -705,6 +728,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
   },
+  requestContent: {
+    gap: 10,
+  },
+  instructionMemoCard: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 6,
+  },
+  instructionMemoTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  instructionMemoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  instructionMemoBullet: {
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+  instructionMemoText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  instructionMemoFooter: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 2,
+  },
   label: {
     fontSize: 13,
     fontWeight: '800',
@@ -726,10 +782,6 @@ const styles = StyleSheet.create({
   optionButtonText: {
     fontSize: 12,
     fontWeight: '600',
-  },
-  helpText: {
-    fontSize: 13,
-    lineHeight: 20,
   },
   /** 更新ボタン: primary薄め背景 / borderWidth削除 */
   refreshButton: {

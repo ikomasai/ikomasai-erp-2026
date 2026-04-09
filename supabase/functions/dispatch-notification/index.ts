@@ -725,10 +725,11 @@ const getNavigateTo = (
       return { screen: 'JimuShift', tab: 'requestHistory' };
     case 'shift_reminder':
       return { screen: 'JimuShift', tab: 'myShift' };
-<<<<<<< 59-erp-実長用迷子通知検索機能
+    case 'item2_call_created':
+    case 'item2_responder_assigned':
+      return { screen: 'Item2', tab: 'list' };
     case 'missing_child':
       return { screen: 'Item5', tab: 'manage' };
-=======
     case 'rule_question':
     case 'layout_change':
     case 'key_preapply':
@@ -741,7 +742,6 @@ const getNavigateTo = (
       return { screen: 'Item16', tab: 'question' };
     case 'patrol_task_assigned':
       return { screen: 'Item12', tab: 'tasks' };
->>>>>>> develop
     default:
       if (source === 'support_ticket' && normalizeText(metadata?.event) === 'status_changed') {
         return { screen: 'Item16', tab: 'question' };

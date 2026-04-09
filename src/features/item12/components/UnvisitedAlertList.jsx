@@ -38,9 +38,6 @@ const UnvisitedAlertList = ({
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>未巡回アラート</Text>
-          <Text style={[styles.sectionSubTitle, { color: theme.textSecondary }]}>
-            閾値を超えた場所を先頭に出し、見落としを減らします。
-          </Text>
         </View>
         <TouchableOpacity
           style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
@@ -204,10 +201,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '800',
-  },
-  sectionSubTitle: {
-    fontSize: 12,
-    lineHeight: 18,
   },
   label: {
     fontSize: 13,

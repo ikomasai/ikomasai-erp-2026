@@ -3,7 +3,18 @@
  * 管理者/一般ユーザーの表示切り替えと、管理者向けフッタータブ制御を行う。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { SafeAreaView, ScrollView, View, Text, StyleSheet, Button, ActivityIndicator, Pressable, Modal, Platform } from 'react-native';
+import {
+  SafeAreaView,
+  ScrollView,
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  Pressable,
+  Modal,
+  Platform,
+  useWindowDimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../shared/hooks/useTheme';
 import { ThemedHeader } from '../../../shared/components/ThemedHeader';
@@ -45,6 +56,7 @@ const SORT_CREATED_DESC = 'created_desc';
 const SORT_CREATED_ASC = 'created_asc';
 const SORT_HEADCOUNT_DESC = 'headcount_desc';
 const SORT_HEADCOUNT_ASC = 'headcount_asc';
+const MOBILE_BREAKPOINT = 768;
 
 /**
  * 生エラーメッセージをユーザー表示向けに正規化する。
@@ -140,7 +152,18 @@ class LocalErrorBoundary extends React.Component {
           <Text style={[styles.localErrorMessage, { color: theme.text }]}>
             {toDisplayErrorMessage(this.state.error?.message)}
           </Text>
-          <Button title="再読み込み" onPress={onReload} color={theme.primary} />
+          <Pressable
+            onPress={() => void onReload?.()}
+            style={({ pressed }) => [
+              styles.localErrorReloadButton,
+              {
+                backgroundColor: pressed ? withAlpha(theme.primary, '24') : withAlpha(theme.primary, '16'),
+                borderColor: withAlpha(theme.primary, '66'),
+              },
+            ]}
+          >
+            <Text style={[styles.localErrorReloadButtonText, { color: theme.primary }]}>再読み込み</Text>
+          </Pressable>
         </View>
       );
     }
@@ -159,6 +182,8 @@ const SCREEN_NAME = '臨時ヘルプ';
 const Item8Screen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
+  const { width } = useWindowDimensions();
+  const isMobile = width < MOBILE_BREAKPOINT;
   const {
     manager,
     loading,
@@ -181,6 +206,7 @@ const Item8Screen = ({ navigation }) => {
     loadApplications,
     refresh,
   } = useRinjiHelp();
+  const shouldStackUserFilters = !manager && isMobile;
 
   const [editing, setEditing] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -552,6 +578,46 @@ const Item8Screen = ({ navigation }) => {
   const listAndHistorySectionBackground = darkenHex(theme.surface, 0.04);
 
   /**
+   * セクションヘッダー用の再読み込みボタンを返す。
+   * モバイル時は小さめのアイコンボタン表示にする。
+   *
+   * @returns {JSX.Element}
+   */
+  const renderRefreshControl = () => {
+    if (!isMobile) {
+      return (
+        <Pressable
+          onPress={() => void handleRefresh()}
+          style={({ pressed }) => [
+            styles.desktopRefreshButton,
+            {
+              backgroundColor: pressed ? withAlpha(theme.primary, '22') : withAlpha(theme.primary, '16'),
+              borderColor: withAlpha(theme.primary, '66'),
+            },
+          ]}
+        >
+          <Text style={[styles.desktopRefreshButtonText, { color: theme.primary }]}>再読み込み</Text>
+        </Pressable>
+      );
+    }
+    return (
+      <Pressable
+        onPress={() => void handleRefresh()}
+        style={[
+          styles.mobileRefreshButton,
+          {
+            backgroundColor: theme.surface,
+            borderColor: theme.border,
+            borderRadius: 999,
+          },
+        ]}
+      >
+        <Ionicons name="refresh" size={18} color={theme.primary} />
+      </Pressable>
+    );
+  };
+
+  /**
    * 募集作成/編集セクションを描画する。
    *
    * @returns {JSX.Element}
@@ -577,7 +643,22 @@ const Item8Screen = ({ navigation }) => {
         onSubmit={onSubmit}
         disabled={submitting}
       />
-      {editing && <Button title="編集をやめる" onPress={() => setEditing(null)} color={theme.textSecondary} />}
+      {editing ? (
+        <Pressable
+          onPress={() => setEditing(null)}
+          style={({ pressed }) => [
+            styles.editCancelButton,
+            {
+              backgroundColor: pressed
+                ? withAlpha(theme.textSecondary, '1C')
+                : withAlpha(theme.textSecondary, '14'),
+              borderColor: withAlpha(theme.textSecondary, '66'),
+            },
+          ]}
+        >
+          <Text style={[styles.editCancelButtonText, { color: theme.textSecondary }]}>編集をやめる</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 
@@ -586,184 +667,209 @@ const Item8Screen = ({ navigation }) => {
    *
    * @returns {JSX.Element}
    */
-  const renderListSection = () => (
-    <View
-      style={[
-        styles.section,
-        {
-          backgroundColor: listAndHistorySectionBackground,
-          borderColor: theme.border,
-          borderRadius: theme.borderRadius,
-        },
-      ]}
-    >
-      <View style={styles.sectionHeader}>
-        <Text style={[styles.sectionTitle, { color: theme.text, fontWeight: theme.fontWeight }]}>募集一覧</Text>
-        <View style={styles.sectionHeaderActions}>
-          {!manager ? (
-            <View
-              style={[
-                styles.departmentFilterContainer,
-                {
+  const renderListSection = () => {
+    const filterControl = !manager ? (
+      <View
+        style={[
+          styles.departmentFilterContainer,
+          shouldStackUserFilters && styles.departmentFilterContainerMobile,
+          {
+            borderColor: theme.border,
+            borderRadius: shouldStackUserFilters ? 20 : theme.borderRadius,
+            backgroundColor: theme.surface,
+          },
+        ]}
+      >
+        <View style={styles.dropdownWithIcon}>
+          <Ionicons name="funnel-outline" size={16} color={theme.textSecondary} />
+          <View style={styles.dropdownInputArea}>
+            {Platform.OS === 'web' ? (
+              <select
+                value={selectedDepartmentFilter}
+                onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
+                style={{
+                  ...styles.departmentFilterSelectWeb,
+                  color: theme.text,
+                  backgroundColor: theme.surface,
                   borderColor: theme.border,
-                  borderRadius: theme.borderRadius,
-                  backgroundColor: theme.background,
-                },
-              ]}
-            >
-              <View style={styles.dropdownWithIcon}>
-                <Ionicons name="funnel-outline" size={16} color={theme.textSecondary} />
-                <View style={styles.dropdownInputArea}>
-                  {Platform.OS === 'web' ? (
-                    <select
-                      value={selectedDepartmentFilter}
-                      onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
-                      style={{
-                        ...styles.departmentFilterSelectWeb,
-                        color: theme.text,
-                        backgroundColor: theme.background,
-                        borderColor: theme.border,
-                      }}
-                    >
-                      {departmentFilterOptions.map((option) => (
-                        <option
-                          key={option.value}
-                          value={option.value}
-                          style={{
-                            color: theme.text,
-                            backgroundColor: theme.background,
-                          }}
-                        >
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    (() => {
-                      const { Picker } = require('@react-native-picker/picker');
-                      return (
-                        <Picker
-                          selectedValue={selectedDepartmentFilter}
-                          onValueChange={setSelectedDepartmentFilter}
-                          style={[
-                            styles.departmentFilterSelectNative,
-                            {
-                              color: theme.text,
-                              backgroundColor: theme.background,
-                            },
-                          ]}
-                          itemStyle={{ color: theme.text }}
-                          dropdownIconColor={theme.text}
-                        >
-                          {departmentFilterOptions.map((option) => (
-                            <Picker.Item key={option.value} label={option.label} value={option.value} />
-                          ))}
-                        </Picker>
-                      );
-                    })()
-                  )}
-                </View>
-              </View>
-            </View>
-          ) : null}
-          {!manager ? (
-            <View
-              style={[
-                styles.departmentFilterContainer,
-                {
-                  borderColor: theme.border,
-                  borderRadius: theme.borderRadius,
-                  backgroundColor: theme.background,
-                },
-              ]}
-            >
-              <View style={styles.dropdownWithIcon}>
-                <Ionicons name="swap-vertical-outline" size={16} color={theme.textSecondary} />
-                <View style={styles.dropdownInputArea}>
-                  {Platform.OS === 'web' ? (
-                    <select
-                      value={selectedSortKey}
-                      onChange={(e) => setSelectedSortKey(e.target.value)}
-                      style={{
-                        ...styles.departmentFilterSelectWeb,
-                        color: theme.text,
-                        backgroundColor: theme.background,
-                        borderColor: theme.border,
-                      }}
-                    >
-                      {sortOptions.map((option) => (
-                        <option
-                          key={option.value}
-                          value={option.value}
-                          style={{
-                            color: theme.text,
-                            backgroundColor: theme.background,
-                          }}
-                        >
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    (() => {
-                      const { Picker } = require('@react-native-picker/picker');
-                      return (
-                        <Picker
-                          selectedValue={selectedSortKey}
-                          onValueChange={setSelectedSortKey}
-                          style={[
-                            styles.departmentFilterSelectNative,
-                            {
-                              color: theme.text,
-                              backgroundColor: theme.background,
-                            },
-                          ]}
-                          itemStyle={{ color: theme.text }}
-                          dropdownIconColor={theme.text}
-                        >
-                          {sortOptions.map((option) => (
-                            <Picker.Item key={option.value} label={option.label} value={option.value} />
-                          ))}
-                        </Picker>
-                      );
-                    })()
-                  )}
-                </View>
-              </View>
-            </View>
-          ) : null}
-          {manager ? (
-            <View style={styles.managerInlineToggleGroup}>
-              <Text style={[styles.managerOnlyToggleLabel, { color: theme.textSecondary }]}>
-                自分が作成した募集のみ表示
-              </Text>
-              <Pressable
-                style={[
-                  styles.customToggleTrack,
-                  {
-                    backgroundColor: showOnlyMyRecruits
-                      ? withAlpha(TOGGLE_ACTIVE_COLOR, '55')
-                      : withAlpha(theme.textSecondary, '55'),
-                  },
-                ]}
-                onPress={() => setShowOnlyMyRecruits((prev) => !prev)}
+                }}
               >
-                <View
-                  style={[
-                    styles.customToggleThumb,
-                    {
-                      backgroundColor: showOnlyMyRecruits ? TOGGLE_ACTIVE_COLOR : theme.surface,
-                      borderColor: showOnlyMyRecruits ? TOGGLE_ACTIVE_COLOR : withAlpha(theme.textSecondary, '88'),
-                      transform: [{ translateX: showOnlyMyRecruits ? 18 : 0 }],
-                    },
-                  ]}
-                />
-              </Pressable>
-            </View>
-          ) : null}
-          <Button title="再読み込み" onPress={handleRefresh} color={theme.primary} />
+                {departmentFilterOptions.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    style={{
+                      color: theme.text,
+                      backgroundColor: theme.surface,
+                    }}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              (() => {
+                const { Picker } = require('@react-native-picker/picker');
+                return (
+                  <Picker
+                    selectedValue={selectedDepartmentFilter}
+                    onValueChange={setSelectedDepartmentFilter}
+                    style={[
+                      styles.departmentFilterSelectNative,
+                      {
+                        color: theme.text,
+                        backgroundColor: theme.surface,
+                      },
+                    ]}
+                    itemStyle={{ color: theme.text }}
+                    dropdownIconColor={theme.text}
+                  >
+                    {departmentFilterOptions.map((option) => (
+                      <Picker.Item key={option.value} label={option.label} value={option.value} />
+                    ))}
+                  </Picker>
+                );
+              })()
+            )}
+          </View>
         </View>
       </View>
+    ) : null;
+
+    const sortControl = !manager ? (
+      <View
+        style={[
+          styles.departmentFilterContainer,
+          shouldStackUserFilters && styles.departmentFilterContainerMobile,
+          {
+            borderColor: theme.border,
+            borderRadius: shouldStackUserFilters ? 20 : theme.borderRadius,
+            backgroundColor: theme.surface,
+          },
+        ]}
+      >
+        <View style={styles.dropdownWithIcon}>
+          <Ionicons name="swap-vertical-outline" size={16} color={theme.textSecondary} />
+          <View style={styles.dropdownInputArea}>
+            {Platform.OS === 'web' ? (
+              <select
+                value={selectedSortKey}
+                onChange={(e) => setSelectedSortKey(e.target.value)}
+                style={{
+                  ...styles.departmentFilterSelectWeb,
+                  color: theme.text,
+                  backgroundColor: theme.surface,
+                  borderColor: theme.border,
+                }}
+              >
+                {sortOptions.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    style={{
+                      color: theme.text,
+                      backgroundColor: theme.surface,
+                    }}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              (() => {
+                const { Picker } = require('@react-native-picker/picker');
+                return (
+                  <Picker
+                    selectedValue={selectedSortKey}
+                    onValueChange={setSelectedSortKey}
+                    style={[
+                      styles.departmentFilterSelectNative,
+                      {
+                        color: theme.text,
+                        backgroundColor: theme.surface,
+                      },
+                    ]}
+                    itemStyle={{ color: theme.text }}
+                    dropdownIconColor={theme.text}
+                  >
+                    {sortOptions.map((option) => (
+                      <Picker.Item key={option.value} label={option.label} value={option.value} />
+                    ))}
+                  </Picker>
+                );
+              })()
+            )}
+          </View>
+        </View>
+      </View>
+    ) : null;
+
+    return (
+      <View
+        style={[
+          styles.section,
+          {
+            backgroundColor: listAndHistorySectionBackground,
+            borderColor: theme.border,
+            borderRadius: theme.borderRadius,
+          },
+        ]}
+      >
+        {shouldStackUserFilters ? (
+          <View style={styles.mobileUserListHeader}>
+            <View style={styles.mobileUserListHeaderRow}>
+              <View style={styles.mobileUserListTitleCell}>
+                <Text style={[styles.sectionTitle, { color: theme.text, fontWeight: theme.fontWeight }]}>募集一覧</Text>
+              </View>
+              <View style={styles.mobileUserListHeaderSpacer} />
+              <View style={styles.mobileUserListRefreshCell}>
+                {renderRefreshControl()}
+              </View>
+            </View>
+            <View style={styles.mobileUserListControlsRow}>
+              <View style={styles.mobileUserListControlCell}>{filterControl}</View>
+              <View style={styles.mobileUserListControlCell}>{sortControl}</View>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: theme.text, fontWeight: theme.fontWeight }]}>募集一覧</Text>
+            <View style={styles.sectionHeaderActions}>
+              {filterControl}
+              {sortControl}
+              {manager ? (
+                <View style={styles.managerInlineToggleGroup}>
+                  <Text style={[styles.managerOnlyToggleLabel, { color: theme.textSecondary }]}>
+                    {isMobile ? '自分が作成した\n募集のみ表示' : '自分が作成した募集のみ表示'}
+                  </Text>
+                  <Pressable
+                    style={[
+                      styles.customToggleTrack,
+                      {
+                        backgroundColor: showOnlyMyRecruits
+                          ? withAlpha(TOGGLE_ACTIVE_COLOR, '55')
+                          : withAlpha(theme.textSecondary, '55'),
+                      },
+                    ]}
+                    onPress={() => setShowOnlyMyRecruits((prev) => !prev)}
+                  >
+                    <View
+                      style={[
+                        styles.customToggleThumb,
+                        {
+                          backgroundColor: showOnlyMyRecruits ? TOGGLE_ACTIVE_COLOR : theme.surface,
+                          borderColor: showOnlyMyRecruits ? TOGGLE_ACTIVE_COLOR : withAlpha(theme.textSecondary, '88'),
+                          transform: [{ translateX: showOnlyMyRecruits ? 18 : 0 }],
+                        },
+                      ]}
+                    />
+                  </Pressable>
+                </View>
+              ) : null}
+              {renderRefreshControl()}
+            </View>
+          </View>
+        )}
       <RecruitList
         data={manager ? managerFilteredRecruits : sortedFilteredRecruits}
         isManager={manager}
@@ -785,7 +891,8 @@ const Item8Screen = ({ navigation }) => {
         currentUserId={currentUserId}
       />
     </View>
-  );
+    );
+  };
 
   /**
    * 募集履歴セクションを描画する。
@@ -805,7 +912,7 @@ const Item8Screen = ({ navigation }) => {
     >
       <View style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, { color: theme.text, fontWeight: theme.fontWeight }]}>募集履歴</Text>
-        <Button title="再読み込み" onPress={handleRefresh} color={theme.primary} />
+        {renderRefreshControl()}
       </View>
       <RecruitList
         data={historyRecruits}
@@ -848,7 +955,7 @@ const Item8Screen = ({ navigation }) => {
     >
       <View style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, { color: theme.text, fontWeight: theme.fontWeight }]}>応募済み</Text>
-        <Button title="再読み込み" onPress={handleRefresh} color={theme.primary} />
+        {renderRefreshControl()}
       </View>
       <RecruitList
         data={appliedRecruits}
@@ -884,6 +991,65 @@ const Item8Screen = ({ navigation }) => {
     return renderListSection();
   };
 
+  /**
+   * フッタータブ（管理者 / 一般）を描画する。
+   *
+   * @param {Array<{key: string, label: string}>} tabs
+   * @returns {JSX.Element}
+   */
+  const renderFooterTabs = (tabs) => (
+    <View
+      style={[
+        styles.footer,
+        isMobile && styles.footerMobile,
+        {
+          backgroundColor: theme.surface,
+          borderTopColor: theme.border,
+          paddingBottom: insets.bottom + (isMobile ? 8 : 18),
+        },
+      ]}
+    >
+      {tabs.map((tab) => {
+        const active = activeTab === tab.key;
+        return (
+          <Pressable
+            key={tab.key}
+            style={[
+              styles.footerTab,
+              isMobile && styles.footerTabMobile,
+              {
+                borderColor: isMobile ? 'transparent' : active ? theme.primary : theme.border,
+                backgroundColor: isMobile ? 'transparent' : active ? theme.primary : theme.background,
+                borderRadius: isMobile ? 0 : theme.borderRadius,
+                borderBottomColor: isMobile ? (active ? theme.primary : 'transparent') : 'transparent',
+              },
+            ]}
+            onPress={() => setActiveTab(tab.key)}
+          >
+            <Text
+              style={[
+                styles.footerTabLabel,
+                isMobile && styles.footerTabLabelMobile,
+                {
+                  color: isMobile
+                    ? active
+                      ? theme.primary
+                      : theme.textSecondary
+                    : active
+                      ? '#FFFFFF'
+                      : theme.textSecondary,
+                  fontWeight: active ? '700' : theme.fontWeight,
+                },
+              ]}
+            >
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <ThemedHeader title={SCREEN_NAME} navigation={navigation} />
@@ -900,89 +1066,7 @@ const Item8Screen = ({ navigation }) => {
               {manager ? renderManagerTabContent() : renderUserTabContent()}
             </ScrollView>
 
-            {manager ? (
-              <View
-                style={[
-                  styles.footer,
-                  {
-                    backgroundColor: theme.surface,
-                    borderTopColor: theme.border,
-                    paddingBottom: insets.bottom + 18,
-                  },
-                ]}
-              >
-                {MANAGER_TAB_OPTIONS.map((tab) => {
-                  const active = activeTab === tab.key;
-                  return (
-                    <Pressable
-                      key={tab.key}
-                      style={[
-                        styles.footerTab,
-                        {
-                          borderColor: active ? theme.primary : theme.border,
-                          backgroundColor: active ? theme.primary : theme.background,
-                          borderRadius: theme.borderRadius,
-                        },
-                      ]}
-                      onPress={() => setActiveTab(tab.key)}
-                    >
-                      <Text
-                        style={[
-                          styles.footerTabLabel,
-                          {
-                            color: active ? '#FFFFFF' : theme.textSecondary,
-                            fontWeight: active ? '700' : theme.fontWeight,
-                          },
-                        ]}
-                      >
-                        {tab.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.footer,
-                  {
-                    backgroundColor: theme.surface,
-                    borderTopColor: theme.border,
-                    paddingBottom: insets.bottom + 18,
-                  },
-                ]}
-              >
-                {USER_TAB_OPTIONS.map((tab) => {
-                  const active = activeTab === tab.key;
-                  return (
-                    <Pressable
-                      key={tab.key}
-                      style={[
-                        styles.footerTab,
-                        {
-                          borderColor: active ? theme.primary : theme.border,
-                          backgroundColor: active ? theme.primary : theme.background,
-                          borderRadius: theme.borderRadius,
-                        },
-                      ]}
-                      onPress={() => setActiveTab(tab.key)}
-                    >
-                      <Text
-                        style={[
-                          styles.footerTabLabel,
-                          {
-                            color: active ? '#FFFFFF' : theme.textSecondary,
-                            fontWeight: active ? '700' : theme.fontWeight,
-                          },
-                        ]}
-                      >
-                        {tab.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
+            {manager ? renderFooterTabs(MANAGER_TAB_OPTIONS) : renderFooterTabs(USER_TAB_OPTIONS)}
             {toast.message ? (
               <View
                 pointerEvents="none"
@@ -1109,6 +1193,56 @@ const styles = StyleSheet.create({
     gap: 8,
     flexShrink: 1,
   },
+  mobileUserListHeader: {
+    marginBottom: 8,
+    gap: 8,
+  },
+  mobileUserListHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  mobileUserListTitleCell: {
+    width: 'auto',
+    justifyContent: 'center',
+  },
+  mobileUserListHeaderSpacer: {
+    flex: 1,
+    minWidth: 0,
+  },
+  mobileUserListRefreshCell: {
+    width: 'auto',
+    alignItems: 'flex-end',
+  },
+  mobileRefreshButton: {
+    width: 40,
+    height: 40,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  desktopRefreshButton: {
+    minWidth: 108,
+    minHeight: 36,
+    borderWidth: 1,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  desktopRefreshButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  mobileUserListControlsRow: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 8,
+  },
+  mobileUserListControlCell: {
+    width: '100%',
+  },
   departmentFilterContainer: {
     minWidth: 140,
     maxWidth: 220,
@@ -1116,10 +1250,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
+  departmentFilterContainerMobile: {
+    minWidth: 0,
+    maxWidth: '100%',
+    width: '100%',
+  },
   dropdownWithIcon: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingLeft: 6,
+    paddingRight: 6,
     gap: 2,
   },
   dropdownInputArea: {
@@ -1179,6 +1319,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
+  footerMobile: {
+    marginTop: 0,
+    paddingTop: 6,
+    paddingHorizontal: 12,
+    gap: 0,
+  },
   footerTab: {
     flex: 1,
     borderWidth: 1,
@@ -1188,10 +1334,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  footerTabMobile: {
+    borderWidth: 0,
+    borderBottomWidth: 2,
+    minHeight: 42,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
   footerTabLabel: {
     fontSize: 16,
     lineHeight: 20,
     textAlign: 'center',
+  },
+  footerTabLabelMobile: {
+    fontSize: 14,
+    lineHeight: 18,
   },
   toastContainer: {
     position: 'absolute',
@@ -1264,6 +1421,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 8,
   },
+  localErrorReloadButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  localErrorReloadButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
   localErrorTitle: {
     fontSize: 16,
     fontWeight: '700',
@@ -1271,6 +1439,18 @@ const styles = StyleSheet.create({
   localErrorMessage: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  editCancelButton: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  editCancelButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
 

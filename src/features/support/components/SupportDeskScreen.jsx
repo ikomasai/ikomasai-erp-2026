@@ -43,7 +43,6 @@ import OfflineBanner from '../../../shared/components/OfflineBanner';
 import { createRadioLog, listRadioLogs } from '../../../services/supabase/radioLogService';
 import {
   assignPatrolTask,
-  createCustomPatrolTask,
   createDispatchPatrolTask,
   createEvaluationPatrolTask,
   deletePatrolTask,
@@ -77,6 +76,11 @@ import {
   selectPrizeDistributions,
   updatePrizeDistributionCriteria,
 } from '../../../services/supabase/prizeDistributionService';
+import {
+  ERP_SETTING_KEYS,
+  selectEvaluationFormUrlSetting,
+  upsertEvaluationFormUrlSetting,
+} from '../../../services/supabase/erpSettingService';
 import { useManagedPushSubscription } from '../../notifications/hooks/useManagedPushSubscription';
 import WebPushStatusCard from '../../notifications/components/WebPushStatusCard';
 import {
@@ -292,6 +296,13 @@ const UNVISITED_ALERT_MINUTE_OPTIONS = [30, 60, 90, 120];
 /** AsyncStorage: 評価項目設定（本部が設定した項目名の配列 JSON） */
 const ASYNC_KEY_EVALUATION_ITEMS = 'hqEvaluationItems';
 
+/** AsyncStorage: 評価フォームURL（本部が設定、巡回サポートは読み取り専用） */
+const ASYNC_KEY_EVALUATION_FORM_URL = 'evaluationFormUrl';
+
+/** 評価フォームURLのデフォルト値 */
+const DEFAULT_EVALUATION_FORM_URL =
+  'https://docs.google.com/forms/d/e/1FAIpQLSfcBhmp3X4Z3ARM6UFkvCH6WW4hXvg6-s6hhNuBKKaAjKmZhg/viewform?embedded=true';
+
 /** 評価項目のデフォルト値 */
 const DEFAULT_EVALUATION_ITEMS = ['企画書通りの進行', '安全管理', '来場者対応', '設営・片付け', '全体印象'];
 
@@ -448,21 +459,20 @@ const ELAPSED_DANGER_MINUTES = 30;
 /** HQロール向けタブ定義 */
 const HQ_TABS = [
   { key: 'dashboard', label: '🏠 ダッシュボード' },
-  { key: 'overview', label: '📊 概況確認' },
   { key: 'tickets', label: '📋 連絡案件' },
   { key: 'keys', label: '🔑 鍵管理' },
   { key: 'patrol', label: '🚶 巡回' },
-  { key: 'custom_task', label: '📌 独自タスク' },
-  { key: 'evaluation', label: '📝 評価' },
-  { key: 'stats', label: '📈 実績' },
   { key: 'radio', label: '📡 無線' },
-  { key: 'event_orgs', label: '🏢 企画一覧' },
   { key: 'master', label: '⚙️ 鍵マスタ' },
   { key: 'settings', label: '🛠 設定' },
+  { key: 'stats', label: '📈 実績' },
 ];
 
 /** HQタブのデフォルト */
 const HQ_TAB_DEFAULT = 'dashboard';
+
+/** 実績タブのアクセスパスワード */
+const STATS_TAB_PASSWORD = 'admin1234';
 
 /** 経過時間アラート色 */
 const ELAPSED_COLORS = {
@@ -881,13 +891,6 @@ const SupportDeskScreen = ({
   /** 振り分けタスク候補読み込み中フラグ */
   const [isLoadingDispatchCandidates, setIsLoadingDispatchCandidates] = useState(false);
 
-  /** 独自タスクのタスク内容入力 */
-  const [customTaskNotes, setCustomTaskNotes] = useState('');
-  /** 独自タスクの担当者ユーザーID（空文字＝未割当） */
-  const [customTaskAssigneeId, setCustomTaskAssigneeId] = useState('');
-  /** 独自タスク作成中フラグ */
-  const [isCreatingCustomTask, setIsCreatingCustomTask] = useState(false);
-
   /** タスク実績データ（担当者別集計元） */
   const [taskStatsData, setTaskStatsData] = useState([]);
   /** タスク実績読み込み中フラグ */
@@ -896,6 +899,14 @@ const SupportDeskScreen = ({
   const [taskStatsProfileMap, setTaskStatsProfileMap] = useState({});
   /** タスク実績の並べ替えキー（'total' | 'name'） */
   const [taskStatsSortKey, setTaskStatsSortKey] = useState('total');
+  /** 実績タブのパスワード認証済みフラグ */
+  const [isStatsUnlocked, setIsStatsUnlocked] = useState(false);
+  /** 実績タブのパスワードモーダル表示フラグ */
+  const [isStatsPasswordModalVisible, setIsStatsPasswordModalVisible] = useState(false);
+  /** 実績タブのパスワード入力値 */
+  const [statsPasswordInput, setStatsPasswordInput] = useState('');
+  /** 実績タブのパスワードエラーメッセージ */
+  const [statsPasswordError, setStatsPasswordError] = useState('');
 
   /** 巡回中スタッフ一覧（on_patrol = true のユーザー） */
   const [patrollingUsers, setPatrollingUsers] = useState([]);
@@ -992,6 +1003,15 @@ const SupportDeskScreen = ({
    * 巡回サポート（Item12Screen）はここで設定した値を読み取り専用で使用する。
    */
   const [hqUnvisitedAlertMinutes, setHqUnvisitedAlertMinutes] = useState(90);
+  /**
+   * 評価フォームURL（本部が設定、AsyncStorage に保存）
+   * 巡回サポートの評価タブに埋め込むGoogleフォームのURL
+   */
+  const [evaluationFormUrl, setEvaluationFormUrl] = useState(DEFAULT_EVALUATION_FORM_URL);
+  /** 評価フォームURL編集中のドラフト */
+  const [evaluationFormUrlDraft, setEvaluationFormUrlDraft] = useState('');
+  /** 評価フォームURL保存中フラグ */
+  const [isSavingEvaluationFormUrl, setIsSavingEvaluationFormUrl] = useState(false);
   /**
    * 評価項目リスト（本部が設定、AsyncStorage に保存）
    * 評価タスク生成時は、この一覧を1件の企画評価タスクへまとめて保存する
@@ -1825,6 +1845,95 @@ const SupportDeskScreen = ({
       await AsyncStorage.setItem(ASYNC_KEY_UNVISITED_ALERT_MINUTES, String(minutes));
     } catch (error) {
       console.error('未巡回アラート閾値の保存に失敗:', error);
+    }
+  };
+
+  /**
+   * AsyncStorage から評価フォームURLを読み込む（本部のみ）
+   * @returns {Promise<void>} 読み込み処理
+   */
+  const loadEvaluationFormUrl = useCallback(async () => {
+    if (!isHQRole) {
+      return;
+    }
+    try {
+      const { value, error } = await selectEvaluationFormUrlSetting();
+      /** DB から取得した共有URL */
+      const sharedUrl =
+        typeof value === 'string' && value.trim().length > 0 ? value.trim() : '';
+      if (sharedUrl) {
+        setEvaluationFormUrl(sharedUrl);
+        setEvaluationFormUrlDraft(sharedUrl);
+        await AsyncStorage.setItem(ASYNC_KEY_EVALUATION_FORM_URL, sharedUrl);
+        return;
+      }
+
+      const stored = await AsyncStorage.getItem(ASYNC_KEY_EVALUATION_FORM_URL);
+      if (stored) {
+        setEvaluationFormUrl(stored);
+        setEvaluationFormUrlDraft(stored);
+        return;
+      }
+
+      if (error) {
+        console.error('共有評価フォームURLの読み込みに失敗:', error);
+      }
+
+      setEvaluationFormUrl(DEFAULT_EVALUATION_FORM_URL);
+      setEvaluationFormUrlDraft(DEFAULT_EVALUATION_FORM_URL);
+    } catch (error) {
+      console.error('評価フォームURLの読み込みに失敗:', error);
+    }
+  }, [isHQRole]);
+
+  /**
+   * 評価フォームURLを保存する（本部のみ）
+   * @returns {Promise<void>} 保存処理
+   */
+  const handleSaveEvaluationFormUrl = async () => {
+    const trimmed = evaluationFormUrlDraft.trim();
+    if (!trimmed) {
+      showMessage('入力エラー', 'URLを入力してください');
+      return;
+    }
+
+    setIsSavingEvaluationFormUrl(true);
+    try {
+      const { error } = await upsertEvaluationFormUrlSetting(trimmed, user?.id || null);
+      if (error) {
+        throw error;
+      }
+      await AsyncStorage.setItem(ASYNC_KEY_EVALUATION_FORM_URL, trimmed);
+      setEvaluationFormUrl(trimmed);
+      setEvaluationFormUrlDraft(trimmed);
+      showMessage('保存完了', '評価フォームURLを保存しました');
+    } catch (error) {
+      console.error('評価フォームURLの保存に失敗:', error);
+      showMessage('保存エラー', '評価フォームURLの保存に失敗しました');
+    } finally {
+      setIsSavingEvaluationFormUrl(false);
+    }
+  };
+
+  /**
+   * 評価フォームURLをデフォルトにリセットする
+   * @returns {Promise<void>} リセット処理
+   */
+  const handleResetEvaluationFormUrl = async () => {
+    setEvaluationFormUrlDraft(DEFAULT_EVALUATION_FORM_URL);
+    setEvaluationFormUrl(DEFAULT_EVALUATION_FORM_URL);
+    try {
+      const { error } = await upsertEvaluationFormUrlSetting(
+        DEFAULT_EVALUATION_FORM_URL,
+        user?.id || null
+      );
+      if (error) {
+        throw error;
+      }
+      await AsyncStorage.setItem(ASYNC_KEY_EVALUATION_FORM_URL, DEFAULT_EVALUATION_FORM_URL);
+      showMessage('リセット完了', 'デフォルトのURLに戻しました');
+    } catch (error) {
+      console.error('評価フォームURLのリセットに失敗:', error);
     }
   };
 
@@ -2928,41 +3037,6 @@ const SupportDeskScreen = ({
   };
 
   /**
-   * 独自タスクを作成して指定した巡回者に割り当てる
-   * @returns {Promise<void>} 作成処理
-   */
-  const handleCreateCustomTask = async () => {
-    if (!customTaskNotes.trim()) {
-      showMessage('エラー', 'タスク内容を入力してください');
-      return;
-    }
-    if (!user?.id) {
-      showMessage('エラー', 'ログイン情報が取得できません');
-      return;
-    }
-
-    setIsCreatingCustomTask(true);
-    const { error } = await createCustomPatrolTask({
-      notes: customTaskNotes.trim(),
-      assignedTo: customTaskAssigneeId || null,
-      creatorUserId: user.id,
-    });
-    setIsCreatingCustomTask(false);
-
-    if (error) {
-      showMessage('エラー', error.message || 'タスク作成に失敗しました');
-      return;
-    }
-
-    /** 割当状態を保存してからリセット */
-    const wasAssigned = !!customTaskAssigneeId;
-    setCustomTaskNotes('');
-    setCustomTaskAssigneeId('');
-    await loadHqPatrolTasks();
-    showMessage('タスク作成完了', wasAssigned ? '担当者へ通知を送信しました' : 'タスクを作成しました（担当者未割当）');
-  };
-
-  /**
    * タスク実績データを取得して担当者ごとに集計する
    * @returns {Promise<void>} 取得処理
    */
@@ -3442,9 +3516,10 @@ const SupportDeskScreen = ({
 
   useEffect(() => {
     loadLastViewedAt();
-    /** 本部は初回マウント時に閾値設定・評価項目を読み込む */
+    /** 本部は初回マウント時に閾値設定・評価項目・評価フォームURLを読み込む */
     loadHqAlertMinutes();
     loadEvaluationItems();
+    loadEvaluationFormUrl();
     loadTickets();
     loadRadioLogs();
     loadHqPatrolTasks();
@@ -3501,16 +3576,13 @@ const SupportDeskScreen = ({
   }, [isAccountingRole]);
 
   /**
-   * 独自タスクタブに切り替えたとき、候補が未取得であれば自動読み込みする
+   * 実績タブから離れたときにパスワード認証をリセットする
    */
   useEffect(() => {
-    if (!isHQRole || activeTab !== 'custom_task') {
-      return;
+    if (activeTab !== 'stats') {
+      setIsStatsUnlocked(false);
     }
-    if (dispatchCandidates.length === 0 && !isLoadingDispatchCandidates) {
-      loadDispatchCandidates();
-    }
-  }, [isHQRole, activeTab]);
+  }, [activeTab]);
 
   /**
    * 概況タブ表示時に施錠確認一覧を取得する
@@ -3700,6 +3772,38 @@ const SupportDeskScreen = ({
       supabase.removeChannel(channel);
     };
   }, [isHQRole, user?.id]);
+
+  /**
+   * HQ向け: ERP共有設定の Realtime 購読
+   * 評価フォームURLの変更を即時反映する
+   */
+  useEffect(() => {
+    if (!isHQRole || !user?.id) {
+      return () => {};
+    }
+
+    const supabase = getSupabaseClient();
+    const channel = supabase.channel(`erp_setting_hq_${user.id}`);
+
+    channel.on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'ERP_setting',
+        filter: `key=eq.${ERP_SETTING_KEYS.EVALUATION_FORM_URL}`,
+      },
+      () => {
+        loadEvaluationFormUrl();
+      }
+    );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isHQRole, loadEvaluationFormUrl, user?.id]);
 
   /**
    * HQ向け: 画面フォーカス復帰時・アプリ復帰時に巡回タスク一覧を再取得する
@@ -4216,7 +4320,8 @@ const SupportDeskScreen = ({
         <View style={[styles.tabSegmentBar, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <ScrollView
             horizontal
-            showsHorizontalScrollIndicator={Platform.OS !== 'web'}
+            showsHorizontalScrollIndicator={true}
+            decelerationRate="fast"
             contentContainerStyle={[styles.tabSegmentBarContent, { backgroundColor: `${theme.border}55` }]}
           >
             {HQ_TABS.map((tab) => {
@@ -4229,7 +4334,16 @@ const SupportDeskScreen = ({
                     styles.tabSegmentBarItem,
                     isTabActive && [styles.tabSegmentBarItemActive, { backgroundColor: theme.background }],
                   ]}
-                  onPress={() => setActiveTab(tab.key)}
+                  onPress={() => {
+                    if (tab.key === 'stats' && !isStatsUnlocked) {
+                      /** 実績タブ選択時：未認証なのでパスワードモーダルを表示 */
+                      setStatsPasswordInput('');
+                      setStatsPasswordError('');
+                      setIsStatsPasswordModalVisible(true);
+                    } else {
+                      setActiveTab(tab.key);
+                    }
+                  }}
                 >
                   <Text
                     style={[
@@ -4374,17 +4488,9 @@ const SupportDeskScreen = ({
                         setActiveTab('tickets');
                       }}
                     >
-                      <View style={[styles.dashboardTicketTypeBadge, { backgroundColor: `${theme.primary}18` }]}>
-                        <Text style={[styles.dashboardTicketTypeText, { color: theme.primary }]}>
-                          {TICKET_TYPE_LABELS[t.ticket_type] || t.ticket_type}
-                        </Text>
-                      </View>
                       <View style={styles.dashboardTicketBody}>
                         <Text style={[styles.dashboardTicketTitle, { color: theme.text }]} numberOfLines={1}>
                           {t.title || t.event_name || '（タイトルなし）'}
-                        </Text>
-                        <Text style={[styles.dashboardTicketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                          {t.event_name || '-'} / {new Date(t.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -4436,11 +4542,6 @@ const SupportDeskScreen = ({
                           <Text style={[styles.dashboardPatrolName, { color: theme.text }]}>
                             {patrolUser.name || '（名前未設定）'}
                           </Text>
-                          {patrolUser.organization ? (
-                            <Text style={[styles.dashboardPatrolOrg, { color: theme.textSecondary }]}>
-                              {patrolUser.organization}
-                            </Text>
-                          ) : null}
                         </View>
 
                         <View
@@ -4513,7 +4614,7 @@ const SupportDeskScreen = ({
                                 ) : null}
 
                                 <Text style={[styles.dashboardPatrolTaskMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                                  {timeLabel} / {task.task_no || 'タスク番号なし'}
+                                  {timeLabel}
                                 </Text>
                               </View>
                             );
@@ -4665,9 +4766,6 @@ const SupportDeskScreen = ({
                           <Text style={[styles.overviewTaskLocation, { color: theme.text }]} numberOfLines={1}>
                             {ticket.event_name || '-'} / {ticket.event_location || '-'}
                           </Text>
-                          <Text style={[styles.messageDate, { color: theme.textSecondary }]}>
-                            団体: {ticket.organizations?.name || '-'} / {new Date(ticket.created_at).toLocaleString('ja-JP')}
-                          </Text>
                         </Pressable>
                       );
                     })
@@ -4683,12 +4781,6 @@ const SupportDeskScreen = ({
                       <Text style={[styles.sectionTitle, { color: theme.text }]}>選択中の企画報告</Text>
                       <Text style={[styles.ticketDetailTitle, { color: theme.text }]}>
                         {selectedOverviewReportTicket.title}
-                      </Text>
-                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                        種別:{' '}
-                        {TICKET_TYPE_LABELS[selectedOverviewReportTicket.ticket_type] ||
-                          selectedOverviewReportTicket.ticket_type}
-                        {' / '}状態: {getTicketStatusLabelForRole(selectedOverviewReportTicket, roleType)}
                       </Text>
                       <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                         企画: {selectedOverviewReportTicket.event_name || '-'}（
@@ -4934,9 +5026,6 @@ const SupportDeskScreen = ({
                         {selectedOverviewLockTask.notes || '施錠確認'}
                       </Text>
                       <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                        状態: {PATROL_TASK_STATUS_LABELS[selectedOverviewLockTask.task_status] || selectedOverviewLockTask.task_status}
-                      </Text>
-                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                         企画: {selectedOverviewLockTask.event_name || '-'}（
                         {selectedOverviewLockTask.event_location || selectedOverviewLockTask.location_text || '-'}）
                       </Text>
@@ -4944,9 +5033,6 @@ const SupportDeskScreen = ({
                         担当:{' '}
                         {overviewProfileMap[selectedOverviewLockTask.assigned_to] ||
                           (selectedOverviewLockTask.assigned_to ? '読込中...' : '未割当')}
-                      </Text>
-                      <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                        受付: {formatOverviewTaskTime(selectedOverviewLockTask)}
                       </Text>
                       <View style={styles.overviewActionRow}>
                         {[PATROL_TASK_STATUSES.OPEN, PATROL_TASK_STATUSES.ACCEPTED, PATROL_TASK_STATUSES.EN_ROUTE].includes(
@@ -6347,11 +6433,6 @@ const SupportDeskScreen = ({
                         <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
                           {ticket.event_name} / {ticket.event_location}
                         </Text>
-                        <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                          {TICKET_TYPE_LABELS[ticket.ticket_type] || ticket.ticket_type} /{' '}
-                          {getTicketStatusLabelForRole(ticket, roleType)} /{' '}
-                          {new Date(ticket.created_at).toLocaleString('ja-JP')}
-                        </Text>
                         {alertInfo.color ? (
                           <Text style={[styles.elapsedAlert, { color: alertInfo.color }]}>
                             {formatElapsedMinutes(alertInfo.elapsedMinutes)} 経過
@@ -6381,11 +6462,6 @@ const SupportDeskScreen = ({
                 {isDepartmentTicketDetailExpanded ? (
                   <>
                     <Text style={[styles.ticketDetailTitle, { color: theme.text }]}>{selectedTicket.title}</Text>
-                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>受付番号: {selectedTicket.ticket_no || '-'}</Text>
-                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                      種別: {TICKET_TYPE_LABELS[selectedTicket.ticket_type] || selectedTicket.ticket_type} / 状態:{' '}
-                      {getTicketStatusLabelForRole(selectedTicket, roleType)}
-                    </Text>
                     <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                       企画: {selectedTicket.event_name}（{selectedTicket.event_location}）
                     </Text>
@@ -6397,9 +6473,6 @@ const SupportDeskScreen = ({
                         { borderColor: theme.border, backgroundColor: theme.background },
                       ]}
                     >
-                      <Text style={[styles.statusPickerLabel, { color: theme.textSecondary }]}>
-                        {isUpdatingStatus ? 'ステータス更新中...' : 'ステータスを変更'}
-                      </Text>
                       <View style={styles.departmentStatusActions}>
                         {HQ_TICKET_STATUS_OPTIONS.map((option) => {
                           /** このオプションが選択中かどうか */
@@ -6435,17 +6508,9 @@ const SupportDeskScreen = ({
                               >
                                 {option.label}
                               </Text>
-                              <Text
-                                style={[
-                                  styles.departmentStatusButtonMeta,
-                                  { color: isActive ? tone.borderColor : theme.textSecondary },
-                                ]}
-                              >
-                                {isActive ? '選択中' : 'この状態に変更'}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
+                          </Pressable>
+                        );
+                      })}
                       </View>
                     </View>
 
@@ -6466,9 +6531,6 @@ const SupportDeskScreen = ({
                       <View style={[styles.dispatchSection, { borderColor: theme.border, backgroundColor: `${theme.primary}08` }]}>
                         <Text style={[styles.dispatchSectionTitle, { color: theme.text }]}>
                           🚶 現地対応
-                        </Text>
-                        <Text style={[styles.dispatchSectionDesc, { color: theme.textSecondary }]}>
-                          企画管理部の部員を現地に向かわせるタスクを生成します。依頼者にも通知が届きます。
                         </Text>
                         <TouchableOpacity
                           style={[styles.dispatchButton, { backgroundColor: theme.primary }]}
@@ -6770,15 +6832,7 @@ const SupportDeskScreen = ({
                       </Text>
                     </View>
                     <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                      {ticket.organizations?.name || '-'} / 受付 {ticket.ticket_no || '-'}
-                    </Text>
-                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
                       {ticket.event_name} / {ticket.event_location}
-                    </Text>
-                    <Text style={[styles.ticketMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-                      {TICKET_TYPE_LABELS[ticket.ticket_type] || ticket.ticket_type} /{' '}
-                      {getTicketStatusLabelForRole(ticket, roleType)} /{' '}
-                      {new Date(ticket.created_at).toLocaleString('ja-JP')}
                     </Text>
                     {alertInfo.color ? (
                       <Text style={[styles.elapsedAlert, { color: alertInfo.color }]}>
@@ -6817,14 +6871,6 @@ const SupportDeskScreen = ({
               <>
                 <Text style={[styles.ticketDetailTitle, { color: theme.text }]}>{selectedTicket.title}</Text>
                 <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                  団体: {selectedTicket.organizations?.name || '-'} / 受付番号: {selectedTicket.ticket_no || '-'}
-                </Text>
-                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
-                  種別: {TICKET_TYPE_LABELS[selectedTicket.ticket_type] || selectedTicket.ticket_type} / 状態:{' '}
-                  {getTicketStatusLabelForRole(selectedTicket, roleType)}
-                  {selectedTicket.priority ? ` / 優先度: ${selectedTicket.priority === 'high' ? '高' : '中'}` : null}
-                </Text>
-                <Text style={[styles.ticketMeta, { color: theme.textSecondary }]}>
                   企画: {selectedTicket.event_name}（{selectedTicket.event_location}）
                 </Text>
                 {isEventStatusTicket ? (
@@ -6841,9 +6887,6 @@ const SupportDeskScreen = ({
                       { borderColor: theme.border, backgroundColor: theme.background },
                     ]}
                   >
-                    <Text style={[styles.statusPickerLabel, { color: theme.textSecondary }]}>
-                      {isUpdatingStatus ? 'ステータス更新中...' : 'ステータスを変更'}
-                    </Text>
                     <View style={styles.departmentStatusActions}>
                       {departmentStatusOptions.map((option) => {
                         const tone = DEPARTMENT_STATUS_TONES[option.key] || {
@@ -6878,14 +6921,6 @@ const SupportDeskScreen = ({
                             >
                               {option.label}
                             </Text>
-                            <Text
-                              style={[
-                                styles.departmentStatusButtonMeta,
-                                { color: isActive ? tone.borderColor : theme.textSecondary },
-                              ]}
-                            >
-                              {isActive ? '選択中' : 'この状態に変更'}
-                            </Text>
                           </Pressable>
                         );
                       })}
@@ -6898,9 +6933,6 @@ const SupportDeskScreen = ({
                       { borderColor: theme.border, backgroundColor: theme.background },
                     ]}
                   >
-                    <Text style={[styles.statusPickerLabel, { color: theme.textSecondary }]}>
-                      {isUpdatingStatus ? 'ステータス更新中...' : 'ステータスを変更'}
-                    </Text>
                     <Picker
                       selectedValue={selectedTicket.ticket_status}
                       onValueChange={(value) => {
@@ -7417,158 +7449,6 @@ const SupportDeskScreen = ({
           </View>
         ) : null}
 
-        {/* ─── 独自タスクタブ ─── */}
-        {isHQRole && activeTab === 'custom_task' ? (
-          <View style={[styles.card, { backgroundColor: theme.surface }]}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>独自タスクを作成</Text>
-            </View>
-            <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-              巡回者を選択してタスクを投げることができます。担当者は未割当のままにすることもできます。
-            </Text>
-
-            {/* 担当者選択 */}
-            <Text style={[styles.label, { color: theme.text }]}>担当者を選択（企画管理部）</Text>
-            {isLoadingDispatchCandidates ? (
-              <Text style={[styles.helpText, { color: theme.textSecondary }]}>読み込み中...</Text>
-            ) : dispatchCandidates.length === 0 ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <Text style={[styles.helpText, { color: theme.textSecondary }]}>
-                  企画管理部のメンバーが見つかりません
-                </Text>
-                <TouchableOpacity
-                  style={[styles.refreshButton, { backgroundColor: `${theme.primary}15` }]}
-                  onPress={loadDispatchCandidates}
-                >
-                  <Text style={[styles.refreshButtonText, { color: theme.primary }]}>読み込む</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <ScrollView
-                style={[styles.dispatchAssigneeList, { marginBottom: 12 }]}
-                contentContainerStyle={{ gap: 6 }}
-              >
-                {/* 未割当オプション */}
-                <Pressable
-                  style={[
-                    styles.dispatchAssigneeItem,
-                    {
-                      borderColor: !customTaskAssigneeId ? theme.primary : theme.border,
-                      backgroundColor: !customTaskAssigneeId ? `${theme.primary}14` : theme.background,
-                    },
-                  ]}
-                  onPress={() => setCustomTaskAssigneeId('')}
-                >
-                  <Text style={[styles.dispatchAssigneeText, { color: !customTaskAssigneeId ? theme.primary : theme.text }]}>
-                    未割当のまま作成
-                  </Text>
-                </Pressable>
-
-                {dispatchCandidates.map((candidate) => {
-                  /** 選択中かどうか */
-                  const isSelected = customTaskAssigneeId === candidate.userId;
-                  /** アクティブタスク（稼働中）を持つかどうか */
-                  const activeTasks = getAssignedActivePatrolTasks(hqPatrolTasks, candidate.userId);
-                  /** アクティブタスクのラベル */
-                  const activeTaskLabel =
-                    activeTasks.length > 0
-                      ? PATROL_TASK_TYPE_LABELS[getPatrolTaskDisplayType(activeTasks[0])] || '対応中'
-                      : '';
-                  /** 対応中タスクを持つかどうか */
-                  const hasActiveTask = activeTasks.length > 0;
-                  return (
-                    <Pressable
-                      key={candidate.userId}
-                      style={[
-                        styles.dispatchAssigneeItem,
-                        {
-                          borderColor: isSelected ? theme.primary : hasActiveTask ? '#D1242F' : theme.border,
-                          backgroundColor: isSelected
-                            ? `${theme.primary}14`
-                            : hasActiveTask
-                              ? '#D1242F0A'
-                              : theme.background,
-                        },
-                      ]}
-                      onPress={() => {
-                        if (hasActiveTask) {
-                          return;
-                        }
-                        setCustomTaskAssigneeId(candidate.userId);
-                      }}
-                      disabled={hasActiveTask}
-                    >
-                      <Text
-                        style={[
-                          styles.dispatchAssigneeText,
-                          {
-                            color: hasActiveTask
-                              ? '#D1242F'
-                              : isSelected
-                                ? theme.primary
-                                : theme.text,
-                          },
-                        ]}
-                      >
-                        {candidate.name}
-                        {hasActiveTask ? `（対応中: ${activeTaskLabel}）` : ''}
-                      </Text>
-                      {candidate.organization ? (
-                        <Text style={[styles.dispatchAssigneeSub, { color: theme.textSecondary }]}>
-                          {candidate.organization}
-                        </Text>
-                      ) : null}
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            )}
-
-            {/* タスク内容入力 */}
-            <Text style={[styles.label, { color: theme.text }]}>タスク内容 *</Text>
-            <TextInput
-              value={customTaskNotes}
-              onChangeText={setCustomTaskNotes}
-              placeholder="例：A棟3Fの出展団体に企画ルール変更を伝えてください"
-              placeholderTextColor={theme.textSecondary}
-              style={[
-                styles.textArea,
-                {
-                  borderColor: theme.border,
-                  backgroundColor: theme.background,
-                  color: theme.text,
-                  minHeight: 90,
-                },
-              ]}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-            />
-
-            {/* 作成ボタン */}
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                {
-                  backgroundColor:
-                    customTaskNotes.trim() && !isCreatingCustomTask ? theme.primary : theme.border,
-                  marginTop: 8,
-                },
-              ]}
-              onPress={handleCreateCustomTask}
-              disabled={!customTaskNotes.trim() || isCreatingCustomTask}
-            >
-              <Text style={styles.primaryButtonText}>
-                {isCreatingCustomTask
-                  ? '作成中...'
-                  : customTaskAssigneeId
-                    ? '割り当てて作成'
-                    : '未割当で作成'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
         {/* ─── 設定タブ ─── */}
         {isHQRole && activeTab === 'settings' ? (
           <>
@@ -7613,6 +7493,67 @@ const SupportDeskScreen = ({
               <Text style={[styles.helpText, { color: theme.textSecondary }]}>
                 現在の設定: {hqUnvisitedAlertMinutes}分以上巡回がない場所にアラートを表示
               </Text>
+            </View>
+
+            {/* ── 評価フォームURL設定 ── */}
+            <View style={[styles.card, { backgroundColor: theme.surface }]}>
+              <View style={styles.sectionHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.sectionTitle, { color: theme.text }]}>評価フォームURL設定</Text>
+                  <Text style={[styles.helpText, { color: theme.textSecondary, marginTop: 2 }]}>
+                    巡回サポートの「評価」タブに埋め込まれるGoogleフォームのURLを設定します。
+                  </Text>
+                </View>
+              </View>
+              <TextInput
+                value={evaluationFormUrlDraft}
+                onChangeText={setEvaluationFormUrlDraft}
+                placeholder="https://docs.google.com/forms/..."
+                placeholderTextColor={theme.textSecondary}
+                style={[
+                  styles.evalItemInput,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor: theme.background,
+                    color: theme.text,
+                    marginBottom: 8,
+                  },
+                ]}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+              />
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  style={[
+                    styles.evalItemAddButton,
+                    {
+                      flex: 1,
+                      backgroundColor:
+                        isSavingEvaluationFormUrl || !evaluationFormUrlDraft.trim()
+                          ? theme.border
+                          : theme.primary,
+                    },
+                  ]}
+                  onPress={handleSaveEvaluationFormUrl}
+                  disabled={isSavingEvaluationFormUrl || !evaluationFormUrlDraft.trim()}
+                >
+                  <Text style={styles.evalItemAddButtonText}>
+                    {isSavingEvaluationFormUrl ? '保存中...' : '保存'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.inlineActionButton,
+                    { borderColor: theme.border, alignSelf: 'stretch', justifyContent: 'center' },
+                  ]}
+                  onPress={handleResetEvaluationFormUrl}
+                >
+                  <Text style={[styles.inlineActionButtonText, { color: theme.textSecondary }]}>
+                    デフォルトに戻す
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* ── 評価項目設定 ── */}
@@ -7805,6 +7746,91 @@ const SupportDeskScreen = ({
         </Pressable>
       </Modal>
 
+      {/* ─── 実績タブ パスワード認証モーダル ─── */}
+      <Modal
+        visible={isStatsPasswordModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsStatsPasswordModalVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setIsStatsPasswordModalVisible(false)}
+        >
+          <Pressable
+            style={[styles.dispatchModal, { borderColor: theme.border, backgroundColor: theme.surface }]}
+            onPress={() => {}}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>🔒 実績タブ</Text>
+            <Text style={[styles.helpText, { color: theme.textSecondary, marginBottom: 12 }]}>
+              このタブにアクセスするにはパスワードが必要です。
+            </Text>
+            <TextInput
+              value={statsPasswordInput}
+              onChangeText={(text) => {
+                setStatsPasswordInput(text);
+                setStatsPasswordError('');
+              }}
+              placeholder="パスワードを入力"
+              placeholderTextColor={theme.textSecondary}
+              secureTextEntry={true}
+              style={[
+                styles.replyInput,
+                {
+                  borderColor: statsPasswordError ? '#D1242F' : theme.border,
+                  backgroundColor: theme.background,
+                  color: theme.text,
+                  marginBottom: 4,
+                },
+              ]}
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                /** パスワード確認処理 */
+                if (statsPasswordInput === STATS_TAB_PASSWORD) {
+                  setIsStatsUnlocked(true);
+                  setIsStatsPasswordModalVisible(false);
+                  setActiveTab('stats');
+                  setStatsPasswordInput('');
+                  setStatsPasswordError('');
+                } else {
+                  setStatsPasswordError('パスワードが正しくありません。');
+                }
+              }}
+            />
+            {statsPasswordError ? (
+              <Text style={[styles.helpText, { color: '#D1242F', marginBottom: 8 }]}>
+                {statsPasswordError}
+              </Text>
+            ) : null}
+            <View style={styles.dispatchModalActions}>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: theme.border }]}
+                onPress={() => setIsStatsPasswordModalVisible(false)}
+              >
+                <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>キャンセル</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dispatchConfirmButton, { backgroundColor: theme.primary }]}
+                onPress={() => {
+                  /** パスワード確認処理 */
+                  if (statsPasswordInput === STATS_TAB_PASSWORD) {
+                    setIsStatsUnlocked(true);
+                    setIsStatsPasswordModalVisible(false);
+                    setActiveTab('stats');
+                    setStatsPasswordInput('');
+                    setStatsPasswordError('');
+                  } else {
+                    setStatsPasswordError('パスワードが正しくありません。');
+                  }
+                }}
+              >
+                <Text style={styles.dispatchConfirmButtonText}>確認</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* 部署ロール向けステータス更新トースト */}
       <ToastMessage
         visible={toast.visible}
@@ -7827,22 +7853,26 @@ const styles = StyleSheet.create({
   /** HQロール向けタブバー外枠: ThemedHeader 直下に固定 */
   tabSegmentBar: {
     borderBottomWidth: 1,
-    paddingVertical: 8,
+    paddingTop: 10,
+    paddingBottom: 10,
     paddingHorizontal: 12,
   },
   /** Segmented Control コンテナ: 薄いグレー背景 + 角丸 */
   tabSegmentBarContent: {
     flexDirection: 'row',
-    gap: 3,
+    gap: 4,
     paddingHorizontal: 4,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 14,
   },
-  /** 個々のタブアイテム: 非アクティブは透明 */
+  /** 個々のタブアイテム: 非アクティブは透明 / タップ領域を広く確保 */
   tabSegmentBarItem: {
     borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   /** アクティブタブ: 白カード + shadow */
   tabSegmentBarItemActive: {
@@ -7854,7 +7884,7 @@ const styles = StyleSheet.create({
   },
   /** タブテキスト */
   tabSegmentBarText: {
-    fontSize: 14,
+    fontSize: 13,
   },
   content: {
     padding: 16,
@@ -7960,15 +7990,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     paddingBottom: 8,
   },
-  dashboardTicketTypeBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  dashboardTicketTypeText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
   dashboardTicketBody: {
     flex: 1,
   },
@@ -8022,10 +8043,6 @@ const styles = StyleSheet.create({
   dashboardPatrolName: {
     fontSize: 13,
     fontWeight: '700',
-  },
-  /** ダッシュボード: 巡回スタッフ所属 */
-  dashboardPatrolOrg: {
-    fontSize: 11,
   },
   /** ダッシュボード: 担当中タスクバッジ */
   dashboardPatrolTaskBadge: {
@@ -8100,10 +8117,6 @@ const styles = StyleSheet.create({
   dispatchSectionTitle: {
     fontSize: 14,
     fontWeight: '800',
-  },
-  dispatchSectionDesc: {
-    fontSize: 12,
-    lineHeight: 18,
   },
   dispatchButton: {
     borderRadius: 10,
@@ -8767,13 +8780,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingTop: 8,
   },
-  /** ステータス変更Pickerのラベル */
-  statusPickerLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    paddingHorizontal: 8,
-    marginBottom: 2,
-  },
   /** 部署向けステータス変更カード */
   departmentStatusPanel: {
     borderWidth: 1,
@@ -8802,11 +8808,6 @@ const styles = StyleSheet.create({
   departmentStatusButtonLabel: {
     fontSize: 14,
     fontWeight: '700',
-  },
-  /** 部署向けステータス変更ボタンの補足 */
-  departmentStatusButtonMeta: {
-    fontSize: 11,
-    marginTop: 4,
   },
   /** ステータス変更Picker本体 */
   picker: {
@@ -9129,28 +9130,6 @@ const styles = StyleSheet.create({
   evalReviewSummaryText: {
     fontSize: 12,
     lineHeight: 18,
-  },
-  /** 独自タスク用: 複数行テキスト入力 */
-  textArea: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  /** 独自タスク用: 確定ボタン */
-  primaryButton: {
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  /** 独自タスク用: 確定ボタンテキスト */
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
   },
 });
 

@@ -24,6 +24,20 @@ export const STATUS_LABELS = {
 	ended: '終了',
 };
 
+/** ステータス色 */
+export const STATUS_COLORS = {
+	/** 未開始 */
+	not_started: '#95a5a6',
+	/** 発券中 */
+	active: '#2ecc71',
+	/** 一時停止 */
+	paused: '#f1c40f',
+	/** 満員 */
+	full: '#e74c3c',
+	/** 終了 */
+	ended: '#95a5a6',
+};
+
 /** 画面表示用ラベル */
 export const SCREEN_LABELS = {
 	/** 画面タイトル */
@@ -34,6 +48,8 @@ export const SCREEN_LABELS = {
 	timeSlot: '時間枠定員制',
 	/** 全て */
 	all: '全て',
+	/** 表示フィルタ */
+	filterLabel: '表示フィルタ',
 	/** 日付検索 */
 	dateSearch: '日付検索',
 	/** 日付選択の全件表示 */
@@ -42,5 +58,7 @@ export const SCREEN_LABELS = {
 	timeSearch: '時間検索',
 	/** 全ての時間 */
 	allTimes: '全ての時間',
+	/** 適用中 */
+	activeFilters: '適用中',
 };
 

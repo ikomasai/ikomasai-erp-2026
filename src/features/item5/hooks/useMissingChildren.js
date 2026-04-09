@@ -6,6 +6,7 @@
 import { useState, useCallback } from 'react';
 import {
   insertMissingChild,
+  deleteMissingChildById,
   selectMissingChildrenByUser,
   selectAllMissingChildren,
   updateMissingChildStatus,
@@ -154,14 +155,19 @@ export const useMissingChildren = () => {
       senderUserId
     );
 
-    /** 通知送信に失敗したかどうか */
-    let hasNotificationError = false;
     if (notifError) {
-      hasNotificationError = true;
+      /**
+       * 通知送信失敗時は登録したデータを削除してロールバックする
+       * 通知が届かないと管理ロールが迷子情報を把握できないため、
+       * 登録は成功させずに再試行を促す
+       */
+      await deleteMissingChildById(data.id);
+      setIsLoading(false);
+      return { success: false, notificationError: true };
     }
 
     setIsLoading(false);
-    return { success: true, notificationError: hasNotificationError };
+    return { success: true, notificationError: false };
   }, []);
 
   /**
