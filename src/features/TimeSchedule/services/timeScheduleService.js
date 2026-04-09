@@ -11,6 +11,8 @@ const BUILDING_LOCATIONS_TABLE = 'building_locations';
 const AREA_LOCATIONS_TABLE = 'area_locations';
 /** 企画運営団体テーブル名 */
 const EVENT_ORGANIZATIONS_TABLE = 'event_organizations';
+/** 企画カテゴリテーブル名 */
+const EVENT_CATEGORIES_TABLE = 'event_categorys';
 /** 企画テーブル名 */
 const EVENTS_TABLE = 'events';
 
@@ -45,15 +47,6 @@ const DEFAULT_BUILDING_NAME_ORDER = [
   '実学ホール',
   '記念会館',
   '人工芝グラウンド',
-  'その他',
-];
-/** エリア名のデフォルト表示順 */
-const DEFAULT_AREA_NAME_ORDER = [
-  '11月ホール',
-  '実学ホール',
-  '記念会館',
-  '人工芝グラウンド',
-  '人工芝',
   'その他',
 ];
 
@@ -136,76 +129,6 @@ const uniqStringArray = (values) => {
 };
 
 /**
- * 文字列を比較用に正規化する
- * @param {string} value - 元文字列
- * @returns {string} 正規化文字列
- */
-const normalizeTextKey = (value) => {
-  return String(value || '').trim().toLowerCase();
-};
-
-/**
- * エリア一覧から解決用インデックスを作成する
- * @param {Array<Object>} areaLocations - エリア一覧
- * @returns {Map<string, string>} 正規化キー -> エリアID
- */
-const buildAreaResolveMap = (areaLocations) => {
-  /** 解決用Map */
-  const resolveMap = new Map();
-
-  (Array.isArray(areaLocations) ? areaLocations : []).forEach((area) => {
-    /** エリアID */
-    const areaId = String(area?.area_id || '').trim();
-    if (!areaId) {
-      return;
-    }
-
-    /** 照合候補 */
-    const candidates = [areaId, area?.area_name, area?.area_name_kana];
-    candidates.forEach((candidate) => {
-      /** 正規化キー */
-      const normalizedKey = normalizeTextKey(candidate);
-      if (!normalizedKey) {
-        return;
-      }
-      resolveMap.set(normalizedKey, areaId);
-    });
-  });
-
-  return resolveMap;
-};
-
-/**
- * 候補値からエリアIDを解決する
- * @param {Object} params - パラメータ
- * @param {Array<string>} params.candidates - 候補値一覧
- * @param {Map<string,string>} params.areaResolveMap - エリア解決Map
- * @returns {string} 解決済みエリアID（解決不可時は先頭候補）
- */
-const resolveAreaIdFromCandidates = ({ candidates, areaResolveMap }) => {
-  /** 正規化済み候補一覧 */
-  const normalizedCandidates = uniqStringArray(candidates);
-  if (normalizedCandidates.length === 0) {
-    return '';
-  }
-
-  for (const candidate of normalizedCandidates) {
-    /** 正規化キー */
-    const normalizedKey = normalizeTextKey(candidate);
-    if (!normalizedKey) {
-      continue;
-    }
-    /** 解決済みエリアID */
-    const resolvedAreaId = areaResolveMap.get(normalizedKey);
-    if (resolvedAreaId) {
-      return resolvedAreaId;
-    }
-  }
-
-  return normalizedCandidates[0];
-};
-
-/**
  * select エラーがスキーマ差分起因か判定する
  * @param {Object|null} error - Supabaseエラー
  * @returns {boolean} フォールバック実行可否
@@ -230,25 +153,6 @@ const isMissingColumnError = (error) => {
   /** エラーメッセージ */
   const message = String(error?.message || '').toLowerCase();
   return message.includes('column') && message.includes('does not exist');
-};
-
-/**
- * エリア名のフォールバック表示順を解決する
- * @param {string} areaName - エリア名
- * @param {number} index - 取得配列内のインデックス
- * @returns {number} 表示順
- */
-const resolveAreaFallbackDisplayOrder = (areaName, index) => {
-  /** 正規化エリア名 */
-  const normalizedAreaName = String(areaName || '').trim();
-  /** 固定順の位置 */
-  const fixedOrderIndex = DEFAULT_AREA_NAME_ORDER.indexOf(normalizedAreaName);
-  if (fixedOrderIndex !== -1) {
-    return fixedOrderIndex + 1;
-  }
-
-  /** 固定順にない値は後ろへ並べる */
-  return DEFAULT_AREA_NAME_ORDER.length + index + 1;
 };
 
 /**
@@ -456,48 +360,33 @@ const selectEventDetailsByIds = async (eventIds) => {
 const selectAreaLocations = async () => {
   /** Supabaseクライアント */
   const supabase = getSupabaseClient();
-  /** 候補クエリ */
-  const queryCandidates = [
-    () =>
-      supabase
-        .from(AREA_LOCATIONS_TABLE)
-        .select('id,name,name_kana,display_order')
-        .order('display_order', { ascending: true }),
-    () => supabase.from(AREA_LOCATIONS_TABLE).select('id,name,name_kana').order('name', { ascending: true }),
-    () => supabase.from(AREA_LOCATIONS_TABLE).select('id,name').order('name', { ascending: true }),
-  ];
 
-  /** 最後のエラー */
-  let lastError = null;
-  for (const buildQuery of queryCandidates) {
-    /** エリア一覧取得結果 */
-    const { data, error } = await buildQuery();
-    if (!error) {
-      /** 正規化済みエリア一覧 */
-      const normalizedRows = (data || []).map((row, index) => ({
-        area_id: String(row.id || ''),
-        area_name: String(row.name || ''),
-        area_name_kana: String(row.name_kana || ''),
-        display_order: Number.isFinite(Number(row.display_order))
-          ? Number(row.display_order)
-          : resolveAreaFallbackDisplayOrder(row.name, index),
-      }));
+  /** エリア一覧取得（display_order または名前順） */
+  const { data, error } = await supabase
+    .from(AREA_LOCATIONS_TABLE)
+    .select('id,name,name_kana,display_order')
+    .order('display_order', { ascending: true });
 
-      return normalizedRows.sort((left, right) => {
-        if (left.display_order !== right.display_order) {
-          return left.display_order - right.display_order;
-        }
-        return String(left.area_name || '').localeCompare(String(right.area_name || ''), 'ja', { numeric: true });
-      });
-    }
-
-    lastError = error;
-    if (!shouldFallbackSelect(error)) {
-      break;
-    }
+  if (error) {
+    throw new Error(`area_locations の取得に失敗しました: ${error.message}`);
   }
 
-  throw new Error(`area_locations の取得に失敗しました: ${lastError?.message || 'unknown error'}`);
+  /** 正規化済みエリア一覧 */
+  const normalizedRows = (data || []).map((row, index) => ({
+    area_id: String(row.id || ''),
+    area_name: String(row.name || ''),
+    area_name_kana: String(row.name_kana || ''),
+    display_order: Number.isFinite(Number(row.display_order))
+      ? Number(row.display_order)
+      : index + 1,
+  }));
+
+  return normalizedRows.sort((left, right) => {
+    if (left.display_order !== right.display_order) {
+      return left.display_order - right.display_order;
+    }
+    return String(left.area_name || '').localeCompare(String(right.area_name || ''), 'ja', { numeric: true });
+  });
 };
 
 /**
@@ -695,6 +584,8 @@ const attachSourceDetailsToSlots = async (slots, areaLocations = []) => {
 
   /** イベント詳細Map */
   let eventMap = new Map();
+  /** 企画カテゴリ名Map（category_id -> category_name） */
+  let eventCategoryNameMap = new Map();
   /** イベント取得エラー */
   let eventError = null;
 
@@ -709,8 +600,21 @@ const attachSourceDetailsToSlots = async (slots, areaLocations = []) => {
     throw new Error(`events の詳細取得に失敗しました: ${eventError?.message || 'unknown'}`);
   }
 
-  /** エリア解決Map */
-  const areaResolveMap = buildAreaResolveMap(areaLocations);
+  /** 取得対象カテゴリID一覧 */
+  const categoryIds = uniqStringArray(
+    Array.from(eventMap.values()).map((eventDetail) => String(eventDetail?.category_id || '').trim())
+  );
+  if (categoryIds.length > 0) {
+    /** Supabaseクライアント */
+    const supabase = getSupabaseClient();
+    /** カテゴリ取得 */
+    const { data: categoryData } = await supabase.from(EVENT_CATEGORIES_TABLE).select('id,name');
+    if (categoryData) {
+      eventCategoryNameMap = new Map(
+        categoryData.map((row) => [String(row.id).trim(), String(row.name).trim()])
+      );
+    }
+  }
 
   return (slots || [])
     .map((slot) => {
@@ -726,7 +630,7 @@ const attachSourceDetailsToSlots = async (slots, areaLocations = []) => {
       const entryStartMinutes = parseTimeTextToMinutes(slot.entry_start_time);
       const exitEndMinutes = parseTimeTextToMinutes(slot.exit_end_time);
 
-      /** 参照元ID */
+      /** 詳細付きスロットオブジェクトを生成 */
       return {
         ...slot,
         source_type: sourceType,
@@ -748,15 +652,18 @@ const attachSourceDetailsToSlots = async (slots, areaLocations = []) => {
         schedule_exit_end_times: sourceDetail.schedule_exit_end_times || [],
         groupName: sourceDetail.event_organizations?.name || '',
         groupNameKana: sourceDetail.event_organizations?.name_kana || '',
+        categoryId: String(sourceDetail.category_id || '').trim(),
+        categoryName:
+          eventCategoryNameMap.get(String(sourceDetail.category_id || '').trim()) ||
+          String(sourceDetail.category_id || '').trim() ||
+          '未設定',
         locationName: sourceDetail.event_locations?.name || '',
         buildingLocationId: String(sourceDetail.event_locations?.building_id || ''),
         buildingLocationName: sourceDetail.event_locations?.building_locations?.name || '',
         areaId:
-          slot.areaId ||
-          resolveAreaIdFromCandidates({
-            candidates: [sourceDetail.event_locations?.building_locations?.area_id],
-            areaResolveMap,
-          }),
+          slot.area_id ||
+          sourceDetail.event_locations?.building_locations?.area_id ||
+          '',
         description: sourceDetail.description || '',
       };
     })
