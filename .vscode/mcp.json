@@ -1,9 +1,8 @@
 {
-	"inputs": [],
 	"servers": {
 		"supabase": {
 			"type": "http",
-     		"url": "https://mcp.supabase.com/mcp?project_ref=qlldsvpkcfftbibujltf"
+			"url": "https://mcp.supabase.com/mcp?project_ref=qlldsvpkcfftbibujltf"
 		},
 		"context7": {
 			"command": "npx",
@@ -45,5 +44,6 @@
 			],
 			"type": "stdio"
 		}
-	}
+	},
+	"inputs": []
 }

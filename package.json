@@ -23,6 +23,7 @@
     "expo": "^54.0.30",
     "expo-image-picker": "~17.0.10",
     "expo-location": "^19.0.8",
+    "expo-sqlite": "^55.0.10",
     "expo-status-bar": "~3.0.9",
     "leaflet": "^1.9.4",
     "fuse.js": "^7.1.0",
